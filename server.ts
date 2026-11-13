@@ -1206,10 +1206,13 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
+    const disableHmr = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: { server: httpServer },
+        hmr: disableHmr ? false : { server: httpServer },
+        ws: { server: httpServer },
+        watch: disableHmr ? null : {},
       },
       appType: 'spa',
     });
