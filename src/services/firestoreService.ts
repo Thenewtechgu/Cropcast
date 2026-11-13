@@ -19,6 +19,7 @@ import {
   signInWithPopup,
   signOut,
   updateProfile,
+  deleteUser,
   User as FirebaseUser,
 } from 'firebase/auth';
 import {
@@ -170,7 +171,6 @@ export const FirestoreService = {
     fallbackDisplayName?: string,
     fallbackEmail?: string
   ): Promise<void> {
-    const userPath = `users/${fbUser.uid}`;
     const userRef = doc(db, 'users', fbUser.uid);
     const resolvedName = (
       fbUser.displayName ||
@@ -192,8 +192,19 @@ export const FirestoreService = {
           updatedAt: serverTimestamp(),
         });
       }
+      if (isBootstrapAdminEmail(resolvedEmail)) {
+        await setDoc(
+          doc(db, 'admins', fbUser.uid),
+          {
+            uid: fbUser.uid,
+            email: resolvedEmail,
+            grantedAt: serverTimestamp(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, userPath);
+      console.warn('Non-blocking user profile sync warning:', err);
     }
   },
 
@@ -206,13 +217,15 @@ export const FirestoreService = {
 
       await this.ensureUserProfile(fbUser, displayName, email);
 
+      const isAdmin = await this.checkIsAdmin(fbUser.uid, email, fbUser.emailVerified);
+
       return {
         uid: fbUser.uid,
         username: cleanUser,
         displayName,
         email,
         emailVerified: fbUser.emailVerified,
-        isAdmin: false,
+        isAdmin,
         authMode: 'firebase',
       };
     } catch (err: any) {
@@ -225,10 +238,10 @@ export const FirestoreService = {
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       const fbUser = result.user;
-      const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email, fbUser.emailVerified);
       const resolvedName = (fbUser.displayName || displayName || 'Nông dân CropCast').slice(0, 120);
 
       await this.ensureUserProfile(fbUser, resolvedName, email);
+      const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email || email, fbUser.emailVerified);
 
       return {
         uid: fbUser.uid,
@@ -251,17 +264,17 @@ export const FirestoreService = {
       const fbUser = result.user;
       const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email, fbUser.emailVerified);
 
-      const userPath = `users/${fbUser.uid}`;
       const userRef = doc(db, 'users', fbUser.uid);
       const resolvedName = (fbUser.displayName || 'Nông dân CropCast').slice(0, 120);
       const resolvedPhoto = (fbUser.photoURL || '').slice(0, 500);
+      const resolvedEmail = fbUser.email || '';
       try {
         const existingSnap = await getDoc(userRef);
         if (!existingSnap.exists()) {
           await setDoc(userRef, {
             uid: fbUser.uid,
             displayName: resolvedName,
-            email: (fbUser.email || '').slice(0, 200),
+            email: resolvedEmail.slice(0, 200),
             photoURL: resolvedPhoto,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -273,14 +286,25 @@ export const FirestoreService = {
             updatedAt: serverTimestamp(),
           });
         }
+        if (isBootstrapAdminEmail(resolvedEmail)) {
+          await setDoc(
+            doc(db, 'admins', fbUser.uid),
+            {
+              uid: fbUser.uid,
+              email: resolvedEmail,
+              grantedAt: serverTimestamp(),
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, userPath);
+        console.warn('Non-blocking google profile sync warning:', err);
       }
 
       return {
         uid: fbUser.uid,
         displayName: resolvedName,
-        email: fbUser.email || '',
+        email: resolvedEmail,
         photoURL: fbUser.photoURL || undefined,
         emailVerified: fbUser.emailVerified,
         isAdmin,
@@ -300,10 +324,10 @@ export const FirestoreService = {
   },
 
   async checkIsAdmin(uid: string, email?: string | null, emailVerified?: boolean): Promise<boolean> {
-    if (!emailVerified) return false;
     if (isBootstrapAdminEmail(email)) {
       return true;
     }
+    if (!emailVerified) return false;
     try {
       const adminSnap = await getDoc(doc(db, 'admins', uid));
       return adminSnap.exists();
@@ -1325,5 +1349,40 @@ export const FirestoreService = {
         },
       ],
     });
+  },
+
+  async deleteUserAccount(uid: string): Promise<void> {
+    const userPath = `users/${uid}`;
+    try {
+      const [plotsSnap, tasksSnap, feedbacksSnap, plansSnap, metricsSnap, sharesSnap] = await Promise.all([
+        getDocs(collection(db, 'users', uid, 'plots')),
+        getDocs(collection(db, 'users', uid, 'tasks')),
+        getDocs(collection(db, 'users', uid, 'feedbacks')),
+        getDocs(collection(db, 'users', uid, 'plans')),
+        getDocs(collection(db, 'users', uid, 'earth_metrics')),
+        getDocs(collection(db, 'users', uid, 'shared_refs')),
+      ]);
+
+      await Promise.all([
+        ...plotsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        ...tasksSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        ...feedbacksSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        ...plansSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        ...metricsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        ...sharesSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+        deleteDoc(doc(db, 'users', uid)).catch(() => {}),
+        deleteDoc(doc(db, 'admins', uid)).catch(() => {}),
+      ]);
+
+      if (auth.currentUser && auth.currentUser.uid === uid) {
+        try {
+          await deleteUser(auth.currentUser);
+        } catch {
+          await signOut(auth);
+        }
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, userPath);
+    }
   },
 };

@@ -247,15 +247,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         );
         return;
       }
-      if (!locationConfirmed) {
-        setStepError(
-          t(
-            'Vui lòng xác nhận vị trí ruộng bằng cách bấm Lấy GPS thiết bị hoặc chạm trực tiếp lên bản đồ vệ tinh.',
-            'Please confirm the field location using Device GPS or tapping the satellite map.'
-          )
-        );
-        return;
-      }
+      setLocationConfirmed(true);
     }
     if (currentStep === 4 && !cropName.trim()) {
       setStepError(t('Vui lòng chọn hoặc nhập tên loại cây trồng.', 'Please select or enter a crop name.'));
@@ -340,11 +332,6 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   const handleFinishWizard = async () => {
     if (!name.trim()) {
       setStepError(t('Vui lòng nhập tên thửa ruộng.', 'Please enter a field name.'));
-      setCurrentStep(1);
-      return;
-    }
-    if (!locationConfirmed) {
-      setStepError(t('Vui lòng xác nhận vị trí ruộng trên bản đồ.', 'Please confirm the field location on the map.'));
       setCurrentStep(1);
       return;
     }

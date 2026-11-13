@@ -260,6 +260,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [togglingAdminUid, setTogglingAdminUid] = useState<string | null>(null);
+  const [deletingUserUid, setDeletingUserUid] = useState<string | null>(null);
   const [adminEmailInput, setAdminEmailInput] = useState('');
   const [adminActionSuccess, setAdminActionSuccess] = useState<string | null>(null);
 
@@ -586,6 +587,35 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       );
     } finally {
       setTogglingAdminUid(null);
+    }
+  };
+
+  const handleDeleteUserAccount = async (uid: string, email: string) => {
+    if (
+      !window.confirm(
+        t(
+          `Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản ${email || uid} và toàn bộ dữ liệu ruộng của người dùng này?`,
+          `Are you sure you want to permanently delete account ${email || uid} and all their field data?`
+        )
+      )
+    ) {
+      return;
+    }
+    setDeletingUserUid(uid);
+    setActionErrorMsg(null);
+    setAdminActionSuccess(null);
+    try {
+      await FirestoreService.deleteUserAccount(uid);
+      await fetchPlatformStats();
+      setAdminActionSuccess(
+        t(`Đã xóa vĩnh viễn tài khoản ${email || uid}.`, `Successfully deleted account ${email || uid}.`)
+      );
+    } catch (err: any) {
+      setActionErrorMsg(
+        err?.message || t('Không thể xóa tài khoản.', 'Unable to delete user account.')
+      );
+    } finally {
+      setDeletingUserUid(null);
     }
   };
 
@@ -1668,28 +1698,36 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                           {new Date(u.createdAt).toLocaleDateString(locale)}
                         </td>
                         <td className="p-3 text-right">
-                          {isBootstrap ? (
-                            <span className="text-[11px] text-stone-400 font-semibold">
-                              {t('Admin gốc', 'Root Admin')}
-                            </span>
-                          ) : (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!isBootstrap && (
+                              <button
+                                type="button"
+                                disabled={togglingAdminUid === u.uid}
+                                onClick={() => handleToggleUserAdmin(u.uid, u.email, u.isAdmin)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 ${
+                                  u.isAdmin
+                                    ? 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                                }`}
+                              >
+                                {togglingAdminUid === u.uid
+                                  ? t('Đang lưu...', 'Saving...')
+                                  : u.isAdmin
+                                  ? t('Gỡ quyền Admin', 'Revoke Admin')
+                                  : t('Cấp quyền Admin', 'Grant Admin')}
+                              </button>
+                            )}
                             <button
                               type="button"
-                              disabled={togglingAdminUid === u.uid}
-                              onClick={() => handleToggleUserAdmin(u.uid, u.email, u.isAdmin)}
-                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 ${
-                                u.isAdmin
-                                  ? 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
-                                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
-                              }`}
+                              disabled={deletingUserUid === u.uid}
+                              onClick={() => handleDeleteUserAccount(u.uid, u.email)}
+                              className="px-2.5 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                              title={t('Xóa vĩnh viễn tài khoản', 'Delete account permanently')}
                             >
-                              {togglingAdminUid === u.uid
-                                ? t('Đang lưu...', 'Saving...')
-                                : u.isAdmin
-                                ? t('Gỡ quyền Admin', 'Revoke Admin')
-                                : t('Cấp quyền Admin', 'Grant Admin')}
+                              <Trash2 className="w-3 h-3" />
+                              {deletingUserUid === u.uid ? t('Đang xóa...', 'Deleting...') : t('Xóa', 'Delete')}
                             </button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     );
