@@ -710,10 +710,10 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5">
         {/* Clean Sub-Website Navigation Strip for Care Hub */}
         {!authUser?.isAdmin && ['dashboard', 'tasks', 'feedback'].includes(activeTab) && (
-          <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex flex-wrap items-center gap-1.5">
+          <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             {[
               { id: 'dashboard', label: t('Hôm nay & Quyết định', 'Today & Decisions'), icon: Layers },
               {
@@ -733,13 +733,13 @@ export default function App() {
                   key={sub.id}
                   type="button"
                   onClick={() => navigateToTab(sub.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                     isSubActive
                       ? 'bg-emerald-800 text-white shadow-xs'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
                   <span>{sub.label}</span>
                 </button>
               );
@@ -749,7 +749,7 @@ export default function App() {
 
         {/* Clean Sub-Website Navigation Strip for Rotation & Climate Planning Hub */}
         {!authUser?.isAdmin && ['rotation', 'calendar', 'analytics'].includes(activeTab) && (
-          <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex flex-wrap items-center gap-1.5">
+          <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             {[
               { id: 'rotation', label: t('Luân canh tối ưu', 'Optimal Rotation'), icon: RefreshCw },
               { id: 'calendar', label: t('Lịch gieo trồng 12 tháng', '12-Month Calendar'), icon: CalendarDays },
@@ -762,13 +762,13 @@ export default function App() {
                   key={sub.id}
                   type="button"
                   onClick={() => navigateToTab(sub.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                     isSubActive
                       ? 'bg-emerald-800 text-white shadow-xs'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
                   <span>{sub.label}</span>
                 </button>
               );

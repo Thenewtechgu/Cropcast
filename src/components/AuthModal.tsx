@@ -99,12 +99,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+      <div className="relative w-full max-w-md max-h-[92dvh] bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 bg-emerald-900 text-white flex items-center justify-between">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center shrink-0">
               <Sprout className="w-5 h-5 text-emerald-200" />
             </div>
             <div>
@@ -124,13 +124,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800 cursor-pointer"
+            className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800 cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
           {/* Mode Tabs */}
           <div className="grid grid-cols-2 gap-1.5 bg-stone-100 p-1 rounded-xl text-xs font-bold">
             <button
@@ -186,7 +186,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   placeholder={t('VD: nongdan_hanoi', 'e.g. farmer_hanoi')}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
+                  className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-base sm:text-sm"
                   required
                 />
               </div>
@@ -204,7 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   placeholder={t('Tối thiểu 6 ký tự', 'Minimum 6 characters')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
+                  className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-base sm:text-sm"
                   required
                 />
               </div>
@@ -223,7 +223,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     placeholder={t('Nhập lại mật khẩu', 'Re-enter password')}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
+                    className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-base sm:text-sm"
                     required
                   />
                 </div>

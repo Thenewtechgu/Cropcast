@@ -57,7 +57,7 @@ function saveEarthCache() {
 
 loadEarthCache();
 
-async function fetchJsonWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 4500) {
+async function fetchJsonWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -322,7 +322,7 @@ export async function fetchAndNormalizeGhgeEdgar(
   rotationId?: string
 ): Promise<GreenhouseGasEdgarRecord> {
   const stacUrl = `https://earth.gov/ghgcenter/api/stac/collections?limit=3`;
-  const stacJson = await fetchJsonWithTimeout(stacUrl, {}, 3500);
+  const stacJson = await fetchJsonWithTimeout(stacUrl, {}, 8500);
   const hasGhgc = Array.isArray(stacJson?.collections) && stacJson.collections.length > 0;
 
   const isRice = cropCategory === 'rice' || cropName.toLowerCase().includes('lúa') || cropName.toLowerCase().includes('rice');
@@ -385,9 +385,9 @@ export async function fetchAndNormalizeSmapModisGpm(
   const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=GWETTOP,PRECTOTCORR&community=AG&longitude=${lon.toFixed(3)}&latitude=${lat.toFixed(3)}&start=${startStr}&end=${endStr}&format=JSON`;
 
   const [smapJson, modisJson, powerJson] = await Promise.all([
-    fetchJsonWithTimeout(smapCmrUrl, {}, 3500),
-    fetchJsonWithTimeout(modisCmrUrl, {}, 3500),
-    fetchJsonWithTimeout(powerUrl, {}, 4000),
+    fetchJsonWithTimeout(smapCmrUrl, {}, 8000),
+    fetchJsonWithTimeout(modisCmrUrl, {}, 8000),
+    fetchJsonWithTimeout(powerUrl, {}, 8000),
   ]);
 
   let topMoist = cell.climatology21Yr.avgGwettop || 0.55;

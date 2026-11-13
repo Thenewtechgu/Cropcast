@@ -154,7 +154,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
       </div>
 
       {/* Chat Window */}
-      <div className="bg-white rounded-2xl border border-stone-200 shadow-xs flex flex-col h-[520px] overflow-hidden">
+      <div className="bg-white rounded-2xl border border-stone-200 shadow-xs flex flex-col h-[65dvh] min-h-[380px] max-h-[560px] overflow-hidden">
         {/* Messages Scroll Area */}
         <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4 text-xs sm:text-sm">
           {messages.map((msg) => {
@@ -171,7 +171,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
                 )}
 
                 <div
-                  className={`p-3.5 sm:p-4 rounded-2xl max-w-[85%] sm:max-w-[75%] space-y-1.5 leading-relaxed ${
+                  className={`p-3.5 sm:p-4 rounded-2xl max-w-[88%] sm:max-w-[75%] break-words space-y-1.5 leading-relaxed ${
                     isAi
                       ? 'bg-stone-100/90 text-stone-800 rounded-tl-xs border border-stone-200/80'
                       : 'bg-emerald-800 text-white rounded-tr-xs shadow-xs'
@@ -255,7 +255,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-            className="flex-1 px-4 py-2.5 border border-stone-300 rounded-xl text-stone-900 text-xs sm:text-sm focus:outline-emerald-600"
+            className="flex-1 min-w-0 px-3.5 sm:px-4 py-2.5 border border-stone-300 rounded-xl text-stone-900 text-base sm:text-sm focus:outline-emerald-600"
           />
           <button
             onClick={() => handleSendMessage()}

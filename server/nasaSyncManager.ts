@@ -209,7 +209,7 @@ export async function executeNasaPowerSync(cellIds?: string[]): Promise<SyncLogR
           const nasaUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=${startStr}&end=${endStr}&format=JSON`;
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const timeoutId = setTimeout(() => controller.abort(), 8500);
 
           const resp = await fetch(nasaUrl, {
             signal: controller.signal,
@@ -369,22 +369,51 @@ const KNOWN_NASA_WIDE_INDICATORS = new Set([
   'EVLAND',
 ]);
 
+function doyToIsoDate(yearRaw: string, doyRaw: string): string {
+  const y = parseInt(yearRaw, 10);
+  const doy = parseInt(doyRaw, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(doy) || y < 1900 || y > 2100 || doy < 1 || doy > 366) {
+    return '';
+  }
+  const dt = new Date(Date.UTC(y, 0, doy));
+  if (dt.getUTCFullYear() !== y) {
+    return '';
+  }
+  return dt.toISOString().slice(0, 10);
+}
+
+interface ParseCsvOptions {
+  fallbackCellId?: string;
+  skipRowArray?: boolean;
+  onRow?: (row: ParsedNasaRow) => void;
+}
+
 function parseSingleCsvToRows(
   fileName: string,
   content: string,
-  fallbackCellId?: string
+  fallbackOrOptions?: string | ParseCsvOptions
 ): {
   rows: ParsedNasaRow[];
+  validCount: number;
   invalidRows: number;
   duplicateCount: number;
   errors: string[];
   detectedFormat: '4_COL' | 'NASA_POWER_WIDE' | 'UNKNOWN';
 } {
+  const opts: ParseCsvOptions =
+    typeof fallbackOrOptions === 'string'
+      ? { fallbackCellId: fallbackOrOptions }
+      : fallbackOrOptions || {};
+  const fallbackCellId = opts.fallbackCellId;
+  const collectArray = !opts.skipRowArray;
+  const onRow = opts.onRow;
+
   const rawLines = content.split(/\r?\n/);
   const nonEmptyLines = rawLines.map((l) => l.trim()).filter((l) => l.length > 0);
   if (nonEmptyLines.length === 0) {
     return {
       rows: [],
+      validCount: 0,
       invalidRows: 0,
       duplicateCount: 0,
       errors: [`${fileName}: Tệp rỗng hoặc không có dữ liệu`],
@@ -412,6 +441,7 @@ function parseSingleCsvToRows(
   if (dataStartIdx >= nonEmptyLines.length) {
     return {
       rows: [],
+      validCount: 0,
       invalidRows: 0,
       duplicateCount: 0,
       errors: [`${fileName}: Không tìm thấy dòng tiêu đề cột sau phần -END HEADER-`],
@@ -434,10 +464,11 @@ function parseSingleCsvToRows(
 
   const isFourColumn = cellIdx !== -1 && dateIdx !== -1 && indicatorIdx !== -1 && valueIdx !== -1;
 
-  // Wide format date columns (YEAR, MO, DY or YYYYMMDD or DATE)
+  // Wide format date columns (YEAR, MO, DY or YEAR, DOY or YYYYMMDD or DATE)
   const yearIdx = headersUpper.findIndex((h) => h === 'YEAR');
   const moIdx = headersUpper.findIndex((h) => h === 'MO' || h === 'MONTH');
   const dyIdx = headersUpper.findIndex((h) => h === 'DY' || h === 'DAY');
+  const doyIdx = headersUpper.findIndex((h) => h === 'DOY' || h === 'DAY_OF_YEAR');
   const yyyymmddIdx = headersUpper.findIndex((h) => h === 'YYYYMMDD' || h === 'DATE');
   const latColIdx = headersUpper.findIndex((h) => h === 'LAT' || h === 'LATITUDE');
   const lonColIdx = headersUpper.findIndex((h) => h === 'LON' || h === 'LONGITUDE');
@@ -449,13 +480,14 @@ function parseSingleCsvToRows(
         idx !== yearIdx &&
         idx !== moIdx &&
         idx !== dyIdx &&
+        idx !== doyIdx &&
         idx !== yyyymmddIdx &&
         idx !== latColIdx &&
         idx !== lonColIdx &&
         idx !== cellIdx &&
         (KNOWN_NASA_WIDE_INDICATORS.has(h) || /^[A-Z0-9_]{2,24}$/.test(h))
       ) {
-        if (!['DOY', 'HR', 'UTC', 'INDEX'].includes(h)) {
+        if (!['DOY', 'DAY_OF_YEAR', 'HR', 'UTC', 'INDEX'].includes(h)) {
           wideIndicatorCols.push({ idx, code: h });
         }
       }
@@ -465,13 +497,20 @@ function parseSingleCsvToRows(
   const isWideFormat =
     !isFourColumn &&
     wideIndicatorCols.length > 0 &&
-    ((yearIdx !== -1 && moIdx !== -1 && dyIdx !== -1) || yyyymmddIdx !== -1);
+    ((yearIdx !== -1 && moIdx !== -1 && dyIdx !== -1) ||
+      (yearIdx !== -1 && doyIdx !== -1) ||
+      yyyymmddIdx !== -1);
 
   if (!isFourColumn && !isWideFormat) {
     const errors: string[] = [];
-    if (cellIdx === -1) errors.push(`${fileName}: Thiếu cột mã ô lưới (cell_id) hoặc định dạng NASA POWER (YEAR,MO,DY + chỉ số)`);
+    if (cellIdx === -1) {
+      errors.push(
+        `${fileName}: Thiếu cột mã ô lưới (cell_id) hoặc định dạng NASA POWER (YEAR,MO,DY / YEAR,DOY + chỉ số)`
+      );
+    }
     return {
       rows: [],
+      validCount: 0,
       invalidRows: Math.max(0, nonEmptyLines.length - dataStartIdx - 1),
       duplicateCount: 0,
       errors,
@@ -487,8 +526,20 @@ function parseSingleCsvToRows(
       ? findNearestNasaGrid(headerLat, headerLon).cell.cellId
       : undefined;
 
+  // Cache coordinate-to-cell mapping per file to avoid scanning 531 grid cells on every line
+  const coordCellCache = new Map<string, string>();
+  const resolveCellForCoords = (rLat: number, rLon: number): string => {
+    const coordKey = `${rLat.toFixed(3)},${rLon.toFixed(3)}`;
+    const cached = coordCellCache.get(coordKey);
+    if (cached) return cached;
+    const mapped = findNearestNasaGrid(rLat, rLon).cell.cellId;
+    coordCellCache.set(coordKey, mapped);
+    return mapped;
+  };
+
   const seenKeys = new Set<string>();
   const rows: ParsedNasaRow[] = [];
+  let validCount = 0;
   let invalidRows = 0;
   let duplicateCount = 0;
 
@@ -503,10 +554,14 @@ function parseSingleCsvToRows(
       const cId = cols[cellIdx];
       const dStr = cols[dateIdx];
       const ind = cols[indicatorIdx]?.toUpperCase();
-      const val = parseFloat(cols[valueIdx]);
+      const rawVal = (cols[valueIdx] ?? '').trim();
+      const val = parseFloat(rawVal);
 
-      if (!cId || !dStr || !ind || isNaN(val) || val <= -990) {
+      if (!cId || !dStr || !ind) {
         invalidRows++;
+        continue;
+      }
+      if (!rawVal || /^(na|nan|null|-999(?:\.0+)?)$/i.test(rawVal) || isNaN(val) || val <= -990) {
         continue;
       }
 
@@ -516,7 +571,10 @@ function parseSingleCsvToRows(
         continue;
       }
       seenKeys.add(key);
-      rows.push({ cell_id: cId, date: dStr, indicator_code: ind, value: val });
+      const rowObj: ParsedNasaRow = { cell_id: cId, date: dStr, indicator_code: ind, value: val };
+      validCount++;
+      if (collectArray) rows.push(rowObj);
+      if (onRow) onRow(rowObj);
     } else {
       // NASA POWER Wide Format
       let dateStr = '';
@@ -527,6 +585,8 @@ function parseSingleCsvToRows(
         if (y && m && d && /^\d{4}$/.test(y)) {
           dateStr = `${y}-${m}-${d}`;
         }
+      } else if (yearIdx !== -1 && doyIdx !== -1) {
+        dateStr = doyToIsoDate(cols[yearIdx] || '', cols[doyIdx] || '');
       } else if (yyyymmddIdx !== -1) {
         const rawD = cols[yyyymmddIdx]?.replace(/[^0-9-]/g, '');
         if (rawD && rawD.length === 8 && !rawD.includes('-')) {
@@ -546,7 +606,7 @@ function parseSingleCsvToRows(
         const rLat = parseFloat(cols[latColIdx]);
         const rLon = parseFloat(cols[lonColIdx]);
         if (Number.isFinite(rLat) && Number.isFinite(rLon)) {
-          rowCellId = findNearestNasaGrid(rLat, rLon).cell.cellId;
+          rowCellId = resolveCellForCoords(rLat, rLon);
         }
       }
       if (!rowCellId) {
@@ -554,9 +614,19 @@ function parseSingleCsvToRows(
       }
 
       let addedFromRow = 0;
+      let skippedEmptyOrFillInRow = 0;
       for (const indCol of wideIndicatorCols) {
-        const val = parseFloat(cols[indCol.idx]);
-        if (isNaN(val) || val <= -990) continue; // skip NASA POWER -999 fill values
+        const rawCell = (cols[indCol.idx] ?? '').trim();
+        if (!rawCell || /^(na|nan|null)$/i.test(rawCell)) {
+          skippedEmptyOrFillInRow++;
+          continue;
+        }
+        const val = parseFloat(rawCell);
+        if (isNaN(val) || val <= -990) {
+          // skip NASA POWER -999 fill values / ocean blanks
+          skippedEmptyOrFillInRow++;
+          continue;
+        }
         const code = indCol.code === 'PRECTOT' ? 'PRECTOTCORR' : indCol.code;
         const key = `${rowCellId}_${dateStr}_${code}`;
         if (seenKeys.has(key)) {
@@ -564,15 +634,18 @@ function parseSingleCsvToRows(
           continue;
         }
         seenKeys.add(key);
-        rows.push({
+        const rowObj: ParsedNasaRow = {
           cell_id: rowCellId,
           date: dateStr,
           indicator_code: code,
           value: val,
-        });
+        };
+        validCount++;
+        if (collectArray) rows.push(rowObj);
+        if (onRow) onRow(rowObj);
         addedFromRow++;
       }
-      if (addedFromRow === 0) {
+      if (addedFromRow === 0 && skippedEmptyOrFillInRow === 0) {
         invalidRows++;
       }
     }
@@ -580,6 +653,7 @@ function parseSingleCsvToRows(
 
   return {
     rows,
+    validCount,
     invalidRows,
     duplicateCount,
     errors: [],
@@ -638,23 +712,69 @@ export interface BatchPreviewResponse {
   representativeOverrides: ParsedNasaRow[];
 }
 
-export function previewBatchCsvFiles(files: BatchCsvFileInput[]): BatchPreviewResponse {
+function pushRepresentativeRow(buffer: ParsedNasaRow[], row: ParsedNasaRow, maxSize = 300) {
+  if (buffer.length < maxSize) {
+    buffer.push(row);
+    return;
+  }
+  // Prefer keeping newer observation dates in representative overrides
+  let minIdx = 0;
+  let minDate = buffer[0].date;
+  for (let i = 1; i < buffer.length; i++) {
+    if (buffer[i].date < minDate) {
+      minDate = buffer[i].date;
+      minIdx = i;
+    }
+  }
+  if (row.date >= minDate) {
+    buffer[minIdx] = row;
+  }
+}
+
+export function previewBatchCsvFiles(files: Iterable<BatchCsvFileInput>, totalFilesHint?: number): BatchPreviewResponse {
   const folderMap = new Map<
     string,
     { fileCount: number; validRows: number; errors: string[] }
   >();
-  const allRows: ParsedNasaRow[] = [];
-  const globalSeen = new Set<string>();
+  const sampleRows: ParsedNasaRow[] = [];
+  const repMap = new Map<string, ParsedNasaRow>();
+  const cellSet = new Set<string>();
+  const indicatorSet = new Set<string>();
+  let minDate = '9999-99-99';
+  let maxDate = '0000-00-00';
+  let validRowsCount = 0;
   let totalInvalid = 0;
   let totalDuplicates = 0;
   const allErrors: string[] = [];
+  let fileCountProcessed = 0;
 
   for (const f of files) {
+    fileCountProcessed += 1;
     const folder = f.folderName || 'Thư mục gốc';
     const curFolder = folderMap.get(folder) || { fileCount: 0, validRows: 0, errors: [] };
     curFolder.fileCount += 1;
 
-    const parsed = parseSingleCsvToRows(f.fileName, f.content);
+    const parsed = parseSingleCsvToRows(f.fileName, f.content, {
+      skipRowArray: true,
+      onRow: (r) => {
+        validRowsCount += 1;
+        curFolder.validRows += 1;
+        cellSet.add(r.cell_id);
+        indicatorSet.add(r.indicator_code);
+        if (r.date < minDate) minDate = r.date;
+        if (r.date > maxDate) maxDate = r.date;
+        if (sampleRows.length < 10) {
+          sampleRows.push(r);
+        }
+        const repKey = `${r.cell_id}_${r.indicator_code}`;
+        const existingRep = repMap.get(repKey);
+        if (!existingRep || r.date >= existingRep.date) {
+          if (repMap.size < 600 || existingRep) {
+            repMap.set(repKey, r);
+          }
+        }
+      },
+    });
     totalInvalid += parsed.invalidRows;
     totalDuplicates += parsed.duplicateCount;
 
@@ -663,44 +783,22 @@ export function previewBatchCsvFiles(files: BatchCsvFileInput[]): BatchPreviewRe
       allErrors.push(...parsed.errors);
     }
 
-    for (const r of parsed.rows) {
-      const key = `${r.cell_id}_${r.date}_${r.indicator_code}`;
-      if (globalSeen.has(key)) {
-        totalDuplicates++;
-        continue;
-      }
-      globalSeen.add(key);
-      allRows.push(r);
-      curFolder.validRows += 1;
-    }
-
     folderMap.set(folder, curFolder);
   }
 
-  const cellSet = new Set<string>();
-  const indicatorSet = new Set<string>();
-  let minDate = '9999-99-99';
-  let maxDate = '0000-00-00';
+  const representativeOverrides = Array.from(repMap.values())
+    .sort((a, b) => (b.date > a.date ? 1 : -1))
+    .slice(0, 300);
 
-  for (const r of allRows) {
-    cellSet.add(r.cell_id);
-    indicatorSet.add(r.indicator_code);
-    if (r.date < minDate) minDate = r.date;
-    if (r.date > maxDate) maxDate = r.date;
-  }
-
-  // Pick representative overrides (prioritizing latest date per indicator/cell, capped at 300)
-  const latestRows = [...allRows].sort((a, b) => (b.date > a.date ? 1 : -1));
-  const representativeOverrides = latestRows.slice(0, 300);
-
+  const totalFiles = totalFilesHint ?? fileCountProcessed;
   const folderNames = Array.from(folderMap.keys());
   const batchLabel =
     folderNames.length === 1
-      ? `${folderNames[0]} (${files.length} tệp)`
-      : `${folderNames.length} thư mục (${files.length} tệp CSV)`;
+      ? `${folderNames[0]} (${totalFiles} tệp)`
+      : `${folderNames.length} thư mục (${totalFiles} tệp CSV)`;
 
   return {
-    totalFiles: files.length,
+    totalFiles,
     totalFolders: folderNames.length,
     folderSummaries: Array.from(folderMap.entries()).map(([folderName, info]) => ({
       folderName,
@@ -708,14 +806,14 @@ export function previewBatchCsvFiles(files: BatchCsvFileInput[]): BatchPreviewRe
     })),
     preview: {
       fileName: batchLabel,
-      totalRows: allRows.length + totalInvalid,
-      validRows: allRows.length,
+      totalRows: validRowsCount + totalInvalid,
+      validRows: validRowsCount,
       invalidRows: totalInvalid,
       uniqueCells: cellSet.size,
       startDate: minDate === '9999-99-99' ? '' : minDate,
       endDate: maxDate === '0000-00-00' ? '' : maxDate,
       indicatorsDetected: Array.from(indicatorSet),
-      sampleRows: allRows.slice(0, 10),
+      sampleRows,
       errors: allErrors,
       duplicateCount: totalDuplicates,
     },
@@ -809,17 +907,28 @@ export async function commitBatchCsvFiles(files: BatchCsvFileInput[]): Promise<{
 
   for (const f of files) {
     totalBytes += f.content.length;
-    const parsed = parseSingleCsvToRows(f.fileName, f.content);
-    for (const dp of parsed.rows) {
-      incomingMap.set(`${dp.cell_id}_${dp.date}_${dp.indicator_code}`, {
-        cellId: dp.cell_id,
-        date: dp.date,
-        indicatorCode: dp.indicator_code,
-        value: dp.value,
-        unit: '',
-        version,
-      });
-    }
+    parseSingleCsvToRows(f.fileName, f.content, {
+      skipRowArray: true,
+      onRow: (dp) => {
+        incomingMap.set(`${dp.cell_id}_${dp.date}_${dp.indicator_code}`, {
+          cellId: dp.cell_id,
+          date: dp.date,
+          indicatorCode: dp.indicator_code,
+          value: dp.value,
+          unit: '',
+          version,
+        });
+        if (incomingMap.size > 40000) {
+          const toDelete = incomingMap.size - 25000;
+          let removed = 0;
+          for (const k of incomingMap.keys()) {
+            incomingMap.delete(k);
+            removed++;
+            if (removed >= toDelete) break;
+          }
+        }
+      },
+    });
   }
   inMemoryDailyData = Array.from(incomingMap.values()).slice(-25000);
 
@@ -916,20 +1025,69 @@ export function startAsyncBatchImportJob(files: BatchCsvFileInput[]): CsvImportJ
         string,
         { fileCount: number; validRows: number; errors: string[] }
       >();
-      const allRows: ParsedNasaRow[] = [];
-      const globalSeen = new Set<string>();
+      const sampleRows: ParsedNasaRow[] = [];
+      const repMap = new Map<string, ParsedNasaRow>();
+      const cellSet = new Set<string>();
+      const indicatorSet = new Set<string>();
+      let minDate = '9999-99-99';
+      let maxDate = '0000-00-00';
+      let validRowsCount = 0;
       let totalInvalid = 0;
       let totalDuplicates = 0;
       const allErrors: string[] = [];
 
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
+        const fileContent = f.content || '';
+        const fileLen = fileContent.length;
         job.currentFileName = f.fileName;
         const folder = f.folderName || 'Thư mục gốc';
         const curFolder = folderMap.get(folder) || { fileCount: 0, validRows: 0, errors: [] };
         curFolder.fileCount += 1;
 
-        const parsed = parseSingleCsvToRows(f.fileName, f.content);
+        const parsed = parseSingleCsvToRows(f.fileName, fileContent, {
+          skipRowArray: true,
+          onRow: (r) => {
+            validRowsCount += 1;
+            curFolder.validRows += 1;
+            cellSet.add(r.cell_id);
+            indicatorSet.add(r.indicator_code);
+            if (r.date < minDate) minDate = r.date;
+            if (r.date > maxDate) maxDate = r.date;
+            if (sampleRows.length < 10) {
+              sampleRows.push(r);
+            }
+            const repKey = `${r.cell_id}_${r.indicator_code}`;
+            const existingRep = repMap.get(repKey);
+            if (!existingRep || r.date >= existingRep.date) {
+              if (repMap.size < 600 || existingRep) {
+                repMap.set(repKey, r);
+              }
+            }
+
+            const key = `${r.cell_id}_${r.date}_${r.indicator_code}`;
+            incomingMap.set(key, {
+              cellId: r.cell_id,
+              date: r.date,
+              indicatorCode: r.indicator_code,
+              value: r.value,
+              unit: '',
+              version,
+            });
+            if (incomingMap.size > 40000) {
+              const toDelete = incomingMap.size - 25000;
+              let removed = 0;
+              for (const k of incomingMap.keys()) {
+                incomingMap.delete(k);
+                removed++;
+                if (removed >= toDelete) break;
+              }
+            }
+          },
+        });
+        // Release reference to raw CSV text after processing this file
+        f.content = '';
+
         totalInvalid += parsed.invalidRows;
         totalDuplicates += parsed.duplicateCount;
         if (parsed.errors.length > 0) {
@@ -937,29 +1095,11 @@ export function startAsyncBatchImportJob(files: BatchCsvFileInput[]): CsvImportJ
           allErrors.push(...parsed.errors);
         }
 
-        for (const r of parsed.rows) {
-          const key = `${r.cell_id}_${r.date}_${r.indicator_code}`;
-          if (globalSeen.has(key)) {
-            totalDuplicates++;
-            continue;
-          }
-          globalSeen.add(key);
-          allRows.push(r);
-          curFolder.validRows += 1;
-          incomingMap.set(key, {
-            cellId: r.cell_id,
-            date: r.date,
-            indicatorCode: r.indicator_code,
-            value: r.value,
-            unit: '',
-            version,
-          });
-        }
         folderMap.set(folder, curFolder);
 
         job.processedFiles = i + 1;
-        job.processedBytes += f.content?.length || 0;
-        job.processedRows = allRows.length;
+        job.processedBytes += fileLen;
+        job.processedRows = validRowsCount;
 
         const ratio =
           totalBytes > 0
@@ -979,19 +1119,9 @@ export function startAsyncBatchImportJob(files: BatchCsvFileInput[]): CsvImportJ
         }
       }
 
-      const cellSet = new Set<string>();
-      const indicatorSet = new Set<string>();
-      let minDate = '9999-99-99';
-      let maxDate = '0000-00-00';
-      for (const r of allRows) {
-        cellSet.add(r.cell_id);
-        indicatorSet.add(r.indicator_code);
-        if (r.date < minDate) minDate = r.date;
-        if (r.date > maxDate) maxDate = r.date;
-      }
-
-      const latestRows = [...allRows].sort((a, b) => (b.date > a.date ? 1 : -1));
-      const representativeOverrides = latestRows.slice(0, 300);
+      const representativeOverrides = Array.from(repMap.values())
+        .sort((a, b) => (b.date > a.date ? 1 : -1))
+        .slice(0, 300);
       const folderNames = Array.from(folderMap.keys());
       const batchLabel =
         folderNames.length === 1
@@ -1007,14 +1137,14 @@ export function startAsyncBatchImportJob(files: BatchCsvFileInput[]): CsvImportJ
         })),
         preview: {
           fileName: batchLabel,
-          totalRows: allRows.length + totalInvalid,
-          validRows: allRows.length,
+          totalRows: validRowsCount + totalInvalid,
+          validRows: validRowsCount,
           invalidRows: totalInvalid,
           uniqueCells: cellSet.size,
           startDate: minDate === '9999-99-99' ? '' : minDate,
           endDate: maxDate === '0000-00-00' ? '' : maxDate,
           indicatorsDetected: Array.from(indicatorSet),
-          sampleRows: allRows.slice(0, 10),
+          sampleRows,
           errors: allErrors,
           duplicateCount: totalDuplicates,
         },
@@ -1218,12 +1348,29 @@ function materializeStagedFiles(sessionId: string): BatchCsvFileInput[] {
   return out;
 }
 
+function* iterateStagedFiles(sessionId: string): Generator<BatchCsvFileInput> {
+  const session = stagedUploadSessions.get(sessionId);
+  if (!session) {
+    throw new Error('Phiên tải tệp đã hết hạn hoặc không tồn tại. Vui lòng thử lại.');
+  }
+  for (const acc of session.filesMap.values()) {
+    yield {
+      fileName: acc.fileName,
+      folderName: acc.folderName,
+      content: acc.parts.join(''),
+    };
+  }
+}
+
 export function previewStagedUploadSession(sessionId: string): BatchPreviewResponse {
-  const files = materializeStagedFiles(sessionId);
-  if (files.length === 0) {
+  const session = stagedUploadSessions.get(sessionId);
+  if (!session) {
+    throw new Error('Phiên tải tệp đã hết hạn hoặc không tồn tại. Vui lòng thử lại.');
+  }
+  if (session.filesMap.size === 0) {
     throw new Error('Chưa có tệp CSV nào trong phiên tải lên.');
   }
-  return previewBatchCsvFiles(files);
+  return previewBatchCsvFiles(iterateStagedFiles(sessionId), session.filesMap.size);
 }
 
 export function startAsyncStagedImportJob(sessionId: string): CsvImportJobStatus {
@@ -1231,7 +1378,6 @@ export function startAsyncStagedImportJob(sessionId: string): CsvImportJobStatus
   if (files.length === 0) {
     throw new Error('Chưa có tệp CSV nào để nhập.');
   }
-  const job = startAsyncBatchImportJob(files);
   stagedUploadSessions.delete(sessionId);
-  return job;
+  return startAsyncBatchImportJob(files);
 }

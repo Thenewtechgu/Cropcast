@@ -1062,7 +1062,9 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       const map = new Map<string, QueuedCsvFile>();
       for (const existing of queuedFilesRef.current) map.set(existing.key, existing);
 
-      const CHUNK_SIZE = 4;
+      const CHUNK_SIZE = 12;
+      const UI_FLUSH_EVERY = 24;
+      const STORAGE_FLUSH_EVERY = 120;
       for (let i = 0; i < csvEntries.length; i += CHUNK_SIZE) {
         const chunk = csvEntries.slice(i, i + CHUNK_SIZE);
         const loadedChunk = await Promise.all(
@@ -1085,49 +1087,60 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
           processedBytes += item.size || 0;
         }
 
-        const mergedSoFar = Array.from(map.values());
-        queuedFilesRef.current = mergedSoFar;
-        setQueuedFiles(mergedSoFar);
+        const isLastBatch = i + CHUNK_SIZE >= csvEntries.length;
+        const shouldFlushUi =
+          isLastBatch || processedFiles % UI_FLUSH_EVERY < CHUNK_SIZE || processedFiles === loadedChunk.length;
 
-        const ratio =
-          totalBytes > 0
-            ? processedBytes / totalBytes
-            : processedFiles / Math.max(1, totalFiles);
-        const elapsedSec = (Date.now() - startedAt) / 1000;
-        const etaSeconds =
-          ratio > 0.03 && elapsedSec > 0.05
-            ? Math.max(1, Math.ceil((elapsedSec / ratio) * (1 - ratio)))
-            : null;
-        const currentFileName = chunk[chunk.length - 1]?.file.name || '';
+        if (shouldFlushUi) {
+          const ratio =
+            totalBytes > 0
+              ? processedBytes / totalBytes
+              : processedFiles / Math.max(1, totalFiles);
+          const elapsedSec = (Date.now() - startedAt) / 1000;
+          const etaSeconds =
+            ratio > 0.03 && elapsedSec > 0.05
+              ? Math.max(1, Math.ceil((elapsedSec / ratio) * (1 - ratio)))
+              : null;
+          const currentFileName = chunk[chunk.length - 1]?.file.name || '';
 
-        setCsvProgress({
-          active: true,
-          phase: 'reading',
-          totalFiles,
-          processedFiles,
-          totalBytes,
-          processedBytes,
-          currentFileName,
-          percent: Math.min(88, Math.round(ratio * 88)),
-          etaSeconds,
-          startedAt,
-        });
-
-        await CsvQueueStorage.savePatch({
-          queuedFiles: mergedSoFar,
-          readingProgress: {
-            isReading: true,
+          setCsvProgress({
+            active: true,
+            phase: 'reading',
             totalFiles,
             processedFiles,
             totalBytes,
             processedBytes,
             currentFileName,
+            percent: Math.min(88, Math.round(ratio * 88)),
+            etaSeconds,
             startedAt,
-          },
-        });
+          });
+        }
+
+        if (isLastBatch || processedFiles % STORAGE_FLUSH_EVERY < CHUNK_SIZE) {
+          const mergedSoFar = Array.from(map.values());
+          queuedFilesRef.current = mergedSoFar;
+          setQueuedFiles(mergedSoFar);
+          await CsvQueueStorage.savePatch({
+            queuedFiles: mergedSoFar,
+            readingProgress: isLastBatch
+              ? null
+              : {
+                  isReading: true,
+                  totalFiles,
+                  processedFiles,
+                  totalBytes,
+                  processedBytes,
+                  currentFileName: chunk[chunk.length - 1]?.file.name || '',
+                  startedAt,
+                },
+          });
+        }
       }
 
       const mergedQueue = Array.from(map.values());
+      queuedFilesRef.current = mergedQueue;
+      setQueuedFiles(mergedQueue);
       await runBatchPreview(mergedQueue);
     } catch (err: any) {
       setActionErrorMsg(err?.message || t('Lỗi khi đọc tệp CSV từ thư mục.', 'Error reading CSV files from folder.'));
@@ -1400,50 +1413,50 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
       </div>
 
       {/* Admin Sub-navigation Tabs (4 Tabs) */}
-      <div className="flex flex-wrap gap-2 bg-white p-1.5 rounded-2xl border border-stone-200 shadow-xs">
+      <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-stone-200 shadow-xs overflow-x-auto no-scrollbar">
         <button
           type="button"
           onClick={() => setAdminTab('overview')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
             adminTab === 'overview'
               ? 'bg-emerald-800 text-white shadow-xs'
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <BarChart3 className="w-4 h-4" /> {t('Tổng quan Hệ thống', 'System Overview')}
+          <BarChart3 className="w-4 h-4 shrink-0" /> {t('Tổng quan Hệ thống', 'System Overview')}
         </button>
         <button
           type="button"
           onClick={() => setAdminTab('fields')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
             adminTab === 'fields'
               ? 'bg-emerald-800 text-white shadow-xs'
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <MapPin className="w-4 h-4" /> {t('Tất cả Thửa ruộng', 'All Fields')} ({platformStats?.allFields.length ?? '—'})
+          <MapPin className="w-4 h-4 shrink-0" /> {t('Tất cả Thửa ruộng', 'All Fields')} ({platformStats?.allFields.length ?? '—'})
         </button>
         <button
           type="button"
           onClick={() => setAdminTab('users')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
             adminTab === 'users'
               ? 'bg-emerald-800 text-white shadow-xs'
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <Users className="w-4 h-4" /> {t('Người dùng', 'Users')} ({platformStats?.totalUsers ?? '—'})
+          <Users className="w-4 h-4 shrink-0" /> {t('Người dùng', 'Users')} ({platformStats?.totalUsers ?? '—'})
         </button>
         <button
           type="button"
           onClick={() => setAdminTab('nasa')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
             adminTab === 'nasa'
               ? 'bg-emerald-800 text-white shadow-xs'
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <Database className="w-4 h-4" /> {t('Dữ liệu NASA POWER (CSV nhiều thư mục)', 'NASA POWER Data (Multi-Folder CSV)')}
+          <Database className="w-4 h-4 shrink-0" /> {t('Dữ liệu NASA POWER (CSV nhiều thư mục)', 'NASA POWER Data (Multi-Folder CSV)')}
         </button>
       </div>
 
@@ -1690,15 +1703,15 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             </div>
 
             {/* Search & Filters */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
+              <div className="relative flex-1 sm:flex-initial">
                 <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={fieldSearch}
                   onChange={(e) => setFieldSearch(e.target.value)}
                   placeholder={t('Tìm tên ruộng, chủ sở hữu, email, cây...', 'Search field, owner, email, crop...')}
-                  className="pl-8 pr-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-900 w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="pl-8 pr-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-900 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
@@ -2111,8 +2124,8 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 </h2>
                 <p className="text-xs text-stone-500">
                   {t(
-                    'Hỗ trợ cả tệp xuất chuẩn từ NASA POWER (có phần -END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) lẫn tệp 4 cột (cell_id, date, indicator_code, value). Tự bỏ qua giá trị thiếu -999.',
-                    'Supports both standard NASA POWER exports (-END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) and 4-column CSVs (cell_id, date, indicator_code, value). Automatically skips -999 missing values.'
+                    'Hỗ trợ cả tệp dạng lưới tọa độ (LAT,LON,YEAR,DOY,GWETROOT/T2M_MAX/PRECTOTCORR...), tệp xuất NASA POWER (-END HEADER-, YEAR,MO,DY...) lẫn tệp 4 cột (cell_id, date, indicator_code, value). Tự bỏ qua ô biển trống và giá trị thiếu -999.',
+                    'Supports gridded CSVs (LAT,LON,YEAR,DOY,GWETROOT/T2M_MAX/PRECTOTCORR...), standard NASA POWER exports (-END HEADER-, YEAR,MO,DY...), and 4-column CSVs (cell_id, date, indicator_code, value). Skips blank ocean cells and -999 missing values.'
                   )}
                 </p>
               </div>
@@ -2137,7 +2150,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             <input
               ref={filesInputRef}
               type="file"
-              accept=".csv,.txt"
+              accept=".csv,.txt,text/csv,text/plain"
               multiple
               className="hidden"
               onChange={handleFilesInputChange}
@@ -2156,7 +2169,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 setIsDraggingOver(false);
               }}
               onDrop={handleDropFoldersOrFiles}
-              className={`p-6 border-2 border-dashed rounded-2xl text-center transition flex flex-col items-center justify-center space-y-3 ${
+              className={`p-4 sm:p-6 border-2 border-dashed rounded-2xl text-center transition flex flex-col items-center justify-center space-y-3 ${
                 isDraggingOver
                   ? 'border-emerald-600 bg-emerald-50/80 ring-2 ring-emerald-300'
                   : 'border-stone-300 hover:border-emerald-500 bg-stone-50/60'
@@ -2172,24 +2185,24 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 </p>
                 <p className="text-xs text-stone-500">
                   {t(
-                    'Hoặc nhấn nút bên dưới để chọn từng thư mục cộng dồn vào hàng đợi (có thể thêm liên tiếp nhiều thư mục khác nhau trước khi bấm nhập).',
-                    'Or click below to append folders or files into the upload queue (you can add multiple batches before importing).'
+                    'Trên máy tính hãy chọn thư mục hoặc kéo thả; trên điện thoại hãy dùng nút "+ Thêm nhiều tệp CSV" để chọn hàng loạt tệp .csv trong bộ nhớ máy.',
+                    'On desktop, drop or select folders; on mobile, use "+ Add Multiple CSV Files" to multi-select .csv files from device storage.'
                   )}
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center gap-2.5 pt-1 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => folderInputRef.current?.click()}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <FolderPlus className="w-4 h-4" /> {t('+ Thêm thư mục CSV', '+ Add CSV Folder')}
                 </button>
                 <button
                   type="button"
                   onClick={() => filesInputRef.current?.click()}
-                  className="px-4 py-2 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2.5 sm:py-2 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-700" /> {t('+ Thêm nhiều tệp CSV', '+ Add Multiple CSV Files')}
                 </button>
@@ -2197,7 +2210,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   <button
                     type="button"
                     onClick={handleClearQueue}
-                    className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2.5 sm:py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> {t('Xóa hàng đợi', 'Clear Queue')} ({queuedFiles.length} {t('tệp', 'files')})
                   </button>
@@ -2466,11 +2479,11 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
                 {/* Commit Import Button */}
                 {batchPreview.preview.validRows > 0 && (
-                  <div className="flex items-center justify-end gap-3 pt-2">
+                  <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 pt-2">
                     <button
                       type="button"
                       onClick={handleClearQueue}
-                      className="px-4 py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-100 transition cursor-pointer"
+                      className="px-4 py-2.5 sm:py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-100 transition cursor-pointer"
                     >
                       {t('Hủy hàng đợi', 'Cancel Queue')}
                     </button>
@@ -2478,7 +2491,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       type="button"
                       onClick={handleCommitBatchImport}
                       disabled={importing}
-                      className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                      className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                     >
                       {importing ? (
                         <Loader2 className="w-4 h-4 animate-spin" />

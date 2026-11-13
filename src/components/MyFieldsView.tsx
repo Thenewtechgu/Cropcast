@@ -744,7 +744,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
             </div>
 
             {/* Stepper Progress */}
-            <div className="px-6 py-2 bg-stone-100 border-b border-stone-200 flex items-center justify-between text-xs text-stone-600">
+            <div className="px-4 sm:px-6 py-2 bg-stone-100 border-b border-stone-200 flex items-center justify-between gap-4 text-xs text-stone-600 overflow-x-auto no-scrollbar whitespace-nowrap">
               {[
                 { s: 1, label: t('1. Vị trí*', '1. Location*') },
                 { s: 2, label: t('2. Đất', '2. Soil') },
@@ -756,7 +756,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   key={st.s}
                   type="button"
                   onClick={() => editingField && setCurrentStep(st.s)}
-                  className={`flex items-center gap-1 font-semibold ${
+                  className={`flex items-center gap-1 font-semibold shrink-0 ${
                     editingField ? 'cursor-pointer hover:text-emerald-700' : 'cursor-default'
                   } ${
                     currentStep === st.s
@@ -772,7 +772,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
             </div>
 
             {/* Step Body */}
-            <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs sm:text-sm">
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1 text-xs sm:text-sm">
               {stepError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -802,7 +802,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
                         {t('Tỉnh / Thành phố *', 'Province / City *')}
@@ -865,7 +865,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     />
 
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div>
+                      <div className="min-w-0">
                         <span className="text-stone-500 block mb-0.5">
                           {t('Vĩ độ (°Bắc):', 'Latitude (°N):')}
                         </span>
@@ -880,7 +880,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           className="w-full px-2.5 py-1.5 border border-stone-300 rounded-lg bg-white font-mono text-xs tabular-nums"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <span className="text-stone-500 block mb-0.5">
                           {t('Kinh độ (°Đông):', 'Longitude (°E):')}
                         </span>
@@ -1362,7 +1362,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
                         {t('Ngày gieo trồng / xuống giống', 'Planting / Sowing Date')}
@@ -1388,7 +1388,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
                         {t('Phương pháp canh tác', 'Farming Method')}
@@ -1462,7 +1462,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
                         {t('Thời gian bạn thường thăm ruộng', 'Preferred Field Check Time')}
@@ -1510,7 +1510,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
             </div>
 
             {/* Stepper Footer Controls */}
-            <div className="px-6 py-4 bg-stone-50 border-t border-stone-200 flex items-center justify-between shrink-0">
+            <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-stone-50 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
               {currentStep > 1 ? (
                 <button
                   type="button"
@@ -1574,16 +1574,16 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
       {/* SHARE FIELD MODAL (BY LINK OR EMAIL) */}
       {shareModalField && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden">
-            <div className="px-6 py-4 bg-emerald-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div className="relative w-full max-w-lg max-h-[92dvh] flex flex-col bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden">
+            <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center shrink-0">
                   <Share2 className="w-4 h-4 text-emerald-100" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-base font-bold">{t('Chia sẻ Thửa ruộng', 'Share Field')}</h2>
-                  <p className="text-[11px] text-emerald-200 truncate max-w-[300px]">
+                  <p className="text-[11px] text-emerald-200 truncate max-w-[210px] sm:max-w-[300px]">
                     {shareModalField.name} · {getLocalizedRegionName(shareModalField.province, lang)}
                   </p>
                 </div>
@@ -1591,13 +1591,13 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShareModalFieldId(null)}
-                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800 cursor-pointer"
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800 cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-5 text-xs">
+            <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto">
               {shareFeedback && (
                 <div
                   className={`p-3 rounded-xl border font-medium flex items-center justify-between ${
@@ -1632,12 +1632,12 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
                 {shareModalField.activeShareToken ? (
                   <div className="space-y-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
                         readOnly
                         value={`${window.location.origin}/?share=${shareModalField.activeShareToken}`}
-                        className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-[11px] text-stone-800"
+                        className="flex-1 min-w-0 px-3 py-2 bg-white border border-stone-300 rounded-lg font-mono text-[11px] text-stone-800"
                       />
                       <button
                         type="button"
@@ -1747,7 +1747,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       setShareBusy(false);
                     }
                   }}
-                  className="flex gap-2"
+                  className="flex flex-col sm:flex-row gap-2"
                 >
                   <input
                     type="text"
@@ -1757,7 +1757,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       'VD: nongdan2@gmail.com hoặc ten_dang_nhap',
                       'e.g. farmer2@gmail.com or username'
                     )}
-                    className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-lg text-xs text-stone-900 focus:outline-emerald-600"
+                    className="flex-1 min-w-0 px-3 py-2 bg-white border border-stone-300 rounded-lg text-base sm:text-xs text-stone-900 focus:outline-emerald-600"
                   />
                   <button
                     type="submit"

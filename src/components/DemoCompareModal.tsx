@@ -342,7 +342,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                     {getPlantDisplayName(fieldA.crop.name, lang)}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
                     <span className="text-stone-400 block text-[10px]">
                       {t('Loại đất & Thoát nước:', 'Soil & Drainage:')}
@@ -478,7 +478,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                     {getPlantDisplayName(fieldB.crop.name, lang)}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
                     <span className="text-stone-400 block text-[10px]">
                       {t('Loại đất & Thoát nước:', 'Soil & Drainage:')}
@@ -633,7 +633,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-white border-t border-stone-200 flex items-center justify-between shrink-0">
+        <div className="p-4 bg-white border-t border-stone-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
           <div className="text-[11px] text-stone-500 italic">
             {t(
               '* Dữ liệu mô phỏng thử nghiệm so sánh trực quan theo hồ sơ ruộng.',

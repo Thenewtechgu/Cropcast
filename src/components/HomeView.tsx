@@ -322,7 +322,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-2.5 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
               <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
                 <span className="text-stone-400 text-[11px] block">
                   {t('Điểm khí hậu gần nhất', 'Nearest climate grid')}
@@ -447,7 +447,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             {/* ONLY ONE Best Rotation Strategy + Farmer Rejection Flow */}
             <div className="space-y-2.5 pt-1">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                 <span className="text-xs font-bold text-stone-800">
                   {t(
                     `3. Chiến lược Luân canh Tốt nhất cho ${getPlantDisplayName(sampleCrop, 'vi')} tại ${getLocalizedRegionName(cell.region, 'vi')}:`,
@@ -530,7 +530,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
                         value={rejectReason}
@@ -539,13 +539,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           'Nhập lý do phương án này chưa hợp với gia đình...',
                           'Describe why this plan does not fit your farm...'
                         )}
-                        className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-lg text-xs text-stone-900 focus:outline-emerald-600"
+                        className="flex-1 min-w-0 px-2.5 py-2 sm:py-1.5 border border-stone-300 rounded-lg text-base sm:text-xs text-stone-900 focus:outline-emerald-600"
                       />
                       <button
                         type="button"
                         onClick={handleRethinkStrategy}
                         disabled={!rejectReason.trim() || rethinking}
-                        className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                        className="px-3 py-2 sm:py-1.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1 cursor-pointer shrink-0"
                       >
                         {rethinking ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />

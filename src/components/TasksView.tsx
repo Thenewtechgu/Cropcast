@@ -127,7 +127,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
             ))}
           </select>
 
-          <span className="text-stone-400 font-semibold ml-2">{t('Trạng thái:', 'Status:')}</span>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <span className="text-stone-400 font-semibold">{t('Trạng thái:', 'Status:')}</span>
           <div className="flex flex-wrap items-center gap-1">
             {[
               { id: 'ALL', label: t('Tất cả', 'All') },
@@ -147,6 +148,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 {st.label}
               </button>
             ))}
+          </div>
           </div>
         </div>
 
@@ -333,13 +335,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                       <input
                         type="text"
                         placeholder={t('Lý do tạm hoãn khác (tùy chọn)...', 'Other reason (optional)...')}
                         value={postponeReason}
                         onChange={(e) => setPostponeReason(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-lg bg-white text-stone-900"
+                        className="flex-1 min-w-0 px-2.5 py-2 sm:py-1.5 border border-stone-300 rounded-lg bg-white text-base sm:text-xs text-stone-900"
                       />
                       <button
                         type="button"

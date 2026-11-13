@@ -103,6 +103,11 @@ async function localApiFetch(path: string, options: RequestInit = {}) {
   const res = await fetch(path, { ...options, headers });
   const data = await parseJsonSafely<any>(res).catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 404 && !data?.error) {
+      throw new Error(
+        'Máy chủ xác thực không tìm thấy dịch vụ tài khoản (404). Vui lòng tải lại trang hoặc đăng nhập bằng tài khoản Google.'
+      );
+    }
     throw new Error(data?.error || `Lỗi máy chủ (${res.status})`);
   }
   return data;
@@ -261,7 +266,10 @@ export const FirestoreService = {
         authMode: 'firebase',
       };
     } catch (err: any) {
-      if (err?.code === 'auth/operation-not-allowed') {
+      if (
+        err?.code === 'auth/operation-not-allowed' ||
+        err?.code === 'auth/unauthorized-domain'
+      ) {
         const data = await localApiFetch('/api/auth/signup', {
           method: 'POST',
           body: JSON.stringify({ username, password }),
@@ -307,6 +315,7 @@ export const FirestoreService = {
     } catch (err: any) {
       if (
         err?.code === 'auth/operation-not-allowed' ||
+        err?.code === 'auth/unauthorized-domain' ||
         err?.code === 'auth/user-not-found' ||
         err?.code === 'auth/invalid-credential'
       ) {
@@ -318,7 +327,10 @@ export const FirestoreService = {
           localStorage.setItem(LOCAL_TOKEN_KEY, data.token);
           return data.user as AppUser;
         } catch (localErr: any) {
-          if (err?.code === 'auth/operation-not-allowed') {
+          if (
+            err?.code === 'auth/operation-not-allowed' ||
+            err?.code === 'auth/unauthorized-domain'
+          ) {
             throw localErr;
           }
         }

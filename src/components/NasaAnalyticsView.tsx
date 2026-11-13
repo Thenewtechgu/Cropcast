@@ -39,6 +39,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
     'T2M' | 'PRECTOTCORR' | 'GWETROOT' | 'ALLSKY_SFC_SW_DWN' | 'RH2M'
   >('T2M');
   const [overlayTheme, setOverlayTheme] = useState<OverlayTheme>('moisture');
+  const [selectedChartMonth, setSelectedChartMonth] = useState<string | null>(null);
 
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthlyData = getCellMonthlyProfile(cell, lang);
@@ -313,7 +314,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             <div className="text-xs font-bold text-stone-800 uppercase tracking-wider">
               {t('Chọn lớp thông tin theo dõi theo thời gian', 'Select Thematic Layer')}
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
                 { id: 'moisture', label: t('Độ ẩm đất vùng rễ', 'Root Soil Moisture') },
                 { id: 'heat', label: t('Nắng nóng & Bốc hơi', 'Heat & Evapotranspiration') },
@@ -496,49 +497,97 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           </div>
         </div>
 
-        <div className="pt-2">
-          <div className="grid grid-cols-12 gap-1.5 sm:gap-3 h-64 items-end pb-2 border-b border-stone-200">
-            {monthlyData.map((d) => {
-              let val = 0;
-              if (selectedIndicator === 'T2M') val = Number(d.T2M.toFixed(1));
-              else if (selectedIndicator === 'PRECTOTCORR') val = Math.round(d.PRECTOTCORR);
-              else if (selectedIndicator === 'GWETROOT')
-                val = Math.min(98, Math.max(12, Math.round(d.GWETROOT * 100)));
-              else if (selectedIndicator === 'RH2M') val = d.RH2M;
-              else if (selectedIndicator === 'ALLSKY_SFC_SW_DWN') val = d.ALLSKY_SFC_SW_DWN;
-
-              const heightPct = Math.min(100, Math.max(8, (val / maxValue) * 100));
-
-              return (
-                <div
-                  key={d.month}
-                  className="flex flex-col items-center h-full justify-end group relative"
-                >
-                  <div className="absolute -top-12 opacity-0 group-hover:opacity-100 transition-opacity bg-stone-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-20 pointer-events-none shadow-md">
-                    {d.month}: <strong>{val}</strong> {currentMeta.unit}
-                    {selectedIndicator === 'T2M' && (
-                      <div className="text-[9px] text-stone-300">
-                        {t('Thấp nhất:', 'Min:')} {d.T2M_MIN.toFixed(1)}°C | {t('Cao nhất:', 'Max:')}{' '}
-                        {d.T2M_MAX.toFixed(1)}°C
-                      </div>
-                    )}
-                  </div>
-
-                  <span className="text-[10px] font-bold text-stone-700 mb-1 opacity-80 group-hover:opacity-100 tabular-nums">
-                    {val}
+        <div className="pt-2 space-y-3">
+          {selectedChartMonth && (() => {
+            const activeItem = monthlyData.find((item) => item.month === selectedChartMonth);
+            if (!activeItem) return null;
+            let activeVal = 0;
+            if (selectedIndicator === 'T2M') activeVal = Number(activeItem.T2M.toFixed(1));
+            else if (selectedIndicator === 'PRECTOTCORR') activeVal = Math.round(activeItem.PRECTOTCORR);
+            else if (selectedIndicator === 'GWETROOT')
+              activeVal = Math.min(98, Math.max(12, Math.round(activeItem.GWETROOT * 100)));
+            else if (selectedIndicator === 'RH2M') activeVal = activeItem.RH2M;
+            else if (selectedIndicator === 'ALLSKY_SFC_SW_DWN') activeVal = activeItem.ALLSKY_SFC_SW_DWN;
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950">
+                <div>
+                  <strong>{activeItem.month}:</strong>{' '}
+                  <span className="font-mono font-bold">
+                    {activeVal} {currentMeta.unit}
                   </span>
-
-                  <div className="w-full max-w-[36px] bg-stone-100 rounded-t-lg relative flex items-end justify-center overflow-hidden h-full">
-                    <div
-                      className={`w-full ${activeColorTheme.barClass} rounded-t-lg transition-all duration-500`}
-                      style={{ height: `${heightPct}%` }}
-                    />
-                  </div>
-
-                  <span className="text-[11px] font-bold text-stone-700 mt-2">{d.month}</span>
+                  {selectedIndicator === 'T2M' && (
+                    <span className="text-stone-600 ml-2">
+                      ({t('Thấp nhất:', 'Min:')} {activeItem.T2M_MIN.toFixed(1)}°C |{' '}
+                      {t('Cao nhất:', 'Max:')} {activeItem.T2M_MAX.toFixed(1)}°C)
+                    </span>
+                  )}
                 </div>
-              );
-            })}
+                <button
+                  type="button"
+                  onClick={() => setSelectedChartMonth(null)}
+                  className="text-[11px] font-bold text-emerald-800 hover:underline cursor-pointer"
+                >
+                  {t('Đóng', 'Clear')}
+                </button>
+              </div>
+            );
+          })()}
+
+          <div className="overflow-x-auto pb-2">
+            <div className="min-w-[520px] grid grid-cols-12 gap-2 sm:gap-3 h-64 items-end pb-2 border-b border-stone-200 pt-10">
+              {monthlyData.map((d) => {
+                let val = 0;
+                if (selectedIndicator === 'T2M') val = Number(d.T2M.toFixed(1));
+                else if (selectedIndicator === 'PRECTOTCORR') val = Math.round(d.PRECTOTCORR);
+                else if (selectedIndicator === 'GWETROOT')
+                  val = Math.min(98, Math.max(12, Math.round(d.GWETROOT * 100)));
+                else if (selectedIndicator === 'RH2M') val = d.RH2M;
+                else if (selectedIndicator === 'ALLSKY_SFC_SW_DWN') val = d.ALLSKY_SFC_SW_DWN;
+
+                const heightPct = Math.min(100, Math.max(8, (val / maxValue) * 100));
+                const isBarSelected = selectedChartMonth === d.month;
+
+                return (
+                  <button
+                    key={d.month}
+                    type="button"
+                    onClick={() =>
+                      setSelectedChartMonth((prev) => (prev === d.month ? null : d.month))
+                    }
+                    className={`flex flex-col items-center h-full justify-end group relative cursor-pointer focus:outline-none ${
+                      isBarSelected ? 'ring-2 ring-emerald-600/40 rounded-lg' : ''
+                    }`}
+                  >
+                    <div
+                      className={`absolute -top-10 transition-opacity bg-stone-900 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-20 pointer-events-none shadow-md ${
+                        isBarSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      {d.month}: <strong>{val}</strong> {currentMeta.unit}
+                      {selectedIndicator === 'T2M' && (
+                        <div className="text-[9px] text-stone-300">
+                          {t('Thấp nhất:', 'Min:')} {d.T2M_MIN.toFixed(1)}°C | {t('Cao nhất:', 'Max:')}{' '}
+                          {d.T2M_MAX.toFixed(1)}°C
+                        </div>
+                      )}
+                    </div>
+
+                    <span className="text-[10px] font-bold text-stone-700 mb-1 opacity-80 group-hover:opacity-100 tabular-nums">
+                      {val}
+                    </span>
+
+                    <div className="w-full max-w-[36px] bg-stone-100 rounded-t-lg relative flex items-end justify-center overflow-hidden h-full">
+                      <div
+                        className={`w-full ${activeColorTheme.barClass} rounded-t-lg transition-all duration-500`}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                    </div>
+
+                    <span className="text-[11px] font-bold text-stone-700 mt-2">{d.month}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 

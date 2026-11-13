@@ -1206,16 +1206,32 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
-    const disableHmr = process.env.DISABLE_HMR === 'true';
+    const hmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: disableHmr ? false : { server: httpServer },
-        ws: { server: httpServer },
-        watch: disableHmr ? null : {},
+        hmr: hmrDisabled ? false : { server: httpServer },
+        ws: hmrDisabled ? false : { server: httpServer },
       },
       appType: 'spa',
     });
+    if (hmrDisabled) {
+      app.get('/@vite/client', async (_req: Request, res: Response, next: NextFunction) => {
+        try {
+          const transformed = await vite.transformRequest('/@vite/client');
+          if (!transformed?.code) return next();
+          const code = transformed.code.replace(
+            'const createWebSocketModuleRunnerTransport = (options) => {',
+            'const createWebSocketModuleRunnerTransport = (_options) => ({ connect: async () => {}, disconnect: async () => {}, send: () => {} }); const _disabledWsTransport = (options) => {'
+          );
+          res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache');
+          return res.send(code);
+        } catch {
+          return next();
+        }
+      });
+    }
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.join(__dirname, 'dist')));

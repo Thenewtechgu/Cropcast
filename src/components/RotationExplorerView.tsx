@@ -275,7 +275,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
       {/* Sustainability Context from OCO-2, GRACE & GHGx with Last Updated */}
       {earthSnapshot && (
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-stone-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
-          <div className="grid grid-cols-3 gap-4 sm:gap-6 font-mono tabular-nums">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6 font-mono tabular-nums">
             <div>
               <span className="text-stone-500 font-sans block">
                 {t('Hấp thụ Carbon (OCO-2)', 'Carbon Uptake (OCO-2)')}
@@ -636,7 +636,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
           )}
 
           {/* Title & Score */}
-          <div className="flex items-start justify-between gap-3 border-b border-stone-100 pb-4">
+          <div className="flex flex-col sm:flex-row items-start justify-between gap-3 border-b border-stone-100 pb-4">
             <div className="space-y-1">
               <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
                 {customBestStrategy
@@ -828,7 +828,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
                   <div className="text-xs font-semibold text-rose-700">{rejectError}</div>
                 )}
 
-                <div className="flex items-center justify-end gap-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setRejectPanelOpen(false)}

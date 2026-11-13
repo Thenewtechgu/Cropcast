@@ -90,10 +90,10 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col max-h-[92dvh] overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-emerald-900 text-white flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center">
               <Satellite className="w-5 h-5 text-emerald-200" />
@@ -146,7 +146,7 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               lat={currentLat}
               lon={currentLon}
               zoom={13}
-              heightClass="h-[380px] sm:h-[440px]"
+              heightClass="h-[260px] sm:h-[440px]"
               interactive={true}
               showNasaGrid={true}
               onLocationChange={(lat, lon) => {
