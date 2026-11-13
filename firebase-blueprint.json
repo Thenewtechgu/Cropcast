@@ -1,0 +1,465 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated farmer or admin account profile.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted administrator access record for NASA data management.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "grantedAt"]
+    },
+    "Field": {
+      "title": "Field",
+      "description": "Personalized agricultural field profile owned by a farmer.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "sharedWithEmails": {
+          "type": "array"
+        },
+        "sharedWithUids": {
+          "type": "array"
+        },
+        "activeShareToken": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "presentedShareToken": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "province": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "district": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "areaHa": {
+          "type": "number"
+        },
+        "soilType": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "soilCharacteristics": {
+          "type": "object"
+        },
+        "waterSource": {
+          "type": "object"
+        },
+        "crop": {
+          "type": "object"
+        },
+        "primaryGoal": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "inspectTime": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "notificationMethod": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "nasaGrid": {
+          "type": "object"
+        },
+        "adaptiveMemory": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "province",
+        "district",
+        "lat",
+        "lon",
+        "areaHa",
+        "soilType",
+        "soilCharacteristics",
+        "waterSource",
+        "crop",
+        "primaryGoal",
+        "inspectTime",
+        "notificationMethod",
+        "nasaGrid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FarmTask": {
+      "title": "FarmTask",
+      "description": "Agronomic action task linked to a farmer's field.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fieldId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "scheduledTime": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "LOW"]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "triggerData": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "postponed", "skipped"]
+        },
+        "farmerNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "fieldId",
+        "title",
+        "scheduledTime",
+        "priority",
+        "reason",
+        "triggerData",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FeedbackRecord": {
+      "title": "FeedbackRecord",
+      "description": "Field observation and feedback submitted by a farmer.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fieldId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "feedbackType": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "userComment": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "systemActionTaken": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "appliedToProfile": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "fieldId",
+        "feedbackType",
+        "appliedToProfile",
+        "createdAt"
+      ]
+    },
+    "NasaDataset": {
+      "title": "NasaDataset",
+      "description": "Admin-uploaded NASA climate observation dataset manifest and latest metrics.",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "recordCount": {
+          "type": "number"
+        },
+        "cellCount": {
+          "type": "number"
+        },
+        "startDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "endDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "enum": ["COMPLETED", "ROLLED_BACK"]
+        },
+        "uploadedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "sampleOverrides": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "version",
+        "fileName",
+        "recordCount",
+        "cellCount",
+        "startDate",
+        "endDate",
+        "status",
+        "uploadedBy",
+        "isPublic",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "NasaSyncLog": {
+      "title": "NasaSyncLog",
+      "description": "Admin-only synchronization audit log.",
+      "type": "object",
+      "properties": {
+        "syncType": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "targetCellsCount": {
+          "type": "number"
+        },
+        "recordsSynced": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["RUNNING", "SUCCESS", "FAILED", "PARTIAL"]
+        },
+        "latestNasaDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "actorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "syncType",
+        "targetCellsCount",
+        "recordsSynced",
+        "status",
+        "actorUid",
+        "createdAt"
+      ]
+    },
+    "FieldShare": {
+      "title": "FieldShare",
+      "description": "Share link or email invitation granting read access to a farmer's field.",
+      "type": "object",
+      "properties": {
+        "fieldId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fieldName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "shareType": {
+          "type": "string",
+          "enum": ["link", "email"]
+        },
+        "targetEmail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "fieldId",
+        "fieldName",
+        "ownerId",
+        "ownerName",
+        "shareType",
+        "isActive",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profile isolated to owner and admin."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Trusted admin allowlist records."
+    },
+    "/fields/{fieldId}": {
+      "schema": { "$ref": "#/entities/Field" },
+      "description": "Farmer-owned field profiles strictly isolated to creator, explicitly shared recipients, and admin stats."
+    },
+    "/field_shares/{shareId}": {
+      "schema": { "$ref": "#/entities/FieldShare" },
+      "description": "Field sharing links and email invitations created by field owners."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/FarmTask" },
+      "description": "Agronomic tasks tied to a farmer's field."
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": { "$ref": "#/entities/FeedbackRecord" },
+      "description": "Farmer field observations tied to a field."
+    },
+    "/nasa_datasets/{datasetId}": {
+      "schema": { "$ref": "#/entities/NasaDataset" },
+      "description": "Admin-uploaded NASA dataset versions and overrides."
+    },
+    "/nasa_sync_logs/{logId}": {
+      "schema": { "$ref": "#/entities/NasaSyncLog" },
+      "description": "Admin-only NASA synchronization logs."
+    }
+  }
+}

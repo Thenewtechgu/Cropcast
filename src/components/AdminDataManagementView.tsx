@@ -1,0 +1,2580 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Database,
+  CloudUpload,
+  RefreshCw,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  RotateCcw,
+  ShieldCheck,
+  Server,
+  Layers,
+  Eye,
+  Download,
+  Info,
+  Check,
+  Copy,
+  Lock,
+  Users,
+  MapPin,
+  BarChart3,
+  Share2,
+  PlusCircle,
+  Loader2,
+  UserCheck,
+  Sprout,
+  FolderPlus,
+  FolderOpen,
+  Search,
+  Trash2,
+  X,
+  Droplets,
+  Navigation,
+} from 'lucide-react';
+import {
+  AdminFieldSummary,
+  AdminPlatformStats,
+  CentralDataStatus,
+  DataImportRecord,
+  SyncLogRecord,
+  CsvPreviewResult,
+  WaterSourceType,
+} from '../types';
+import { auth, BOOTSTRAP_ADMIN_EMAIL } from '../firebase';
+import { FirestoreService } from '../services/firestoreService';
+import { CsvQueueStorage, StoredCsvSessionState } from '../services/csvQueueStorage';
+import { ALL_NASA_CELLS } from '../data/nasaVietnamGrid';
+import { getSoilLabel } from '../services/agronomyEngine';
+import { SatelliteMap } from './SatelliteMap';
+
+const ADMIN_TAB_STORAGE_KEY = 'cropcast_admin_tab';
+
+interface CsvProgressState {
+  active: boolean;
+  phase: 'reading' | 'analyzing' | 'importing';
+  totalFiles: number;
+  processedFiles: number;
+  totalBytes: number;
+  processedBytes: number;
+  processedRows?: number;
+  currentFileName: string;
+  percent: number;
+  etaSeconds: number | null;
+  startedAt: number;
+}
+
+function formatEta(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return 'Đang tính toán...';
+  if (seconds <= 1) return 'Còn ~1 giây';
+  if (seconds < 60) return `Còn ~${Math.ceil(seconds)} giây`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.ceil(seconds % 60);
+  return `Còn ~${mins} phút ${secs} giây`;
+}
+
+function formatBytesMb(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+interface AdminDataManagementViewProps {
+  onDatasetUpdated?: () => void;
+}
+
+interface QueuedCsvFile {
+  key: string;
+  fileName: string;
+  folderName: string;
+  size: number;
+  content: string;
+}
+
+interface BatchPreviewResponse {
+  totalFiles: number;
+  totalFolders: number;
+  folderSummaries: Array<{
+    folderName: string;
+    fileCount: number;
+    validRows: number;
+    errors: string[];
+  }>;
+  preview: CsvPreviewResult;
+  representativeOverrides: Array<{
+    cell_id: string;
+    date: string;
+    indicator_code: string;
+    value: number;
+  }>;
+}
+
+const NASA_INDICATORS = [
+  { code: 'T2M', label: 'Nhiệt độ TB 2m (°C)', defaultVal: '26.5' },
+  { code: 'T2M_MIN', label: 'Nhiệt độ tối thiểu (°C)', defaultVal: '21.0' },
+  { code: 'T2M_MAX', label: 'Nhiệt độ tối đa (°C)', defaultVal: '32.0' },
+  { code: 'PRECTOTCORR', label: 'Lượng mưa hiệu chỉnh (mm/ngày)', defaultVal: '12.4' },
+  { code: 'GWETROOT', label: 'Độ ẩm đất vùng rễ (0–1)', defaultVal: '0.72' },
+  { code: 'GWETTOP', label: 'Độ ẩm đất tầng mặt (0–1)', defaultVal: '0.68' },
+  { code: 'RH2M', label: 'Độ ẩm không khí (%)', defaultVal: '84' },
+  { code: 'ALLSKY_SFC_SW_DWN', label: 'Bức xạ mặt trời (MJ/m²/ngày)', defaultVal: '17.5' },
+];
+
+const WATER_LABELS: Record<WaterSourceType, string> = {
+  river: 'Nước sông / kênh',
+  pond: 'Ao / hồ chứa',
+  well: 'Giếng khoan / giếng đào',
+  tap: 'Nước máy / thủy cục',
+  rain: 'Phụ thuộc nước mưa',
+  other: 'Nguồn nước khác',
+};
+
+function isCsvOrTextFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.csv') || lower.endsWith('.txt');
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`Không thể đọc tệp ${file.name}`));
+    reader.readAsText(file);
+  });
+}
+
+async function readAllDirectoryEntries(dirReader: any): Promise<any[]> {
+  const allEntries: any[] = [];
+  while (true) {
+    const batch: any[] = await new Promise((resolve, reject) => {
+      dirReader.readEntries(resolve, reject);
+    });
+    if (!batch || batch.length === 0) break;
+    allEntries.push(...batch);
+  }
+  return allEntries;
+}
+
+async function collectFilesFromEntry(
+  entry: any,
+  inheritedFolderName: string
+): Promise<Array<{ file: File; folderName: string }>> {
+  if (!entry) return [];
+
+  if (entry.isFile) {
+    const file: File = await new Promise((resolve, reject) => {
+      entry.file(resolve, reject);
+    });
+    if (!isCsvOrTextFile(file.name)) return [];
+    return [{ file, folderName: inheritedFolderName || 'Tệp tải lẻ' }];
+  }
+
+  if (entry.isDirectory) {
+    const nextFolderName = inheritedFolderName
+      ? `${inheritedFolderName}/${entry.name}`
+      : entry.name;
+    const reader = entry.createReader();
+    const entries = await readAllDirectoryEntries(reader);
+    const nested = await Promise.all(
+      entries.map((child) => collectFilesFromEntry(child, nextFolderName))
+    );
+    return nested.flat();
+  }
+
+  return [];
+}
+
+export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = ({
+  onDatasetUpdated,
+}) => {
+  const [adminTab, setAdminTabState] = useState<'overview' | 'fields' | 'users' | 'nasa'>(() => {
+    try {
+      const saved = localStorage.getItem(ADMIN_TAB_STORAGE_KEY);
+      if (saved === 'overview' || saved === 'fields' || saved === 'users' || saved === 'nasa') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'overview';
+  });
+  const setAdminTab = (next: 'overview' | 'fields' | 'users' | 'nasa') => {
+    setAdminTabState(next);
+    try {
+      localStorage.setItem(ADMIN_TAB_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  };
+  const [platformStats, setPlatformStats] = useState<AdminPlatformStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [togglingAdminUid, setTogglingAdminUid] = useState<string | null>(null);
+  const [adminEmailInput, setAdminEmailInput] = useState('');
+  const [adminActionSuccess, setAdminActionSuccess] = useState<string | null>(null);
+
+  // All-fields filter & inspector state
+  const [fieldSearch, setFieldSearch] = useState('');
+  const [provinceFilter, setProvinceFilter] = useState('ALL');
+  const [cropFilter, setCropFilter] = useState('ALL');
+  const [inspectingField, setInspectingField] = useState<AdminFieldSummary | null>(null);
+
+  const [status, setStatus] = useState<CentralDataStatus | null>(null);
+  const [syncLogs, setSyncLogs] = useState<SyncLogRecord[]>([]);
+  const [imports, setImports] = useState<DataImportRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  // Manual single NASA observation state
+  const [manualCellId, setManualCellId] = useState(ALL_NASA_CELLS[0]?.cellId || 'NASA_VN_001');
+  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [manualIndicator, setManualIndicator] = useState('T2M');
+  const [manualValue, setManualValue] = useState('26.5');
+  const [savingManual, setSavingManual] = useState(false);
+  const [manualSuccessMsg, setManualSuccessMsg] = useState<string | null>(null);
+
+  // Multi-folder / multi-file NASA POWER CSV batch queue state + reload persistence + ETA bar
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
+  const pollTimerRef = useRef<number | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [readingQueue, setReadingQueue] = useState(false);
+  const [queuedFiles, setQueuedFiles] = useState<QueuedCsvFile[]>([]);
+  const queuedFilesRef = useRef<QueuedCsvFile[]>([]);
+  const [batchPreview, setBatchPreview] = useState<BatchPreviewResponse | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [csvProgress, setCsvProgress] = useState<CsvProgressState | null>(null);
+  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
+  const [lastCompletedBatch, setLastCompletedBatch] =
+    useState<StoredCsvSessionState['lastCompletedBatch']>(null);
+  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
+
+  // Rollback state
+  const [rollbackSuccessMsg, setRollbackSuccessMsg] = useState<string | null>(null);
+  const [confirmRollbackVer, setConfirmRollbackVer] = useState<string | null>(null);
+
+  // SQL schema copy state
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const getAdminHeaders = async (includeJson = false): Promise<Record<string, string>> => {
+    const token = await auth.currentUser?.getIdToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (includeJson) headers['Content-Type'] = 'application/json';
+    return headers;
+  };
+
+  const fetchPlatformStats = async () => {
+    try {
+      setStatsLoading(true);
+      setStatsError(null);
+      const data = await FirestoreService.getAdminPlatformStats();
+      setPlatformStats(data);
+    } catch (err: any) {
+      setStatsError(err?.message || 'Không thể tải thống kê người dùng và thửa ruộng.');
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  const fetchStatus = async () => {
+    try {
+      setLoading(true);
+      const headers = await getAdminHeaders();
+      const [resStatus, resLogs, fsDatasets, fsSyncLogs] = await Promise.all([
+        fetch('/api/admin/status', { headers }),
+        fetch('/api/admin/sync-logs', { headers }),
+        FirestoreService.getAdminNasaDatasets(),
+        FirestoreService.getAdminSyncLogs(),
+      ]);
+
+      const serverStatus: CentralDataStatus | null = resStatus.ok ? await resStatus.json() : null;
+      const serverLogsJson = resLogs.ok ? await resLogs.json() : { logs: [], imports: [] };
+
+      // Merge sync logs (server + persisted Firestore logs)
+      const serverLogs: SyncLogRecord[] = serverLogsJson.logs || [];
+      const mergedLogsMap = new Map<string, SyncLogRecord>();
+      for (const l of serverLogs) mergedLogsMap.set(l.id, l);
+      for (const fl of fsSyncLogs) {
+        const dup = Array.from(mergedLogsMap.values()).some(
+          (existing) =>
+            existing.syncType === fl.syncType &&
+            existing.recordsSynced === fl.recordsSynced &&
+            Math.abs(new Date(existing.startTime).getTime() - new Date(fl.startTime).getTime()) < 15000
+        );
+        if (!dup) {
+          mergedLogsMap.set(fl.id, {
+            id: fl.id,
+            syncType: fl.syncType as any,
+            targetCellsCount: fl.targetCellsCount,
+            recordsSynced: fl.recordsSynced,
+            startTime: fl.startTime,
+            endTime: fl.endTime,
+            status: fl.status,
+            latestNasaDate: fl.latestNasaDate,
+          });
+        }
+      }
+      const mergedLogs = Array.from(mergedLogsMap.values()).sort((a, b) =>
+        b.startTime.localeCompare(a.startTime)
+      );
+      setSyncLogs(mergedLogs);
+
+      // Merge data imports (server + persisted Firestore nasa_datasets)
+      const serverImports: DataImportRecord[] = serverLogsJson.imports || [];
+      const mergedImportsByVer = new Map<string, DataImportRecord>();
+      for (const imp of serverImports) mergedImportsByVer.set(imp.version, imp);
+      let fsExtraRecords = 0;
+      for (const ds of fsDatasets) {
+        if (!mergedImportsByVer.has(ds.version)) {
+          fsExtraRecords += Number(ds.recordCount) || 0;
+          const createdIso = ds.createdAt?.toDate?.()?.toISOString() || new Date().toISOString();
+          mergedImportsByVer.set(ds.version, {
+            id: ds.id,
+            fileName: ds.fileName,
+            fileSizeBytes: 0,
+            storagePath: `firestore/nasa_datasets/${ds.id}`,
+            recordCount: ds.recordCount,
+            cellCount: ds.cellCount,
+            startDate: ds.startDate,
+            endDate: ds.endDate,
+            status: ds.status,
+            version: ds.version,
+            importedBy: ds.uploadedBy || 'admin',
+            createdAt: createdIso,
+          });
+        }
+      }
+      const mergedImports = Array.from(mergedImportsByVer.values()).sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      );
+      setImports(mergedImports);
+
+      if (serverStatus) {
+        const latestCompletedFs = fsDatasets.find((d) => d.status === 'COMPLETED');
+        setStatus({
+          ...serverStatus,
+          totalRecords: serverStatus.totalRecords + fsExtraRecords,
+          activeVersion:
+            serverStatus.activeVersion === 'v2026.11-daily' && latestCompletedFs
+              ? latestCompletedFs.version
+              : serverStatus.activeVersion,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch admin data', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finalizeCompletedImportJob = async (job: any) => {
+    const data = job.result;
+    if (!data) return;
+
+    if (auth.currentUser) {
+      const safeOverrides = (data.batchSummary?.representativeOverrides || [])
+        .slice(0, 300)
+        .map((r: any) => ({
+          cell_id: String(r.cell_id || ''),
+          date: String(r.date || ''),
+          indicator_code: String(r.indicator_code || ''),
+          value: Number(r.value) || 0,
+        }));
+
+      await FirestoreService.saveNasaDatasetUpload(auth.currentUser.uid, {
+        version: String(data.importRecord.version || `v${Date.now()}`).slice(0, 80),
+        fileName: String(data.importRecord.fileName || 'NASA POWER Batch CSV').slice(0, 200),
+        recordCount: Number(data.importRecord.recordCount) || 0,
+        cellCount: Number(data.importRecord.cellCount) || 0,
+        startDate: String(data.importRecord.startDate || '').slice(0, 20),
+        endDate: String(data.importRecord.endDate || '').slice(0, 20),
+        status: 'COMPLETED',
+        sampleOverrides: safeOverrides,
+      });
+      await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
+        syncType: 'CSV_UPLOAD',
+        targetCellsCount: Number(data.importRecord.cellCount) || 0,
+        recordsSynced: Number(data.importRecord.recordCount) || 0,
+        status: 'SUCCESS',
+        latestNasaDate: String(data.importRecord.endDate || '').slice(0, 20),
+      });
+    }
+
+    const completedSummary: StoredCsvSessionState['lastCompletedBatch'] = {
+      version: data.importRecord.version,
+      totalFolders: data.batchSummary?.totalFolders || 1,
+      totalFiles: data.batchSummary?.totalFiles || 1,
+      validRows: Number(data.importRecord.recordCount) || 0,
+      uniqueCells: Number(data.importRecord.cellCount) || 0,
+      startDate: data.importRecord.startDate || '',
+      endDate: data.importRecord.endDate || '',
+      indicatorsDetected: data.batchSummary?.preview?.indicatorsDetected || [],
+      sampleRows: data.batchSummary?.preview?.sampleRows || [],
+      completedAt: new Date().toISOString(),
+    };
+
+    setLastCompletedBatch(completedSummary);
+    setImportSuccessMsg(
+      `Đã nhập thành công ${completedSummary.totalFolders} thư mục (${completedSummary.totalFiles} tệp CSV) với ${completedSummary.validRows.toLocaleString('vi-VN')} bản ghi vào kho NASA! Phiên bản: ${completedSummary.version}`
+    );
+    queuedFilesRef.current = [];
+    setQueuedFiles([]);
+    setBatchPreview(null);
+    setCsvProgress(null);
+    setImporting(false);
+
+    await CsvQueueStorage.savePatch({
+      queuedFiles: [],
+      batchPreview: null,
+      activeImportJobId: null,
+      readingProgress: null,
+      lastCompletedBatch: completedSummary,
+    });
+
+    onDatasetUpdated?.();
+    fetchPlatformStats();
+    fetchStatus();
+  };
+
+  const pollImportJob = async (jobId: string) => {
+    if (pollTimerRef.current) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    try {
+      const headers = await getAdminHeaders();
+      const res = await fetch(`/api/admin/import-job/${encodeURIComponent(jobId)}`, { headers });
+      if (!res.ok) {
+        setImporting(false);
+        setCsvProgress(null);
+        await CsvQueueStorage.savePatch({ activeImportJobId: null });
+        return;
+      }
+      const { job } = await res.json();
+      if (!job) return;
+
+      if (job.status === 'RUNNING') {
+        setImporting(true);
+        setCsvProgress({
+          active: true,
+          phase: 'importing',
+          totalFiles: job.totalFiles,
+          processedFiles: job.processedFiles,
+          totalBytes: job.totalBytes,
+          processedBytes: job.processedBytes,
+          processedRows: job.processedRows,
+          currentFileName: job.currentFileName || '',
+          percent: job.percent || 0,
+          etaSeconds: job.etaSeconds ?? null,
+          startedAt: job.startedAt,
+        });
+        pollTimerRef.current = window.setTimeout(() => {
+          pollImportJob(jobId);
+        }, 350);
+      } else if (job.status === 'COMPLETED') {
+        await finalizeCompletedImportJob(job);
+      } else if (job.status === 'FAILED') {
+        setImporting(false);
+        setCsvProgress(null);
+        setActionErrorMsg(job.error || 'Quá trình nhập CSV trên máy chủ gặp lỗi.');
+        await CsvQueueStorage.savePatch({ activeImportJobId: null });
+      }
+    } catch {
+      pollTimerRef.current = window.setTimeout(() => {
+        pollImportJob(jobId);
+      }, 1000);
+    }
+  };
+
+  useEffect(() => {
+    fetchPlatformStats();
+    fetchStatus();
+
+    let mounted = true;
+    (async () => {
+      const saved = await CsvQueueStorage.loadState();
+      if (!mounted) return;
+
+      if (saved?.lastCompletedBatch) {
+        setLastCompletedBatch(saved.lastCompletedBatch);
+      }
+
+      if (saved?.activeImportJobId) {
+        setRestoredNotice('Đã khôi phục thanh trạng thái ETA tiến trình nhập CSV sau khi tải lại trang.');
+        pollImportJob(saved.activeImportJobId);
+      } else if (saved?.queuedFiles && saved.queuedFiles.length > 0) {
+        queuedFilesRef.current = saved.queuedFiles;
+        setQueuedFiles(saved.queuedFiles);
+        if (saved.batchPreview) {
+          setBatchPreview(saved.batchPreview);
+          setRestoredNotice(
+            `Đã khôi phục ${saved.queuedFiles.length} tệp CSV và thông tin phân tích trước khi tải lại trang.`
+          );
+        } else {
+          setRestoredNotice(
+            `Đã khôi phục ${saved.queuedFiles.length} tệp CSV đã đọc trước khi tải lại trang — đang phân tích lại...`
+          );
+          await runBatchPreview(saved.queuedFiles);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      if (pollTimerRef.current) {
+        window.clearTimeout(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Derived filters for All Fields table
+  const availableProvinces = useMemo(() => {
+    const set = new Set<string>();
+    (platformStats?.allFields || []).forEach((f) => {
+      if (f.province) set.add(f.province);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
+  }, [platformStats]);
+
+  const availableCrops = useMemo(() => {
+    const set = new Set<string>();
+    (platformStats?.allFields || []).forEach((f) => {
+      if (f.cropName) set.add(f.cropName);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
+  }, [platformStats]);
+
+  const filteredFields = useMemo(() => {
+    const all = platformStats?.allFields || [];
+    const q = fieldSearch.trim().toLowerCase();
+    return all.filter((f) => {
+      if (provinceFilter !== 'ALL' && f.province !== provinceFilter) return false;
+      if (cropFilter !== 'ALL' && f.cropName !== cropFilter) return false;
+      if (!q) return true;
+      return (
+        f.name.toLowerCase().includes(q) ||
+        f.ownerName.toLowerCase().includes(q) ||
+        f.ownerEmail.toLowerCase().includes(q) ||
+        f.province.toLowerCase().includes(q) ||
+        f.district.toLowerCase().includes(q) ||
+        f.cropName.toLowerCase().includes(q) ||
+        f.nasaCellId.toLowerCase().includes(q)
+      );
+    });
+  }, [platformStats, fieldSearch, provinceFilter, cropFilter]);
+
+  // Folder grouping summary for queued CSV files
+  const queuedFolders = useMemo(() => {
+    const map = new Map<string, { folderName: string; fileCount: number; totalBytes: number }>();
+    for (const f of queuedFiles) {
+      const cur = map.get(f.folderName) || {
+        folderName: f.folderName,
+        fileCount: 0,
+        totalBytes: 0,
+      };
+      cur.fileCount += 1;
+      cur.totalBytes += f.size;
+      map.set(f.folderName, cur);
+    }
+    return Array.from(map.values());
+  }, [queuedFiles]);
+
+  const handleToggleUserAdmin = async (uid: string, email: string, currentIsAdmin: boolean) => {
+    setTogglingAdminUid(uid);
+    setActionErrorMsg(null);
+    setAdminActionSuccess(null);
+    try {
+      await FirestoreService.setAdminRole(uid, email, !currentIsAdmin);
+      await fetchPlatformStats();
+      setAdminActionSuccess(
+        !currentIsAdmin
+          ? `Đã cấp quyền Quản trị viên cho ${email || uid}.`
+          : `Đã gỡ quyền Quản trị viên của ${email || uid}.`
+      );
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'Không thể cập nhật quyền quản trị.');
+    } finally {
+      setTogglingAdminUid(null);
+    }
+  };
+
+  const handleAddAdminByEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetEmail = adminEmailInput.trim().toLowerCase();
+    setActionErrorMsg(null);
+    setAdminActionSuccess(null);
+
+    if (!targetEmail || !targetEmail.includes('@')) {
+      setActionErrorMsg('Vui lòng nhập địa chỉ Email Google hợp lệ của người cần cấp quyền Admin.');
+      return;
+    }
+    if (targetEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+      setAdminActionSuccess(`${BOOTSTRAP_ADMIN_EMAIL} đã là Admin gốc mặc định của hệ thống.`);
+      setAdminEmailInput('');
+      return;
+    }
+
+    const matchedUser = platformStats?.users.find(
+      (u) => u.email.trim().toLowerCase() === targetEmail
+    );
+    if (!matchedUser) {
+      setActionErrorMsg(
+        `Chưa tìm thấy tài khoản "${targetEmail}" trong danh sách người dùng. Người này cần đăng nhập Google vào CropCast ít nhất 1 lần trước để hệ thống ghi nhận UID rồi bạn bấm Cấp quyền Admin.`
+      );
+      return;
+    }
+    if (matchedUser.isAdmin) {
+      setAdminActionSuccess(`Tài khoản ${matchedUser.email} đã có quyền Quản trị viên rồi.`);
+      setAdminEmailInput('');
+      return;
+    }
+
+    await handleToggleUserAdmin(matchedUser.uid, matchedUser.email, false);
+    setAdminEmailInput('');
+  };
+
+  const handleManualNasaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    const numericVal = parseFloat(manualValue);
+    if (!Number.isFinite(numericVal)) {
+      setActionErrorMsg('Giá trị đo NASA phải là số hợp lệ.');
+      return;
+    }
+    setSavingManual(true);
+    setActionErrorMsg(null);
+    setManualSuccessMsg(null);
+    try {
+      await FirestoreService.addManualNasaObservation(auth.currentUser.uid, {
+        cellId: manualCellId,
+        date: manualDate,
+        indicatorCode: manualIndicator,
+        value: numericVal,
+      });
+      await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
+        syncType: 'MANUAL_ENTRY',
+        targetCellsCount: 1,
+        recordsSynced: 1,
+        status: 'SUCCESS',
+        latestNasaDate: manualDate,
+      });
+      setManualSuccessMsg(
+        `Đã lưu chỉ số ${manualIndicator} = ${numericVal} cho ô lưới ${manualCellId} ngày ${manualDate} lên hệ thống!`
+      );
+      onDatasetUpdated?.();
+      fetchPlatformStats();
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'Không thể lưu bản ghi NASA thủ công.');
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const handleTriggerSync = async () => {
+    setSyncing(true);
+    setActionErrorMsg(null);
+    setSyncMessage('Đang kết nối NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...');
+    try {
+      const headers = await getAdminHeaders(true);
+      const res = await fetch('/api/admin/sync', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncMessage(
+          `Đồng bộ thành công! Đã xử lý ${data.recordsSynced} bản ghi. Dữ liệu mới nhất: ${data.latestNasaDate}`
+        );
+        if (auth.currentUser) {
+          await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
+            syncType: 'NASA_POWER_API',
+            targetCellsCount: 531,
+            recordsSynced: Number(data.recordsSynced) || 0,
+            status: 'SUCCESS',
+            latestNasaDate: data.latestNasaDate,
+          });
+        }
+      } else {
+        setSyncMessage(`Lỗi đồng bộ: ${data.error || 'NASA API không phản hồi'}`);
+      }
+      fetchStatus();
+    } catch (err: any) {
+      setSyncMessage(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMessage(null), 8000);
+    }
+  };
+
+  const handleToggleAutoSync = async () => {
+    if (!status) return;
+    const newState = !status.autoSyncEnabled;
+    try {
+      const headers = await getAdminHeaders(true);
+      const res = await fetch('/api/admin/toggle-auto-sync', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ enabled: newState }),
+      });
+      if (res.ok) {
+        setStatus({ ...status, autoSyncEnabled: newState });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const runBatchPreview = async (items: QueuedCsvFile[]) => {
+    if (items.length === 0) {
+      setBatchPreview(null);
+      await CsvQueueStorage.savePatch({ batchPreview: null });
+      return;
+    }
+    setPreviewing(true);
+    setActionErrorMsg(null);
+    const totalBytes = items.reduce((sum, f) => sum + f.size, 0);
+    setCsvProgress({
+      active: true,
+      phase: 'analyzing',
+      totalFiles: items.length,
+      processedFiles: items.length,
+      totalBytes,
+      processedBytes: totalBytes,
+      currentFileName: 'Đang tổng hợp & kiểm tra trùng lặp...',
+      percent: 92,
+      etaSeconds: 1,
+      startedAt: Date.now(),
+    });
+    try {
+      const headers = await getAdminHeaders(true);
+      const res = await fetch('/api/admin/preview-batch', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          files: items.map((f) => ({
+            fileName: f.fileName,
+            folderName: f.folderName,
+            content: f.content,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBatchPreview(data);
+        await CsvQueueStorage.savePatch({ batchPreview: data, readingProgress: null });
+      } else {
+        setActionErrorMsg(data.error || 'Không thể kiểm tra cấu trúc các tệp CSV.');
+      }
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'Lỗi khi kiểm tra hàng loạt tệp CSV.');
+    } finally {
+      setPreviewing(false);
+      setCsvProgress((prev) => (prev?.phase === 'importing' ? prev : null));
+    }
+  };
+
+  const appendFilesToQueue = async (
+    entries: Array<{ file: File; folderName: string }>
+  ) => {
+    const csvEntries = entries.filter((item) => isCsvOrTextFile(item.file.name));
+    if (csvEntries.length === 0) {
+      setActionErrorMsg('Không tìm thấy tệp định dạng .csv trong thư mục hoặc danh sách vừa chọn.');
+      return;
+    }
+
+    setReadingQueue(true);
+    setActionErrorMsg(null);
+    setImportSuccessMsg(null);
+    setRestoredNotice(null);
+
+    const startedAt = Date.now();
+    const totalFiles = csvEntries.length;
+    const totalBytes = csvEntries.reduce((sum, e) => sum + (e.file.size || 0), 0);
+    let processedFiles = 0;
+    let processedBytes = 0;
+
+    setCsvProgress({
+      active: true,
+      phase: 'reading',
+      totalFiles,
+      processedFiles: 0,
+      totalBytes,
+      processedBytes: 0,
+      currentFileName: csvEntries[0].file.name,
+      percent: 0,
+      etaSeconds: null,
+      startedAt,
+    });
+
+    try {
+      const map = new Map<string, QueuedCsvFile>();
+      for (const existing of queuedFilesRef.current) map.set(existing.key, existing);
+
+      const CHUNK_SIZE = 4;
+      for (let i = 0; i < csvEntries.length; i += CHUNK_SIZE) {
+        const chunk = csvEntries.slice(i, i + CHUNK_SIZE);
+        const loadedChunk = await Promise.all(
+          chunk.map(async ({ file, folderName }) => {
+            const content = await readFileAsText(file);
+            const safeFolder = folderName || 'Tệp tải lẻ';
+            return {
+              key: `${safeFolder}::${file.name}`,
+              fileName: file.name,
+              folderName: safeFolder,
+              size: file.size,
+              content,
+            } satisfies QueuedCsvFile;
+          })
+        );
+
+        for (const item of loadedChunk) {
+          map.set(item.key, item);
+          processedFiles += 1;
+          processedBytes += item.size || 0;
+        }
+
+        const mergedSoFar = Array.from(map.values());
+        queuedFilesRef.current = mergedSoFar;
+        setQueuedFiles(mergedSoFar);
+
+        const ratio =
+          totalBytes > 0
+            ? processedBytes / totalBytes
+            : processedFiles / Math.max(1, totalFiles);
+        const elapsedSec = (Date.now() - startedAt) / 1000;
+        const etaSeconds =
+          ratio > 0.03 && elapsedSec > 0.05
+            ? Math.max(1, Math.ceil((elapsedSec / ratio) * (1 - ratio)))
+            : null;
+        const currentFileName = chunk[chunk.length - 1]?.file.name || '';
+
+        setCsvProgress({
+          active: true,
+          phase: 'reading',
+          totalFiles,
+          processedFiles,
+          totalBytes,
+          processedBytes,
+          currentFileName,
+          percent: Math.min(88, Math.round(ratio * 88)),
+          etaSeconds,
+          startedAt,
+        });
+
+        await CsvQueueStorage.savePatch({
+          queuedFiles: mergedSoFar,
+          readingProgress: {
+            isReading: true,
+            totalFiles,
+            processedFiles,
+            totalBytes,
+            processedBytes,
+            currentFileName,
+            startedAt,
+          },
+        });
+      }
+
+      const mergedQueue = Array.from(map.values());
+      await runBatchPreview(mergedQueue);
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'Lỗi khi đọc tệp CSV từ thư mục.');
+      setCsvProgress(null);
+    } finally {
+      setReadingQueue(false);
+    }
+  };
+
+  const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = Array.from(e.target.files || []);
+    if (fileInputRefResetNeeded(e.target)) {
+      e.target.value = '';
+    }
+    if (fileList.length === 0) return;
+
+    const prepared = fileList.map((file) => {
+      const relPath = (file as any).webkitRelativePath as string | undefined;
+      let folderName = 'Thư mục CSV';
+      if (relPath && relPath.includes('/')) {
+        const parts = relPath.split('/').filter(Boolean);
+        folderName = parts.length > 1 ? parts.slice(0, -1).join('/') : parts[0];
+      }
+      return { file, folderName };
+    });
+
+    await appendFilesToQueue(prepared);
+  };
+
+  const handleFilesInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = Array.from(e.target.files || []);
+    if (fileInputRefResetNeeded(e.target)) {
+      e.target.value = '';
+    }
+    if (fileList.length === 0) return;
+
+    const prepared = fileList.map((file) => ({
+      file,
+      folderName: 'Tệp CSV chọn trực tiếp',
+    }));
+
+    await appendFilesToQueue(prepared);
+  };
+
+  function fileInputRefResetNeeded(el: HTMLInputElement | null): el is HTMLInputElement {
+    return !!el;
+  }
+
+  const handleDropFoldersOrFiles = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    const items = Array.from(e.dataTransfer.items || []);
+    const collected: Array<{ file: File; folderName: string }> = [];
+
+    if (items.length > 0 && typeof (items[0] as any).webkitGetAsEntry === 'function') {
+      setReadingQueue(true);
+      try {
+        for (const item of items) {
+          const entry = (item as any).webkitGetAsEntry?.();
+          if (entry) {
+            const found = await collectFilesFromEntry(entry, '');
+            collected.push(...found);
+          }
+        }
+      } finally {
+        setReadingQueue(false);
+      }
+    } else {
+      const files = Array.from(e.dataTransfer.files || []);
+      for (const file of files) {
+        collected.push({ file, folderName: 'Tệp kéo thả' });
+      }
+    }
+
+    if (collected.length > 0) {
+      await appendFilesToQueue(collected);
+    } else {
+      setActionErrorMsg('Không tìm thấy tệp .csv hợp lệ trong các thư mục vừa kéo thả.');
+    }
+  };
+
+  const handleRemoveFolderFromQueue = async (folderName: string) => {
+    const remaining = queuedFilesRef.current.filter((f) => f.folderName !== folderName);
+    queuedFilesRef.current = remaining;
+    setQueuedFiles(remaining);
+    await CsvQueueStorage.savePatch({ queuedFiles: remaining });
+    if (remaining.length === 0) {
+      setBatchPreview(null);
+      await CsvQueueStorage.savePatch({ batchPreview: null });
+    } else {
+      await runBatchPreview(remaining);
+    }
+  };
+
+  const handleClearQueue = async () => {
+    queuedFilesRef.current = [];
+    setQueuedFiles([]);
+    setBatchPreview(null);
+    setActionErrorMsg(null);
+    setRestoredNotice(null);
+    await CsvQueueStorage.savePatch({
+      queuedFiles: [],
+      batchPreview: null,
+      readingProgress: null,
+    });
+  };
+
+  const handleCommitBatchImport = async () => {
+    if (queuedFiles.length === 0 || !batchPreview || batchPreview.preview.validRows === 0) return;
+
+    setImporting(true);
+    setActionErrorMsg(null);
+    const totalBytes = queuedFiles.reduce((sum, f) => sum + f.size, 0);
+    setCsvProgress({
+      active: true,
+      phase: 'importing',
+      totalFiles: queuedFiles.length,
+      processedFiles: 0,
+      totalBytes,
+      processedBytes: 0,
+      processedRows: 0,
+      currentFileName: queuedFiles[0]?.fileName || '',
+      percent: 2,
+      etaSeconds: null,
+      startedAt: Date.now(),
+    });
+    try {
+      const headers = await getAdminHeaders(true);
+      const res = await fetch('/api/admin/import-batch-async', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          files: queuedFiles.map((f) => ({
+            fileName: f.fileName,
+            folderName: f.folderName,
+            content: f.content,
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.job?.jobId) {
+        await CsvQueueStorage.savePatch({ activeImportJobId: data.job.jobId });
+        pollImportJob(data.job.jobId);
+      } else {
+        setImporting(false);
+        setCsvProgress(null);
+        setActionErrorMsg(data.error || 'Không thể nhập hàng loạt dữ liệu CSV.');
+      }
+    } catch (err: any) {
+      setImporting(false);
+      setCsvProgress(null);
+      setActionErrorMsg(`Lỗi khi nhập dữ liệu: ${err.message}`);
+    }
+  };
+
+  const handleRollback = async (version: string) => {
+    setActionErrorMsg(null);
+    try {
+      const headers = await getAdminHeaders(true);
+      const res = await fetch('/api/admin/rollback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ version }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setRollbackSuccessMsg(data.message);
+        setConfirmRollbackVer(null);
+        fetchStatus();
+        setTimeout(() => setRollbackSuccessMsg(null), 6000);
+      } else {
+        setActionErrorMsg(data.error || 'Không thể khôi phục phiên bản.');
+      }
+    } catch (err: any) {
+      setActionErrorMsg(err.message);
+    }
+  };
+
+  const sampleCsvContent = `-BEGIN HEADER-
+NASA/POWER CERES/MERRA2 Native Resolution Daily Data
+Location: Latitude  21.0285   Longitude 105.8542
+-END HEADER-
+YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_DWN
+2026,11,08,24.6,20.1,29.3,6.4,0.74,0.79,85.2,13.5
+2026,11,09,25.1,20.8,30.0,1.2,0.73,0.76,82.0,15.8`;
+
+  const handleDownloadSampleCsv = () => {
+    const blob = new Blob([sampleCsvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'nasa_power_sample_vietnam.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Banner & Admin Header */}
+      <div className="bg-gradient-to-r from-stone-900 via-emerald-950 to-stone-900 rounded-2xl p-6 text-white shadow-md border border-stone-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+              <Lock className="w-3 h-3" /> Cổng Quản Trị Tổng Thể Hệ Thống
+            </span>
+            <span className="text-xs text-stone-400">
+              Toàn bộ nông dân · Tất cả thửa ruộng · Nhập dữ liệu NASA POWER nhiều thư mục CSV
+            </span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight mt-1">
+            Quản trị Tổng thể CropCast &amp; Kho Dữ liệu NASA POWER
+          </h1>
+          <p className="text-xs sm:text-sm text-stone-300 mt-0.5">
+            Giám sát tổng quan toàn bộ ứng dụng, kiểm tra danh sách mọi thửa ruộng trên hệ thống và nhập dữ liệu NASA POWER bằng nhiều thư mục CSV cùng lúc.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              fetchPlatformStats();
+              fetchStatus();
+            }}
+            className="px-3.5 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-100 border border-stone-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${statsLoading || loading ? 'animate-spin' : ''}`} />
+            Làm mới số liệu
+          </button>
+          <button
+            type="button"
+            onClick={handleTriggerSync}
+            disabled={syncing}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Đang đồng bộ...' : 'Đồng bộ NASA ngay'}
+          </button>
+        </div>
+      </div>
+
+      {/* Admin Sub-navigation Tabs (4 Tabs) */}
+      <div className="flex flex-wrap gap-2 bg-white p-1.5 rounded-2xl border border-stone-200 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setAdminTab('overview')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            adminTab === 'overview'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:bg-stone-100'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" /> Tổng quan Hệ thống
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminTab('fields')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            adminTab === 'fields'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:bg-stone-100'
+          }`}
+        >
+          <MapPin className="w-4 h-4" /> Tất cả Thửa ruộng ({platformStats?.allFields.length ?? '—'})
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminTab('users')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            adminTab === 'users'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:bg-stone-100'
+          }`}
+        >
+          <Users className="w-4 h-4" /> Người dùng ({platformStats?.totalUsers ?? '—'})
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminTab('nasa')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            adminTab === 'nasa'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:bg-stone-100'
+          }`}
+        >
+          <Database className="w-4 h-4" /> Dữ liệu NASA POWER (CSV nhiều thư mục)
+        </button>
+      </div>
+
+      {syncMessage && (
+        <div className="p-3.5 bg-emerald-100 border border-emerald-300 text-emerald-950 rounded-xl text-xs font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>{syncMessage}</span>
+          </div>
+          <button type="button" onClick={() => setSyncMessage(null)} className="text-emerald-800 cursor-pointer">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {statsError && (
+        <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold flex items-center justify-between">
+          <span>{statsError}</span>
+          <button type="button" onClick={() => setStatsError(null)} className="cursor-pointer font-bold">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {actionErrorMsg && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-semibold flex items-center justify-between">
+          <span>{actionErrorMsg}</span>
+          <button type="button" onClick={() => setActionErrorMsg(null)} className="cursor-pointer font-bold">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {rollbackSuccessMsg && (
+        <div className="p-3.5 bg-blue-100 border border-blue-300 text-blue-950 rounded-xl text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
+          <span>{rollbackSuccessMsg}</span>
+        </div>
+      )}
+
+      {/* TAB 1: PLATFORM OVERVIEW & STATS */}
+      {adminTab === 'overview' && (
+        <div className="space-y-6">
+          {/* 4 Live Firestore Platform KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+              <div className="flex items-center justify-between text-stone-500">
+                <span className="text-[11px] uppercase font-bold">Tổng số người dùng</span>
+                <Users className="w-4 h-4 text-emerald-700" />
+              </div>
+              <div className="text-2xl font-black text-stone-900 tabular-nums">
+                {statsLoading ? '...' : platformStats?.totalUsers ?? 0}
+              </div>
+              <div className="text-[11px] text-stone-500">
+                Tài khoản nông dân &amp; quản trị đã đăng ký
+              </div>
+            </div>
+
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+              <div className="flex items-center justify-between text-stone-500">
+                <span className="text-[11px] uppercase font-bold">Tổng số thửa ruộng</span>
+                <MapPin className="w-4 h-4 text-blue-700" />
+              </div>
+              <div className="text-2xl font-black text-stone-900 tabular-nums">
+                {statsLoading ? '...' : platformStats?.totalFields ?? 0}
+              </div>
+              <div className="text-[11px] text-emerald-700 font-semibold">
+                Tổng diện tích: {statsLoading ? '...' : platformStats?.totalAreaHa ?? 0} ha
+              </div>
+            </div>
+
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+              <div className="flex items-center justify-between text-stone-500">
+                <span className="text-[11px] uppercase font-bold">Việc đồng ruộng &amp; Phản hồi</span>
+                <CheckCircle2 className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="text-2xl font-black text-stone-900 tabular-nums">
+                {statsLoading
+                  ? '...'
+                  : `${platformStats?.completedTasks ?? 0}/${platformStats?.totalTasks ?? 0}`}
+              </div>
+              <div className="text-[11px] text-stone-500">
+                Phản hồi thực địa đã ghi nhận: <strong>{platformStats?.totalFeedbacks ?? 0}</strong>
+              </div>
+            </div>
+
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+              <div className="flex items-center justify-between text-stone-500">
+                <span className="text-[11px] uppercase font-bold">Chia sẻ &amp; Gói NASA</span>
+                <Share2 className="w-4 h-4 text-purple-700" />
+              </div>
+              <div className="text-2xl font-black text-stone-900 tabular-nums">
+                {statsLoading ? '...' : platformStats?.totalActiveShares ?? 0}
+              </div>
+              <div className="text-[11px] text-stone-500">
+                Lượt chia sẻ ruộng · <strong>{platformStats?.totalNasaDatasets ?? 0}</strong> gói NASA đã nạp
+              </div>
+            </div>
+          </div>
+
+          {/* Field Distribution Breakdowns */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-xs">
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+              <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-emerald-700" /> Phân bố ruộng theo Tỉnh / Vùng
+              </h3>
+              {!platformStats || platformStats.fieldsByProvince.length === 0 ? (
+                <p className="text-stone-400 italic py-4">Chưa có thửa ruộng nào được tạo.</p>
+              ) : (
+                <div className="space-y-2">
+                  {platformStats.fieldsByProvince.map((p) => (
+                    <div
+                      key={p.province}
+                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
+                    >
+                      <span className="font-semibold text-stone-800">{p.province}</span>
+                      <span className="font-mono font-bold text-emerald-800">
+                        {p.count} thửa ({p.areaHa} ha)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+              <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                <Sprout className="w-4 h-4 text-emerald-700" /> Cơ cấu Cây trồng đang canh tác
+              </h3>
+              {!platformStats || platformStats.fieldsByCrop.length === 0 ? (
+                <p className="text-stone-400 italic py-4">Chưa có dữ liệu cây trồng.</p>
+              ) : (
+                <div className="space-y-2">
+                  {platformStats.fieldsByCrop.map((c) => (
+                    <div
+                      key={c.cropName}
+                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
+                    >
+                      <span className="font-semibold text-stone-800">{c.cropName}</span>
+                      <span className="font-mono font-bold text-stone-900">{c.count} thửa</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+              <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-amber-700" /> Phân loại Chất đất trên toàn hệ thống
+              </h3>
+              {!platformStats || platformStats.fieldsBySoil.length === 0 ? (
+                <p className="text-stone-400 italic py-4">Chưa có dữ liệu chất đất.</p>
+              ) : (
+                <div className="space-y-2">
+                  {platformStats.fieldsBySoil.map((s) => (
+                    <div
+                      key={s.soilType}
+                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
+                    >
+                      <span className="font-semibold text-stone-800">
+                        {getSoilLabel(s.soilType as any)}
+                      </span>
+                      <span className="font-mono font-bold text-stone-900">{s.count} thửa</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Latest Fields Snapshot Across App */}
+          <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-700" />
+                  Thửa ruộng mới nhất trên toàn hệ thống
+                </h3>
+                <p className="text-xs text-stone-500">
+                  Tổng quan các thửa ruộng gần đây của tất cả người dùng. Nhấn để xem bản đồ vệ tinh hoặc mở danh sách đầy đủ.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdminTab('fields')}
+                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition cursor-pointer self-start sm:self-auto"
+              >
+                Xem tất cả thửa ruộng →
+              </button>
+            </div>
+
+            {!platformStats || platformStats.allFields.length === 0 ? (
+              <p className="text-xs text-stone-400 italic py-4">Chưa có thửa ruộng nào trên hệ thống.</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {platformStats.allFields.slice(0, 6).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setInspectingField(f)}
+                    className="text-left p-4 rounded-xl border border-stone-200 bg-stone-50/70 hover:bg-emerald-50/60 hover:border-emerald-300 transition space-y-2 cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-sm text-stone-900 line-clamp-1">{f.name}</div>
+                        <div className="text-[11px] text-stone-500">
+                          {f.district ? `${f.district}, ` : ''}{f.province} · {f.areaHa} ha
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        {f.cropName}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-stone-600 pt-1 border-t border-stone-200/70">
+                      <span className="truncate max-w-[170px]">Chủ: <strong>{f.ownerName}</strong></span>
+                      <span className="font-mono text-emerald-700 font-semibold">{f.nasaCellId}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: ALL FIELDS ACROSS ENTIRE APP */}
+      {adminTab === 'fields' && (
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-stone-100 pb-4">
+            <div>
+              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-emerald-700" />
+                Tổng hợp Toàn bộ Thửa ruộng trên CropCast ({filteredFields.length}/{platformStats?.allFields.length ?? 0})
+              </h2>
+              <p className="text-xs text-stone-500">
+                Quản trị viên xem toàn bộ thửa ruộng của tất cả tài khoản, chủ sở hữu, tọa độ vệ tinh và điểm dữ liệu NASA gần nhất.
+              </p>
+            </div>
+
+            {/* Search & Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={fieldSearch}
+                  onChange={(e) => setFieldSearch(e.target.value)}
+                  placeholder="Tìm tên ruộng, chủ sở hữu, email, cây..."
+                  className="pl-8 pr-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-900 w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <select
+                value={provinceFilter}
+                onChange={(e) => setProvinceFilter(e.target.value)}
+                className="px-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-800"
+              >
+                <option value="ALL">Tất cả Tỉnh/Thành</option>
+                {availableProvinces.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+
+              <select
+                value={cropFilter}
+                onChange={(e) => setCropFilter(e.target.value)}
+                className="px-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-800"
+              >
+                <option value="ALL">Tất cả Cây trồng</option>
+                {availableCrops.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {statsLoading ? (
+            <div className="p-8 text-center text-xs text-stone-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> Đang tải toàn bộ thửa ruộng...
+            </div>
+          ) : filteredFields.length === 0 ? (
+            <div className="p-8 text-center text-xs text-stone-400">
+              Không có thửa ruộng nào phù hợp bộ lọc hiện tại.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-stone-200 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px] uppercase">
+                  <tr>
+                    <th className="p-3 font-bold">Thửa ruộng &amp; Địa điểm</th>
+                    <th className="p-3 font-bold">Chủ sở hữu</th>
+                    <th className="p-3 font-bold">Tọa độ &amp; Ô lưới NASA</th>
+                    <th className="p-3 font-bold">Cây trồng &amp; Giai đoạn</th>
+                    <th className="p-3 font-bold">Đất &amp; Nguồn nước</th>
+                    <th className="p-3 font-bold">Diện tích</th>
+                    <th className="p-3 font-bold">Chia sẻ</th>
+                    <th className="p-3 font-bold text-right">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {filteredFields.map((f) => (
+                    <tr key={f.id} className="hover:bg-stone-50/80">
+                      <td className="p-3">
+                        <div className="font-bold text-stone-900">{f.name}</div>
+                        <div className="text-[11px] text-stone-500">
+                          {f.district ? `${f.district}, ` : ''}{f.province}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-semibold text-stone-800">{f.ownerName}</div>
+                        <div className="text-[11px] font-mono text-stone-500">
+                          {f.ownerEmail || f.ownerId.slice(0, 12)}
+                        </div>
+                      </td>
+                      <td className="p-3 font-mono">
+                        <div className="text-stone-800 text-[11px]">
+                          {f.lat.toFixed(4)}°B, {f.lon.toFixed(4)}°Đ
+                        </div>
+                        <div className="text-[11px] text-emerald-700 font-bold">
+                          {f.nasaCellId} ({f.nasaDistanceKm} km)
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-bold text-emerald-900">{f.cropName}</div>
+                        <div className="text-[11px] text-stone-500">
+                          Giống: {f.cropVariety} · {f.currentStage}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-semibold text-stone-800">
+                          {getSoilLabel(f.soilType)}
+                        </div>
+                        <div className="text-[11px] text-stone-500">
+                          {WATER_LABELS[f.waterSourceType] || 'Nguồn nước khác'}
+                        </div>
+                      </td>
+                      <td className="p-3 font-mono font-bold text-stone-900 tabular-nums">
+                        {f.areaHa} ha
+                      </td>
+                      <td className="p-3">
+                        {f.sharedCount > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold text-[11px]">
+                            <Share2 className="w-3 h-3" /> {f.sharedCount}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-stone-400">Riêng tư</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setInspectingField(f)}
+                          className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold transition inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Xem chi tiết
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: USERS DIRECTORY & ADMIN ROLE ASSIGNMENT */}
+      {adminTab === 'users' && (
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-700" />
+                Danh sách Tài khoản Nông dân &amp; Quản trị viên
+              </h2>
+              <p className="text-xs text-stone-500">
+                Admin gốc mặc định: <strong className="font-mono text-stone-800">{BOOTSTRAP_ADMIN_EMAIL}</strong>. Quản trị viên có thể cấp hoặc gỡ quyền Admin cho các tài khoản Google khác.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Add Admin by Email */}
+          <form
+            onSubmit={handleAddAdminByEmail}
+            className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl flex flex-col sm:flex-row items-stretch sm:items-end gap-3 text-xs"
+          >
+            <div className="flex-1 space-y-1">
+              <label className="font-bold text-emerald-950 block">
+                Thêm Quản trị viên mới bằng Email Google
+              </label>
+              <input
+                type="email"
+                value={adminEmailInput}
+                onChange={(e) => setAdminEmailInput(e.target.value)}
+                placeholder="Nhập email Google đã từng đăng nhập CropCast (VD: dongnghiep@gmail.com)"
+                className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={statsLoading || togglingAdminUid !== null}
+              className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+            >
+              <ShieldCheck className="w-4 h-4" /> Thêm Admin
+            </button>
+          </form>
+
+          {adminActionSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                {adminActionSuccess}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAdminActionSuccess(null)}
+                className="text-emerald-700 cursor-pointer font-bold"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {statsLoading ? (
+            <div className="p-8 text-center text-xs text-stone-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> Đang tải danh sách tài khoản...
+            </div>
+          ) : !platformStats || platformStats.users.length === 0 ? (
+            <div className="p-8 text-center text-xs text-stone-400">
+              Chưa có người dùng nào đăng ký tài khoản trên hệ thống.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-stone-200 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px] uppercase">
+                  <tr>
+                    <th className="p-3 font-bold">Người dùng</th>
+                    <th className="p-3 font-bold">Email / Tài khoản</th>
+                    <th className="p-3 font-bold">Vai trò</th>
+                    <th className="p-3 font-bold">Số ruộng</th>
+                    <th className="p-3 font-bold">Tổng diện tích</th>
+                    <th className="p-3 font-bold">Ngày tham gia</th>
+                    <th className="p-3 font-bold text-right">Phân quyền</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {platformStats.users.map((u) => {
+                    const isBootstrap =
+                      u.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+                    return (
+                      <tr key={u.uid} className="hover:bg-stone-50/70">
+                        <td className="p-3 font-bold text-stone-900">{u.displayName}</td>
+                        <td className="p-3 font-mono text-stone-600">{u.email || '—'}</td>
+                        <td className="p-3">
+                          {u.isAdmin ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 font-bold text-[11px]">
+                              <ShieldCheck className="w-3 h-3 text-amber-700" /> Quản trị viên
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-semibold text-[11px]">
+                              <UserCheck className="w-3 h-3" /> Nông dân
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-stone-900 tabular-nums">{u.fieldCount}</td>
+                        <td className="p-3 font-mono text-stone-700 tabular-nums">{u.totalAreaHa} ha</td>
+                        <td className="p-3 text-stone-500">
+                          {new Date(u.createdAt).toLocaleDateString('vi-VN')}
+                        </td>
+                        <td className="p-3 text-right">
+                          {isBootstrap ? (
+                            <span className="text-[11px] text-stone-400 font-semibold">
+                              Admin gốc
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={togglingAdminUid === u.uid}
+                              onClick={() => handleToggleUserAdmin(u.uid, u.email, u.isAdmin)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 ${
+                                u.isAdmin
+                                  ? 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                              }`}
+                            >
+                              {togglingAdminUid === u.uid
+                                ? 'Đang lưu...'
+                                : u.isAdmin
+                                ? 'Gỡ quyền Admin'
+                                : 'Cấp quyền Admin'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: NASA DATA MANAGEMENT (MANUAL + MULTI-FOLDER CSV + API SYNC) */}
+      {adminTab === 'nasa' && (
+        <div className="space-y-6">
+          {/* Warehouse Status KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+            <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-stone-400">
+                <span className="text-[10px] uppercase font-bold">Ngày NASA mới nhất</span>
+                <Clock className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-black text-stone-900">{status?.latestNasaDate || '2026-11-08'}</div>
+              <div className="text-[11px] text-stone-500">Độ trễ xử lý vệ tinh ~48-72 giờ</div>
+            </div>
+
+            <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-stone-400">
+                <span className="text-[10px] uppercase font-bold">Tổng số bản ghi kho</span>
+                <Database className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="text-xl font-black text-stone-900">
+                {status?.totalRecords ? status.totalRecords.toLocaleString('vi-VN') : '1.550.640'}
+              </div>
+              <div className="text-[11px] text-stone-500">531 ô lưới × 8 chỉ số NASA</div>
+            </div>
+
+            <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-stone-400">
+                <span className="text-[10px] uppercase font-bold">Phiên bản dữ liệu</span>
+                <Layers className="w-4 h-4 text-purple-600" />
+              </div>
+              <div className="text-xl font-black text-stone-900">{status?.activeVersion || 'v2026.11'}</div>
+              <div className="text-[11px] text-emerald-700 font-semibold">Khóa độc nhất: ô lưới + ngày + mã</div>
+            </div>
+
+            <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-stone-400">
+                <span className="text-[10px] uppercase font-bold">Tự động đồng bộ API</span>
+                <Server className="w-4 h-4 text-emerald-600" />
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleAutoSync}
+                className={`mt-1 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border ${
+                  status?.autoSyncEnabled
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : 'bg-stone-100 text-stone-600 border-stone-300'
+                }`}
+              >
+                Đồng bộ hàng ngày: {status?.autoSyncEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+              </button>
+            </div>
+          </div>
+
+          {/* SECTION 1: MANUAL SINGLE NASA OBSERVATION ENTRY */}
+          <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+            <div className="border-b border-stone-100 pb-3">
+              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                <PlusCircle className="w-5 h-5 text-emerald-700" />
+                1. Nhập nhanh Dữ liệu Khí hậu NASA Thủ công
+              </h2>
+              <p className="text-xs text-stone-500">
+                Cập nhật tức thì một chỉ số quan trắc (nhiệt độ, lượng mưa, độ ẩm đất rễ/mặt, bức xạ) cho bất kỳ ô lưới Việt Nam nào.
+              </p>
+            </div>
+
+            <form onSubmit={handleManualNasaSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs items-end">
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">Ô lưới NASA (531 ô)</label>
+                <select
+                  value={manualCellId}
+                  onChange={(e) => setManualCellId(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-mono text-xs"
+                >
+                  {ALL_NASA_CELLS.slice(0, 120).map((c) => (
+                    <option key={c.cellId} value={c.cellId}>
+                      {c.cellId} · {c.region}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">Ngày quan trắc</label>
+                <input
+                  type="date"
+                  value={manualDate}
+                  onChange={(e) => setManualDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">Chỉ số NASA POWER</label>
+                <select
+                  value={manualIndicator}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    setManualIndicator(code);
+                    const found = NASA_INDICATORS.find((x) => x.code === code);
+                    if (found) setManualValue(found.defaultVal);
+                  }}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
+                >
+                  {NASA_INDICATORS.map((ind) => (
+                    <option key={ind.code} value={ind.code}>
+                      {ind.code} — {ind.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">Giá trị đo</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={manualValue}
+                  onChange={(e) => setManualValue(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-mono"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={savingManual}
+                className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {savingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
+                {savingManual ? 'Đang lưu...' : 'Thêm dữ liệu NASA'}
+              </button>
+            </form>
+
+            {manualSuccessMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>{manualSuccessMsg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 2: MULTI-FOLDER & MULTI-FILE NASA POWER CSV IMPORTER */}
+          <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                  <CloudUpload className="w-5 h-5 text-emerald-700" />
+                  2. Nhập dữ liệu NASA POWER bằng CSV (Nhiều thư mục cùng lúc)
+                </h2>
+                <p className="text-xs text-stone-500">
+                  Hỗ trợ cả tệp xuất chuẩn từ NASA POWER (có phần -END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) lẫn tệp 4 cột (cell_id, date, indicator_code, value). Tự bỏ qua giá trị thiếu -999.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadSampleCsv}
+                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold inline-flex items-center gap-1 cursor-pointer underline shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" /> Tải tệp mẫu NASA POWER (.CSV)
+              </button>
+            </div>
+
+            {/* Hidden Accumulative Inputs */}
+            <input
+              ref={folderInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFolderInputChange}
+              {...({ webkitdirectory: '', directory: '', multiple: true } as any)}
+            />
+            <input
+              ref={filesInputRef}
+              type="file"
+              accept=".csv,.txt"
+              multiple
+              className="hidden"
+              onChange={handleFilesInputChange}
+            />
+
+            {/* Drag-and-Drop Multi-Folder Zone + Action Buttons */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingOver(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingOver(false);
+              }}
+              onDrop={handleDropFoldersOrFiles}
+              className={`p-6 border-2 border-dashed rounded-2xl text-center transition flex flex-col items-center justify-center space-y-3 ${
+                isDraggingOver
+                  ? 'border-emerald-600 bg-emerald-50/80 ring-2 ring-emerald-300'
+                  : 'border-stone-300 hover:border-emerald-500 bg-stone-50/60'
+              }`}
+            >
+              <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                <FolderOpen className="w-6 h-6" />
+              </div>
+
+              <div className="space-y-1 max-w-xl">
+                <p className="text-sm font-bold text-stone-900">
+                  Kéo thả đồng thời nhiều thư mục NASA POWER vào đây
+                </p>
+                <p className="text-xs text-stone-500">
+                  Hoặc nhấn nút bên dưới để chọn từng thư mục cộng dồn vào hàng đợi (có thể thêm liên tiếp nhiều thư mục khác nhau trước khi bấm nhập).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <FolderPlus className="w-4 h-4" /> + Thêm thư mục CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => filesInputRef.current?.click()}
+                  className="px-4 py-2 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" /> + Thêm nhiều tệp CSV
+                </button>
+                {queuedFiles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearQueue}
+                    className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Xóa hàng đợi ({queuedFiles.length} tệp)
+                  </button>
+                )}
+              </div>
+
+              {readingQueue && (
+                <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5 pt-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang quét các thư mục và đọc tệp CSV...
+                </div>
+              )}
+            </div>
+
+            {restoredNotice && (
+              <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs font-semibold flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-blue-700 shrink-0" />
+                  <span>{restoredNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRestoredNotice(null)}
+                  className="text-blue-800 font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Real-time CSV Reading & Import Progress + ETA Bar */}
+            {csvProgress && csvProgress.active && (
+              <div className="p-4 bg-emerald-50/90 border border-emerald-300 rounded-2xl space-y-2.5 shadow-2xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-emerald-950">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
+                    <span>
+                      {csvProgress.phase === 'reading'
+                        ? 'Đang đọc tệp CSV từ máy (tự lưu nếu tải lại trang)...'
+                        : csvProgress.phase === 'analyzing'
+                        ? 'Đang phân tích cấu trúc & lọc dữ liệu trùng...'
+                        : 'Đang nhập dữ liệu CSV vào Kho NASA...'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-white border border-emerald-300 text-emerald-900 font-bold font-mono text-[11px]">
+                      ETA: {formatEta(csvProgress.etaSeconds)}
+                    </span>
+                    <span className="font-black text-emerald-900 font-mono text-sm tabular-nums">
+                      {csvProgress.percent}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-full h-3 bg-emerald-200/80 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.max(4, csvProgress.percent)}%` }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-900">
+                  <span className="truncate max-w-md font-medium">
+                    Tệp hiện tại: <strong className="font-mono">{csvProgress.currentFileName || '—'}</strong>
+                  </span>
+                  <span className="font-mono font-semibold tabular-nums">
+                    {csvProgress.processedFiles}/{csvProgress.totalFiles} tệp ·{' '}
+                    {formatBytesMb(csvProgress.processedBytes)} / {formatBytesMb(csvProgress.totalBytes)}
+                    {typeof csvProgress.processedRows === 'number' && csvProgress.processedRows > 0
+                      ? ` · ${csvProgress.processedRows.toLocaleString('vi-VN')} dòng`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Folder Queue Summary Chips */}
+            {queuedFolders.length > 0 && (
+              <div className="space-y-2.5 p-4 bg-stone-50 rounded-xl border border-stone-200">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-stone-800">
+                    Hàng đợi hiện tại: {queuedFolders.length} thư mục · {queuedFiles.length} tệp CSV
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => runBatchPreview(queuedFiles)}
+                    disabled={previewing}
+                    className="px-3 py-1.5 bg-white hover:bg-stone-100 text-emerald-800 border border-emerald-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    {previewing ? 'Đang kiểm tra...' : 'Kiểm tra lại hàng loạt'}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {queuedFolders.map((folder) => (
+                    <div
+                      key={folder.folderName}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs shadow-2xs"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="font-bold text-stone-800 max-w-[220px] truncate" title={folder.folderName}>
+                        {folder.folderName}
+                      </span>
+                      <span className="text-[11px] font-mono text-emerald-700 font-semibold">
+                        {folder.fileCount} tệp ({(folder.totalBytes / 1024).toFixed(1)} KB)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFolderFromQueue(folder.folderName)}
+                        className="text-stone-400 hover:text-rose-600 cursor-pointer"
+                        title="Gỡ thư mục này khỏi hàng đợi"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pre-validation Results Summary */}
+            {previewing && (
+              <div className="p-4 text-center text-xs text-stone-500 italic flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
+                Đang phân tích cấu trúc các thư mục NASA POWER và lọc dữ liệu trùng lặp...
+              </div>
+            )}
+
+            {batchPreview && !previewing && (
+              <div className="space-y-4 pt-2 border-t border-stone-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-stone-800 flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-emerald-600" /> Kết quả kiểm tra hàng loạt trước khi nhập
+                  </span>
+                  <span
+                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                      batchPreview.preview.errors.length === 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-amber-100 text-amber-900'
+                    }`}
+                  >
+                    {batchPreview.preview.errors.length === 0
+                      ? 'Tất cả tệp hợp lệ'
+                      : `Có ${batchPreview.preview.errors.length} cảnh báo tệp`}
+                  </span>
+                </div>
+
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Số thư mục</span>
+                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFolders} thư mục</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Số tệp CSV</span>
+                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFiles} tệp</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Bản ghi hợp lệ</span>
+                    <span className="font-bold text-emerald-700 text-sm">
+                      {batchPreview.preview.validRows.toLocaleString('vi-VN')}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Ô lưới nhận diện</span>
+                    <span className="font-bold text-stone-800 text-sm">{batchPreview.preview.uniqueCells} ô</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Khoảng ngày</span>
+                    <span className="font-bold text-stone-800 text-[11px] truncate block">
+                      {batchPreview.preview.startDate || '—'} → {batchPreview.preview.endDate || '—'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-stone-400 text-[10px] block">Chỉ số NASA</span>
+                    <span
+                      className="font-bold text-emerald-800 text-[11px] truncate block"
+                      title={batchPreview.preview.indicatorsDetected.join(', ')}
+                    >
+                      {batchPreview.preview.indicatorsDetected.join(', ') || 'Chưa rõ'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Per-Folder Breakdown Table */}
+                {batchPreview.folderSummaries.length > 0 && (
+                  <div className="overflow-x-auto border border-stone-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px]">
+                        <tr>
+                          <th className="p-2.5 font-bold">Thư mục nguồn</th>
+                          <th className="p-2.5 font-bold">Số tệp CSV</th>
+                          <th className="p-2.5 font-bold">Dữ liệu hợp lệ</th>
+                          <th className="p-2.5 font-bold">Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {batchPreview.folderSummaries.map((fs) => (
+                          <tr key={fs.folderName} className="hover:bg-stone-50/50">
+                            <td className="p-2.5 font-semibold text-stone-900">{fs.folderName}</td>
+                            <td className="p-2.5 font-mono text-stone-700">{fs.fileCount}</td>
+                            <td className="p-2.5 font-mono font-bold text-emerald-700">
+                              {fs.validRows.toLocaleString('vi-VN')} dòng
+                            </td>
+                            <td className="p-2.5">
+                              {fs.errors.length === 0 ? (
+                                <span className="text-[11px] font-bold text-emerald-700">Hợp lệ</span>
+                              ) : (
+                                <span className="text-[11px] font-bold text-rose-700">
+                                  {fs.errors[0]}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Error notifications */}
+                {batchPreview.preview.errors.length > 0 && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs space-y-1">
+                    <div className="font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> Các cảnh báo cấu trúc tệp:
+                    </div>
+                    <ul className="list-disc pl-5 max-h-32 overflow-y-auto">
+                      {batchPreview.preview.errors.slice(0, 15).map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Sample Rows Table */}
+                {batchPreview.preview.sampleRows.length > 0 && (
+                  <div className="overflow-x-auto border border-stone-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-stone-50 border-b border-stone-200 text-stone-500 text-[11px]">
+                        <tr>
+                          <th className="p-2 font-semibold">Ô lưới gần nhất</th>
+                          <th className="p-2 font-semibold">Ngày quan trắc</th>
+                          <th className="p-2 font-semibold">Mã chỉ số NASA</th>
+                          <th className="p-2 font-semibold">Giá trị đo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {batchPreview.preview.sampleRows.map((r, i) => (
+                          <tr key={i} className="hover:bg-stone-50/50">
+                            <td className="p-2 font-mono text-stone-900 font-bold">{r.cell_id}</td>
+                            <td className="p-2 font-mono text-stone-600">{r.date}</td>
+                            <td className="p-2 font-bold text-emerald-800">{r.indicator_code}</td>
+                            <td className="p-2 font-mono font-bold text-stone-800">{r.value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Commit Import Button */}
+                {batchPreview.preview.validRows > 0 && (
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleClearQueue}
+                      className="px-4 py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-100 transition cursor-pointer"
+                    >
+                      Hủy hàng đợi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCommitBatchImport}
+                      disabled={importing}
+                      className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                    >
+                      {importing ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                      {importing
+                        ? 'Đang nhập hàng loạt vào Kho NASA...'
+                        : `Nhập toàn bộ ${batchPreview.totalFolders} thư mục (${batchPreview.preview.validRows.toLocaleString('vi-VN')} dòng) vào Kho NASA`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {importSuccessMsg && (
+              <div className="p-3.5 bg-emerald-100 border border-emerald-300 text-emerald-950 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>{importSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* Persisted Last Imported CSV Batch Summary (survives page reload) */}
+            {lastCompletedBatch && queuedFiles.length === 0 && (
+              <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-stone-900">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    <span>
+                      Thông tin gói CSV gần nhất đã đọc &amp; lưu ({lastCompletedBatch.version})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-stone-500">
+                    <span>
+                      Lúc {new Date(lastCompletedBatch.completedAt).toLocaleString('vi-VN')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setLastCompletedBatch(null);
+                        await CsvQueueStorage.savePatch({ lastCompletedBatch: null });
+                      }}
+                      className="text-stone-400 hover:text-stone-700 font-bold cursor-pointer"
+                      title="Ẩn tóm tắt này"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                  <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                    <span className="text-[10px] text-stone-400 block">Thư mục / Tệp</span>
+                    <span className="font-bold text-stone-900">
+                      {lastCompletedBatch.totalFolders} thư mục · {lastCompletedBatch.totalFiles} tệp
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                    <span className="text-[10px] text-stone-400 block">Dòng dữ liệu hợp lệ</span>
+                    <span className="font-bold text-emerald-700">
+                      {lastCompletedBatch.validRows.toLocaleString('vi-VN')} dòng
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                    <span className="text-[10px] text-stone-400 block">Ô lưới NASA</span>
+                    <span className="font-bold text-stone-900">{lastCompletedBatch.uniqueCells} ô</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                    <span className="text-[10px] text-stone-400 block">Khoảng ngày</span>
+                    <span className="font-bold text-stone-800 text-[11px]">
+                      {lastCompletedBatch.startDate || '—'} → {lastCompletedBatch.endDate || '—'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-stone-200">
+                    <span className="text-[10px] text-stone-400 block">Chỉ số NASA</span>
+                    <span className="font-bold text-emerald-800 text-[11px] truncate block">
+                      {lastCompletedBatch.indicatorsDetected.join(', ') || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {lastCompletedBatch.sampleRows.length > 0 && (
+                  <div className="overflow-x-auto border border-stone-200 rounded-xl bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-stone-50 border-b border-stone-200 text-stone-500 text-[11px]">
+                        <tr>
+                          <th className="p-2 font-semibold">Ô lưới</th>
+                          <th className="p-2 font-semibold">Ngày</th>
+                          <th className="p-2 font-semibold">Chỉ số</th>
+                          <th className="p-2 font-semibold">Giá trị</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {lastCompletedBatch.sampleRows.slice(0, 5).map((r, idx) => (
+                          <tr key={idx}>
+                            <td className="p-2 font-mono font-bold text-stone-900">{r.cell_id}</td>
+                            <td className="p-2 font-mono text-stone-600">{r.date}</td>
+                            <td className="p-2 font-bold text-emerald-800">{r.indicator_code}</td>
+                            <td className="p-2 font-mono font-bold text-stone-800">{r.value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 3: SYNCHRONIZATION LOGS & ROLLBACK */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-7 bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                <div>
+                  <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-700" />
+                    Lịch sử Đồng bộ &amp; Nhập dữ liệu NASA POWER
+                  </h2>
+                  <p className="text-xs text-stone-500">
+                    Ghi nhận chi tiết mọi phiên đồng bộ API, nhập tay và tải lên hàng loạt thư mục CSV
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchStatus}
+                  className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100 transition cursor-pointer"
+                  title="Làm mới"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {syncLogs.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-stone-400">Chưa có nhật ký đồng bộ</div>
+                ) : (
+                  syncLogs.map((log) => {
+                    const isSuccess = log.status === 'SUCCESS';
+                    const isFailed = log.status === 'FAILED';
+                    return (
+                      <div
+                        key={log.id}
+                        className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                isSuccess
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : isFailed
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {log.status}
+                            </span>
+                            <span className="font-bold text-stone-900">{log.syncType}</span>
+                          </div>
+                          <span className="text-[10px] text-stone-400 font-mono">
+                            {new Date(log.startTime).toLocaleString('vi-VN')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-stone-600">
+                          <span>Bản ghi đã đồng bộ: <strong>{log.recordsSynced.toLocaleString('vi-VN')}</strong></span>
+                          <span>Mốc dữ liệu NASA: <strong>{log.latestNasaDate || 'N/A'}</strong></span>
+                        </div>
+
+                        {log.details?.message && (
+                          <p className="text-[11px] text-stone-500 italic">{log.details.message}</p>
+                        )}
+
+                        {log.errorMessage && (
+                          <p className="text-[11px] text-rose-700 font-medium bg-rose-50 p-1.5 rounded">
+                            Lỗi: {log.errorMessage}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="lg:col-span-5 bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+              <div className="border-b border-stone-100 pb-3">
+                <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-purple-700" />
+                  Khôi phục Phiên bản Dữ liệu
+                </h2>
+                <p className="text-xs text-stone-500">
+                  Bảo vệ an toàn kho: Cho phép hoàn tác về trạng thái trước nếu gói nhập bị sai lệch
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                {imports.map((imp) => {
+                  const isCurrent = imp.version === status?.activeVersion;
+                  return (
+                    <div
+                      key={imp.id}
+                      className={`p-3 rounded-xl border text-xs space-y-1.5 transition ${
+                        isCurrent
+                          ? 'bg-purple-50/70 border-purple-300 ring-1 ring-purple-300'
+                          : 'bg-stone-50 border-stone-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-stone-900 truncate">{imp.fileName}</span>
+                        <span className="text-[10px] font-mono bg-stone-200 text-stone-700 px-1.5 py-0.5 rounded shrink-0">
+                          {imp.version}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-stone-500">
+                        <span>{imp.recordCount.toLocaleString('vi-VN')} bản ghi</span>
+                        <span>{imp.startDate} → {imp.endDate}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-stone-200/60">
+                        {isCurrent ? (
+                          <span className="text-[11px] font-bold text-purple-800 flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Phiên bản đang kích hoạt
+                          </span>
+                        ) : confirmRollbackVer === imp.version ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleRollback(imp.version)}
+                              className="text-[11px] bg-purple-700 text-white px-2 py-0.5 rounded font-bold cursor-pointer"
+                            >
+                              Xác nhận khôi phục
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmRollbackVer(null)}
+                              className="text-[11px] bg-stone-200 text-stone-700 px-2 py-0.5 rounded cursor-pointer"
+                            >
+                              Hủy
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmRollbackVer(imp.version)}
+                            className="text-[11px] text-purple-700 hover:text-purple-900 font-bold underline cursor-pointer flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Khôi phục phiên bản này
+                          </button>
+                        )}
+                        <span className="text-[10px] text-stone-400">
+                          {new Date(imp.createdAt).toLocaleDateString('vi-VN')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 4: SUPABASE DDL SCHEMA REFERENCE */}
+          <div className="bg-stone-900 rounded-2xl p-6 text-white border border-stone-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm text-stone-100">
+                  Kiến trúc Kho Dữ liệu Tập trung &amp; Bảo mật Phân quyền
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`-- Xem tệp /src/db/supabase_schema.sql trong mã nguồn dự án`);
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 3000);
+                }}
+                className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-300 px-3 py-1.5 rounded-lg border border-stone-700 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedSql ? 'Đã sao chép' : 'Sao chép đường dẫn DDL'}
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-400 leading-relaxed">
+              Dữ liệu NASA POWER nhập từ nhiều thư mục CSV được chuẩn hóa về 531 ô lưới Việt Nam với khóa duy nhất chống trùng lặp theo ô lưới, ngày và mã chỉ số. Chỉ tài khoản Quản trị viên mới có quyền đọc toàn hệ thống và ghi bổ sung kho dữ liệu NASA.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* READ-ONLY FIELD DETAIL & SATELLITE MAP MODAL */}
+      {inspectingField && (
+        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-stone-200 overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-4 sm:p-5 bg-stone-900 text-white flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-bold text-emerald-300 uppercase">
+                  Chi tiết Thửa ruộng (Chế độ Giám sát Quản trị)
+                </div>
+                <h3 className="text-base sm:text-lg font-black">{inspectingField.name}</h3>
+                <p className="text-xs text-stone-300">
+                  {inspectingField.district ? `${inspectingField.district}, ` : ''}
+                  {inspectingField.province} · Chủ sở hữu: {inspectingField.ownerName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectingField(null)}
+                className="p-2 rounded-lg hover:bg-stone-800 text-stone-300 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto text-xs">
+              <SatelliteMap
+                lat={inspectingField.lat}
+                lon={inspectingField.lon}
+                zoom={14}
+                heightClass="h-60"
+                interactive={false}
+                showNasaGrid={true}
+                fieldLabel={inspectingField.name}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-stone-400">Chủ sở hữu &amp; Chia sẻ</div>
+                  <div className="font-bold text-stone-900">{inspectingField.ownerName}</div>
+                  <div className="font-mono text-stone-600 text-[11px]">{inspectingField.ownerEmail || inspectingField.ownerId}</div>
+                  <div className="text-[11px] text-purple-800 font-semibold pt-1">
+                    {inspectingField.sharedCount > 0
+                      ? `Đang chia sẻ (${inspectingField.sharedCount} lượt / liên kết)`
+                      : 'Chế độ riêng tư'}
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
+                    <Navigation className="w-3 h-3 text-emerald-700" /> Tọa độ &amp; Ô lưới NASA
+                  </div>
+                  <div className="font-mono font-bold text-stone-900">
+                    {inspectingField.lat.toFixed(5)}°B, {inspectingField.lon.toFixed(5)}°Đ
+                  </div>
+                  <div className="text-[11px] text-emerald-800 font-semibold">
+                    Điểm khí hậu: {inspectingField.nasaCellId} (cách {inspectingField.nasaDistanceKm} km)
+                  </div>
+                  <div className="text-[11px] text-stone-500">
+                    Diện tích canh tác: <strong>{inspectingField.areaHa} ha</strong>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
+                    <Sprout className="w-3 h-3 text-emerald-700" /> Cây trồng hiện tại
+                  </div>
+                  <div className="font-bold text-stone-900">{inspectingField.cropName}</div>
+                  <div className="text-[11px] text-stone-600">
+                    Giống: {inspectingField.cropVariety} · Giai đoạn: {inspectingField.currentStage}
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
+                    <Droplets className="w-3 h-3 text-blue-700" /> Chất đất &amp; Nguồn nước
+                  </div>
+                  <div className="font-bold text-stone-900">{getSoilLabel(inspectingField.soilType)}</div>
+                  <div className="text-[11px] text-stone-600">
+                    {WATER_LABELS[inspectingField.waterSourceType] || 'Nguồn nước khác'}
+                  </div>
+                  <div className="text-[11px] text-stone-400">
+                    Ngày tạo: {new Date(inspectingField.createdAt).toLocaleString('vi-VN')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-stone-200 bg-stone-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setInspectingField(null)}
+                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

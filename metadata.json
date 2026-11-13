@@ -1,0 +1,8 @@
+{
+  "name": "CropCast",
+  "description": "CropCast – Trợ lý luân canh và canh tác cá nhân hóa theo từng thửa ruộng kết hợp dữ liệu khí hậu NASA 21 năm và Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
