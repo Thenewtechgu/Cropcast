@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
-import { FirestoreService, LocalServerStorage } from './services/firestoreService';
+import { FirestoreService } from './services/firestoreService';
 import { StorageService } from './services/storage';
 import { analyzeFieldAgronomy, generateTasksFromBrief } from './services/agronomyEngine';
 import { Navbar } from './components/Navbar';
@@ -27,6 +27,7 @@ import {
   FeedbackRecord,
   FeedbackType,
   EarthEnvironmentSnapshot,
+  PlotPlanRecord,
 } from './types';
 import { Sprout, ShieldCheck, Plus, MapPin, LogIn, CheckCircle2, Layers, CalendarCheck, History, RefreshCw, CalendarDays, BarChart3 } from 'lucide-react';
 import { useLanguage } from './contexts/LanguageContext';
@@ -88,6 +89,7 @@ export default function App() {
   const [weather, setWeather] = useState<WeatherObservation>(StorageService.getWeather());
   const [tasks, setTasks] = useState<FarmTask[]>([]);
   const [feedbackHistory, setFeedbackHistory] = useState<FeedbackRecord[]>([]);
+  const [plansByPlotId, setPlansByPlotId] = useState<Record<string, PlotPlanRecord>>({});
   const [datasetRefreshTick, setDatasetRefreshTick] = useState(0);
 
   const setActiveFieldId = (nextIdOrUpdater: string | ((prev: string) => string)) => {
@@ -150,7 +152,7 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
-  // Sync Firebase Auth State + Username-only Local Session fallback
+  // Sync Firebase Auth State strictly with Firebase Authentication
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
@@ -159,6 +161,7 @@ export default function App() {
           fbUser.email,
           fbUser.emailVerified
         );
+        await FirestoreService.ensureUserProfile(fbUser).catch(() => {});
         setAuthUser({
           uid: fbUser.uid,
           displayName: fbUser.displayName || t('Nông dân CropCast', 'CropCast Farmer'),
@@ -169,8 +172,7 @@ export default function App() {
           authMode: 'firebase',
         });
       } else {
-        const localUser = await LocalServerStorage.restoreSession();
-        setAuthUser(localUser);
+        setAuthUser(null);
       }
       setAuthReady(true);
     });
@@ -234,12 +236,7 @@ export default function App() {
       // ignore history error
     }
 
-    const redeemPromise =
-      authUser.authMode === 'local_server'
-        ? LocalServerStorage.redeemShareLink(tokenToRedeem)
-        : FirestoreService.redeemFieldShareLink(tokenToRedeem, authUser.uid);
-
-    redeemPromise
+    FirestoreService.redeemFieldShareLink(tokenToRedeem, authUser.uid)
       .then((res) => {
         setAuthMessage(null);
         setActiveFieldId(res.fieldId);
@@ -265,17 +262,6 @@ export default function App() {
       });
   }, [authReady, authUser, pendingShareToken]);
 
-  const refreshLocalServerState = async () => {
-    const state = await LocalServerStorage.fetchState();
-    setFields(state.fields);
-    setTasks(state.tasks);
-    setFeedbackHistory(state.feedbacks);
-    setActiveFieldId((prev) => {
-      if (prev && state.fields.some((f) => f.id === prev)) return prev;
-      return state.fields[0]?.id || '';
-    });
-  };
-
   // Subscribe strictly to authenticated farmer's own & shared fields; preserve sub-website route on reload!
   useEffect(() => {
     if (!authReady) return;
@@ -284,6 +270,7 @@ export default function App() {
       setFields([]);
       setTasks([]);
       setFeedbackHistory([]);
+      setPlansByPlotId({});
       if (activeTab === 'admin') {
         navigateToTab('home', true);
       }
@@ -294,15 +281,8 @@ export default function App() {
       setFields([]);
       setTasks([]);
       setFeedbackHistory([]);
+      setPlansByPlotId({});
       navigateToTab('admin', true);
-      return;
-    }
-
-    if (authUser.authMode === 'local_server') {
-      refreshLocalServerState().catch(() => {});
-      if (activeTab === 'admin') {
-        navigateToTab('dashboard', true);
-      }
       return;
     }
 
@@ -326,6 +306,10 @@ export default function App() {
       setFeedbackHistory(cloudFbs);
     });
 
+    const unsubPlans = FirestoreService.subscribeUserPlans(authUser.uid, (cloudPlans) => {
+      setPlansByPlotId(cloudPlans);
+    });
+
     if (activeTab === 'admin') {
       navigateToTab('dashboard', true);
     }
@@ -334,6 +318,7 @@ export default function App() {
       unsubFields();
       unsubTasks();
       unsubFeedbacks();
+      unsubPlans();
     };
   }, [authReady, authUser]);
 
@@ -390,16 +375,6 @@ export default function App() {
       setAuthModalOpen(true);
       return;
     }
-    if (authUser.authMode === 'local_server') {
-      const created = await LocalServerStorage.createField(newFieldData);
-      const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
-      const newTasks = generateTasksFromBrief(brief, created);
-      await LocalServerStorage.createTasks(newTasks);
-      await refreshLocalServerState();
-      setActiveFieldId(created.id);
-      navigateToTab('fields');
-      return;
-    }
     const created = await FirestoreService.createField(authUser.uid, newFieldData);
     const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
     const newTasks = generateTasksFromBrief(brief, created);
@@ -410,64 +385,33 @@ export default function App() {
 
   const handleUpdateField = async (updatedField: FieldProfile) => {
     if (!authUser || updatedField.isSharedWithMe) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.updateField(updatedField);
-      await refreshLocalServerState();
-      setActiveFieldId(updatedField.id);
-      return;
-    }
-    await FirestoreService.updateField(updatedField);
+    await FirestoreService.updateField(authUser.uid, updatedField);
     setActiveFieldId(updatedField.id);
   };
 
   const handleDeleteField = async (fieldId: string) => {
     if (!authUser) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.deleteField(fieldId);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.deleteField(fieldId);
+    await FirestoreService.deleteField(authUser.uid, fieldId);
   };
 
   const handleCreateShareLink = async (field: FieldProfile): Promise<string> => {
     if (!authUser) throw new Error(t('Vui lòng đăng nhập để chia sẻ.', 'Please sign in to share.'));
-    if (authUser.authMode === 'local_server') {
-      const token = await LocalServerStorage.createShareLink(field.id);
-      await refreshLocalServerState();
-      return token;
-    }
     return FirestoreService.createFieldShareLink(field, authUser.uid, authUser.displayName);
   };
 
   const handleRevokeShareLink = async (field: FieldProfile): Promise<void> => {
     if (!authUser) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.revokeShareLink(field.id);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.revokeFieldShareLink(field.id, field.activeShareToken);
+    await FirestoreService.revokeFieldShareLink(authUser.uid, field.id, field.activeShareToken);
   };
 
   const handleShareByEmail = async (field: FieldProfile, email: string): Promise<string> => {
     if (!authUser) throw new Error(t('Vui lòng đăng nhập để chia sẻ.', 'Please sign in to share.'));
-    if (authUser.authMode === 'local_server') {
-      const res = await LocalServerStorage.shareByTarget(field.id, email);
-      await refreshLocalServerState();
-      return res;
-    }
     return FirestoreService.shareFieldByEmail(field, authUser.uid, authUser.displayName, email);
   };
 
   const handleRemoveSharedEmail = async (fieldId: string, email: string): Promise<void> => {
     if (!authUser) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.removeSharedTarget(fieldId, email);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.removeSharedEmail(fieldId, email);
+    await FirestoreService.removeSharedEmail(authUser.uid, fieldId, email);
   };
 
   const handleUpdateTaskStatus = async (
@@ -476,44 +420,11 @@ export default function App() {
     note?: string
   ) => {
     if (!authUser) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.updateTaskStatus(taskId, status, note);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.updateTaskStatus(taskId, status, note);
+    await FirestoreService.updateTaskStatus(authUser.uid, taskId, status, note);
   };
 
   const handleAddFeedback = async (feedback: Omit<FeedbackRecord, 'id' | 'timestamp'>) => {
     if (!authUser || !activeField || activeField.isSharedWithMe) return;
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.createFeedback(feedback);
-      if (
-        feedback.feedbackType === 'soil_still_dry' ||
-        feedback.feedbackType === 'soil_too_wet'
-      ) {
-        const adjustment =
-          feedback.feedbackType === 'soil_still_dry'
-            ? t(
-                'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
-                'Field dried faster than forecast: Increased irrigation reminder sensitivity'
-              )
-            : t(
-                'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
-                'Field retained moisture / drained slowly: Prioritized drainage checks'
-              );
-        await LocalServerStorage.updateField({
-          ...activeField,
-          adaptiveMemory: {
-            ...activeField.adaptiveMemory,
-            soilAdjustment: adjustment,
-            lastFeedbackDate: new Date().toISOString().slice(0, 10),
-          },
-        });
-      }
-      await refreshLocalServerState();
-      return;
-    }
     await FirestoreService.createFeedback(authUser.uid, feedback);
     if (
       feedback.feedbackType === 'soil_still_dry' ||
@@ -529,7 +440,7 @@ export default function App() {
               'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
               'Field retained moisture / drained slowly: Prioritized drainage checks'
             );
-      await FirestoreService.updateField({
+      await FirestoreService.updateField(authUser.uid, {
         ...activeField,
         adaptiveMemory: {
           ...activeField.adaptiveMemory,
@@ -572,12 +483,7 @@ export default function App() {
       lat,
       lon,
     };
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.updateField(updated);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.updateField(updated);
+    await FirestoreService.updateField(authUser.uid, updated);
   };
 
   const handleSaveEarthMetrics = async (snapshot: EarthEnvironmentSnapshot) => {
@@ -589,12 +495,38 @@ export default function App() {
         earthMetrics: snapshot,
       },
     };
-    if (authUser.authMode === 'local_server') {
-      await LocalServerStorage.updateField(updated);
-      await refreshLocalServerState();
-      return;
-    }
-    await FirestoreService.updateField(updated);
+    await Promise.all([
+      FirestoreService.updateField(authUser.uid, updated),
+      FirestoreService.saveEarthMetricsSnapshot(authUser.uid, activeField.id, snapshot),
+    ]);
+  };
+
+  const handleSavePlotPlan = async (
+    plotId: string,
+    plan: Omit<PlotPlanRecord, 'id' | 'ownerId' | 'plotId' | 'updatedAt'>
+  ) => {
+    if (!authUser) return;
+    await FirestoreService.savePlotPlan(authUser.uid, plotId, plan);
+  };
+
+  const handleSelectCalendarCropKey = async (plotId: string, cropKey: string) => {
+    if (!authUser) return;
+    const existing = plansByPlotId[plotId];
+    await FirestoreService.savePlotPlan(authUser.uid, plotId, {
+      priorities: existing?.priorities?.length
+        ? existing.priorities
+        : ['water_saving', 'nitrogen_fixing', 'pest_break', 'erosion_control'],
+      constraints: existing?.constraints || {
+        waterAvailability: activeField?.waterSource?.isStable ? 'seasonal_limited' : 'scarce',
+        equipmentAccess: 'basic_manual',
+        marketPreference: 'mixed_family',
+      },
+      activeStrategy: existing?.activeStrategy,
+      rejectedIds: existing?.rejectedIds || [],
+      rejectedTitles: existing?.rejectedTitles || [],
+      lastRejectionNote: existing?.lastRejectionNote,
+      calendarCropKey: cropKey,
+    });
   };
 
   const renderMissingFieldPrompt = () => (
@@ -819,6 +751,8 @@ export default function App() {
             <RotationExplorerView
               field={activeField}
               weather={weather}
+              savedPlan={plansByPlotId[activeField.id]}
+              onSavePlan={handleSavePlotPlan}
               onOpenMap={() => {
                 setMapInitialCoords({ lat: activeField.lat, lon: activeField.lon });
                 setMapPickerOpen(true);
@@ -881,7 +815,11 @@ export default function App() {
 
         {!authUser?.isAdmin && activeTab === 'calendar' &&
           (activeField ? (
-            <PlantingCalendarView activeField={activeField} />
+            <PlantingCalendarView
+              activeField={activeField}
+              savedCropKey={plansByPlotId[activeField.id]?.calendarCropKey}
+              onSelectCropKey={handleSelectCalendarCropKey}
+            />
           ) : (
             renderMissingFieldPrompt()
           ))}

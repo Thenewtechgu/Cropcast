@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { parseJsonSafely } from '../services/httpClient';
 import {
   Database,
   CloudUpload,
@@ -43,8 +42,16 @@ import {
   CsvPreviewResult,
   WaterSourceType,
 } from '../types';
-import { auth, BOOTSTRAP_ADMIN_EMAIL } from '../firebase';
+import { auth, BOOTSTRAP_ADMIN_EMAILS, isBootstrapAdminEmail } from '../firebase';
 import { FirestoreService } from '../services/firestoreService';
+import {
+  executeClientNasaPowerSync,
+  getWarehouseStatus,
+  previewBatchCsvFilesClient,
+  runClientBatchImport,
+  setWarehouseActiveVersion,
+  setWarehouseAutoSyncEnabled,
+} from '../services/nasaWarehouseService';
 import { CsvQueueStorage, StoredCsvSessionState } from '../services/csvQueueStorage';
 import { ALL_NASA_CELLS, getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import {
@@ -280,8 +287,6 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   // Multi-folder / multi-file NASA POWER CSV batch queue state + reload persistence + ETA bar
   const folderInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
-  const pollTimerRef = useRef<number | null>(null);
-  const stagedSessionRef = useRef<{ signature: string; sessionId: string } | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [readingQueue, setReadingQueue] = useState(false);
   const [queuedFiles, setQueuedFiles] = useState<QueuedCsvFile[]>([]);
@@ -300,16 +305,8 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const [rollbackSuccessMsg, setRollbackSuccessMsg] = useState<string | null>(null);
   const [confirmRollbackVer, setConfirmRollbackVer] = useState<string | null>(null);
 
-  // SQL schema copy state
+  // Firestore architecture reference copy state
   const [copiedSql, setCopiedSql] = useState(false);
-
-  const getAdminHeaders = async (includeJson = false): Promise<Record<string, string>> => {
-    const token = await auth.currentUser?.getIdToken();
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (includeJson) headers['Content-Type'] = 'application/json';
-    return headers;
-  };
 
   const fetchPlatformStats = async () => {
     try {
@@ -330,56 +327,33 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const headers = await getAdminHeaders();
-      const [resStatus, resLogs, fsDatasets, fsSyncLogs] = await Promise.all([
-        fetch('/api/admin/status', { headers }),
-        fetch('/api/admin/sync-logs', { headers }),
+      const [fsDatasets, fsSyncLogs] = await Promise.all([
         FirestoreService.getAdminNasaDatasets(),
         FirestoreService.getAdminSyncLogs(),
       ]);
 
-      const serverStatus: CentralDataStatus | null = resStatus.ok ? await parseJsonSafely<CentralDataStatus>(resStatus) : null;
-      const serverLogsJson = resLogs.ok ? await parseJsonSafely<any>(resLogs) : { logs: [], imports: [] };
+      const formattedLogs: SyncLogRecord[] = fsSyncLogs
+        .map((fl) => ({
+          id: fl.id,
+          syncType: fl.syncType as any,
+          targetCellsCount: fl.targetCellsCount,
+          recordsSynced: fl.recordsSynced,
+          startTime: fl.startTime,
+          endTime: fl.endTime,
+          status: fl.status,
+          latestNasaDate: fl.latestNasaDate,
+        }))
+        .sort((a, b) => b.startTime.localeCompare(a.startTime));
+      setSyncLogs(formattedLogs);
 
-      // Merge sync logs (server + persisted Firestore logs)
-      const serverLogs: SyncLogRecord[] = serverLogsJson.logs || [];
-      const mergedLogsMap = new Map<string, SyncLogRecord>();
-      for (const l of serverLogs) mergedLogsMap.set(l.id, l);
-      for (const fl of fsSyncLogs) {
-        const dup = Array.from(mergedLogsMap.values()).some(
-          (existing) =>
-            existing.syncType === fl.syncType &&
-            existing.recordsSynced === fl.recordsSynced &&
-            Math.abs(new Date(existing.startTime).getTime() - new Date(fl.startTime).getTime()) < 15000
-        );
-        if (!dup) {
-          mergedLogsMap.set(fl.id, {
-            id: fl.id,
-            syncType: fl.syncType as any,
-            targetCellsCount: fl.targetCellsCount,
-            recordsSynced: fl.recordsSynced,
-            startTime: fl.startTime,
-            endTime: fl.endTime,
-            status: fl.status,
-            latestNasaDate: fl.latestNasaDate,
-          });
-        }
-      }
-      const mergedLogs = Array.from(mergedLogsMap.values()).sort((a, b) =>
-        b.startTime.localeCompare(a.startTime)
-      );
-      setSyncLogs(mergedLogs);
-
-      // Merge data imports (server + persisted Firestore nasa_datasets)
-      const serverImports: DataImportRecord[] = serverLogsJson.imports || [];
-      const mergedImportsByVer = new Map<string, DataImportRecord>();
-      for (const imp of serverImports) mergedImportsByVer.set(imp.version, imp);
       let fsExtraRecords = 0;
-      for (const ds of fsDatasets) {
-        if (!mergedImportsByVer.has(ds.version)) {
-          fsExtraRecords += Number(ds.recordCount) || 0;
+      const mappedImports: DataImportRecord[] = fsDatasets
+        .map((ds) => {
+          if (ds.status === 'COMPLETED') {
+            fsExtraRecords += Number(ds.recordCount) || 0;
+          }
           const createdIso = ds.createdAt?.toDate?.()?.toISOString() || new Date().toISOString();
-          mergedImportsByVer.set(ds.version, {
+          return {
             id: ds.id,
             fileName: ds.fileName,
             fileSizeBytes: 0,
@@ -392,38 +366,33 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
             version: ds.version,
             importedBy: ds.uploadedBy || 'admin',
             createdAt: createdIso,
-          });
-        }
-      }
-      const mergedImports = Array.from(mergedImportsByVer.values()).sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt)
-      );
-      setImports(mergedImports);
+          } satisfies DataImportRecord;
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      setImports(mappedImports);
 
-      if (serverStatus) {
-        const latestCompletedFs = fsDatasets.find((d) => d.status === 'COMPLETED');
-        setStatus({
-          ...serverStatus,
-          totalRecords: serverStatus.totalRecords + fsExtraRecords,
-          activeVersion:
-            serverStatus.activeVersion === 'v2026.11-daily' && latestCompletedFs
-              ? latestCompletedFs.version
-              : serverStatus.activeVersion,
-        });
-      }
+      const latestCompletedFs = fsDatasets.find((d) => d.status === 'COMPLETED');
+      setStatus(
+        getWarehouseStatus(
+          fsExtraRecords,
+          latestCompletedFs?.version,
+          formattedLogs[0]?.startTime,
+          platformStats?.totalFields || 0
+        )
+      );
     } catch (err) {
-      console.error('Failed to fetch admin data', err);
+      console.error('Failed to fetch admin Firestore status', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const finalizeCompletedImportJob = async (job: any) => {
-    const data = job.result;
-    if (!data) return;
-
+  const finalizeCompletedImport = async (
+    importRecord: DataImportRecord,
+    batchSummary: BatchPreviewResponse
+  ) => {
     if (auth.currentUser) {
-      const safeOverrides = (data.batchSummary?.representativeOverrides || [])
+      const safeOverrides = (batchSummary.representativeOverrides || [])
         .slice(0, 300)
         .map((r: any) => ({
           cell_id: String(r.cell_id || ''),
@@ -433,34 +402,34 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         }));
 
       await FirestoreService.saveNasaDatasetUpload(auth.currentUser.uid, {
-        version: String(data.importRecord.version || `v${Date.now()}`).slice(0, 80),
-        fileName: String(data.importRecord.fileName || 'NASA POWER Batch CSV').slice(0, 200),
-        recordCount: Number(data.importRecord.recordCount) || 0,
-        cellCount: Number(data.importRecord.cellCount) || 0,
-        startDate: String(data.importRecord.startDate || '').slice(0, 20),
-        endDate: String(data.importRecord.endDate || '').slice(0, 20),
+        version: String(importRecord.version || `v${Date.now()}`).slice(0, 80),
+        fileName: String(importRecord.fileName || 'NASA POWER Batch CSV').slice(0, 200),
+        recordCount: Number(importRecord.recordCount) || 0,
+        cellCount: Number(importRecord.cellCount) || 0,
+        startDate: String(importRecord.startDate || '').slice(0, 20),
+        endDate: String(importRecord.endDate || '').slice(0, 20),
         status: 'COMPLETED',
         sampleOverrides: safeOverrides,
       });
       await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
         syncType: 'CSV_UPLOAD',
-        targetCellsCount: Number(data.importRecord.cellCount) || 0,
-        recordsSynced: Number(data.importRecord.recordCount) || 0,
+        targetCellsCount: Number(importRecord.cellCount) || 0,
+        recordsSynced: Number(importRecord.recordCount) || 0,
         status: 'SUCCESS',
-        latestNasaDate: String(data.importRecord.endDate || '').slice(0, 20),
+        latestNasaDate: String(importRecord.endDate || '').slice(0, 20),
       });
     }
 
     const completedSummary: StoredCsvSessionState['lastCompletedBatch'] = {
-      version: data.importRecord.version,
-      totalFolders: data.batchSummary?.totalFolders || 1,
-      totalFiles: data.batchSummary?.totalFiles || 1,
-      validRows: Number(data.importRecord.recordCount) || 0,
-      uniqueCells: Number(data.importRecord.cellCount) || 0,
-      startDate: data.importRecord.startDate || '',
-      endDate: data.importRecord.endDate || '',
-      indicatorsDetected: data.batchSummary?.preview?.indicatorsDetected || [],
-      sampleRows: data.batchSummary?.preview?.sampleRows || [],
+      version: importRecord.version,
+      totalFolders: batchSummary.totalFolders || 1,
+      totalFiles: batchSummary.totalFiles || 1,
+      validRows: Number(importRecord.recordCount) || 0,
+      uniqueCells: Number(importRecord.cellCount) || 0,
+      startDate: importRecord.startDate || '',
+      endDate: importRecord.endDate || '',
+      indicatorsDetected: batchSummary.preview?.indicatorsDetected || [],
+      sampleRows: batchSummary.preview?.sampleRows || [],
       completedAt: new Date().toISOString(),
     };
 
@@ -490,58 +459,6 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     fetchStatus();
   };
 
-  const pollImportJob = async (jobId: string) => {
-    if (pollTimerRef.current) {
-      window.clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    try {
-      const headers = await getAdminHeaders();
-      const res = await fetch(`/api/admin/import-job/${encodeURIComponent(jobId)}`, { headers });
-      if (!res.ok) {
-        setImporting(false);
-        setCsvProgress(null);
-        await CsvQueueStorage.savePatch({ activeImportJobId: null });
-        return;
-      }
-      const { job } = await parseJsonSafely<any>(res);
-      if (!job) return;
-
-      if (job.status === 'RUNNING') {
-        setImporting(true);
-        setCsvProgress({
-          active: true,
-          phase: 'importing',
-          totalFiles: job.totalFiles,
-          processedFiles: job.processedFiles,
-          totalBytes: job.totalBytes,
-          processedBytes: job.processedBytes,
-          processedRows: job.processedRows,
-          currentFileName: job.currentFileName || '',
-          percent: job.percent || 0,
-          etaSeconds: job.etaSeconds ?? null,
-          startedAt: job.startedAt,
-        });
-        pollTimerRef.current = window.setTimeout(() => {
-          pollImportJob(jobId);
-        }, 350);
-      } else if (job.status === 'COMPLETED') {
-        await finalizeCompletedImportJob(job);
-      } else if (job.status === 'FAILED') {
-        setImporting(false);
-        setCsvProgress(null);
-        setActionErrorMsg(
-          job.error || t('Quá trình nhập CSV trên máy chủ gặp lỗi.', 'The server CSV import job failed.')
-        );
-        await CsvQueueStorage.savePatch({ activeImportJobId: null });
-      }
-    } catch {
-      pollTimerRef.current = window.setTimeout(() => {
-        pollImportJob(jobId);
-      }, 1000);
-    }
-  };
-
   useEffect(() => {
     fetchPlatformStats();
     fetchStatus();
@@ -555,18 +472,14 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         setLastCompletedBatch(saved.lastCompletedBatch);
       }
 
-      if (saved?.activeImportJobId) {
-        setRestoredNotice(
-          t(
-            'Đã khôi phục thanh trạng thái ETA tiến trình nhập CSV sau khi tải lại trang.',
-            'Restored the CSV import ETA progress bar after page reload.'
-          )
-        );
-        pollImportJob(saved.activeImportJobId);
-      } else if (saved?.queuedFiles && saved.queuedFiles.length > 0) {
+      if (saved?.queuedFiles && saved.queuedFiles.length > 0) {
         queuedFilesRef.current = saved.queuedFiles;
         setQueuedFiles(saved.queuedFiles);
-        if (saved.batchPreview) {
+        const hasStaleCachedErrors =
+          !saved.batchPreview ||
+          saved.batchPreview.preview?.validRows === 0 ||
+          (saved.batchPreview.preview?.errors?.length || 0) > 0;
+        if (!hasStaleCachedErrors) {
           setBatchPreview(saved.batchPreview);
           setRestoredNotice(
             t(
@@ -588,9 +501,6 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
 
     return () => {
       mounted = false;
-      if (pollTimerRef.current) {
-        window.clearTimeout(pollTimerRef.current);
-      }
     };
   }, []);
 
@@ -694,11 +604,11 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       );
       return;
     }
-    if (targetEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+    if (isBootstrapAdminEmail(targetEmail)) {
       setAdminActionSuccess(
         t(
-          `${BOOTSTRAP_ADMIN_EMAIL} đã là Admin gốc mặc định của hệ thống.`,
-          `${BOOTSTRAP_ADMIN_EMAIL} is already the default root Admin.`
+          `${targetEmail} đã là Admin gốc mặc định của hệ thống.`,
+          `${targetEmail} is already a default root Admin.`
         )
       );
       setAdminEmailInput('');
@@ -779,211 +689,52 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     setActionErrorMsg(null);
     setSyncMessage(
       t(
-        'Đang kết nối NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...',
-        'Connecting to NASA POWER Daily API and syncing Vietnam grid cells...'
+        'Đang kết nối trực tiếp NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...',
+        'Connecting directly to NASA POWER Daily API and syncing Vietnam grid cells...'
       )
     );
     try {
-      const headers = await getAdminHeaders(true);
-      const res = await fetch('/api/admin/sync', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
-      });
-      const data = await parseJsonSafely<any>(res);
-      if (res.ok && data.status !== 'FAILED') {
-        setSyncMessage(
-          t(
-            `Đồng bộ thành công! Đã xử lý ${data.recordsSynced} bản ghi. Dữ liệu mới nhất: ${data.latestNasaDate}`,
-            `Sync completed! Processed ${data.recordsSynced} records. Latest data date: ${data.latestNasaDate}`
-          )
-        );
-        if (auth.currentUser) {
-          await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
-            syncType: 'NASA_POWER_API',
-            targetCellsCount: 531,
-            recordsSynced: Number(data.recordsSynced) || 0,
-            status: 'SUCCESS',
-            latestNasaDate: data.latestNasaDate,
-          });
-        }
-      } else {
-        setSyncMessage(
-          t(
-            `Lỗi đồng bộ: ${data.error || data.errorMessage || `NASA API không phản hồi (HTTP ${res.status})`}`,
-            `Sync error: ${data.error || data.errorMessage || `NASA API did not respond (HTTP ${res.status})`}`
-          )
-        );
+      const syncLog = await executeClientNasaPowerSync();
+      setSyncMessage(
+        t(
+          `Đồng bộ thành công! Đã xử lý ${syncLog.recordsSynced} bản ghi. Dữ liệu mới nhất: ${syncLog.latestNasaDate}`,
+          `Sync completed! Processed ${syncLog.recordsSynced} records. Latest data date: ${syncLog.latestNasaDate}`
+        )
+      );
+      if (auth.currentUser) {
+        await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
+          syncType: 'NASA_POWER_API',
+          targetCellsCount: syncLog.targetCellsCount,
+          recordsSynced: Number(syncLog.recordsSynced) || 0,
+          status: 'SUCCESS',
+          latestNasaDate: syncLog.latestNasaDate,
+        });
       }
-      fetchStatus();
+      await fetchStatus();
+      onDatasetUpdated?.();
     } catch (err: any) {
-      setSyncMessage(t(`Lỗi kết nối: ${err.message}`, `Connection error: ${err.message}`));
+      setSyncMessage(t(`Lỗi kết nối NASA POWER: ${err?.message || 'Unknown error'}`, `NASA POWER connection error: ${err?.message || 'Unknown error'}`));
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMessage(null), 8000);
     }
   };
 
-  const handleToggleAutoSync = async () => {
+  const handleToggleAutoSync = () => {
     if (!status) return;
-    const newState = !status.autoSyncEnabled;
-    try {
-      const headers = await getAdminHeaders(true);
-      const res = await fetch('/api/admin/toggle-auto-sync', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ enabled: newState }),
-      });
-      if (res.ok) {
-        setStatus({ ...status, autoSyncEnabled: newState });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const computeQueueSignature = (items: QueuedCsvFile[]): string =>
-    items.map((f) => `${f.key}:${f.size}:${f.content.length}`).join('|');
-
-  const splitContentOnLines = (content: string, maxChunkChars = 680_000): string[] => {
-    if (content.length <= maxChunkChars) return [content];
-    const parts: string[] = [];
-    let cursor = 0;
-    while (cursor < content.length) {
-      if (content.length - cursor <= maxChunkChars) {
-        parts.push(content.slice(cursor));
-        break;
-      }
-      const sliceEnd = cursor + maxChunkChars;
-      const lastNewline = content.lastIndexOf('\n', sliceEnd);
-      const cutAt = lastNewline > cursor ? lastNewline + 1 : sliceEnd;
-      parts.push(content.slice(cursor, cutAt));
-      cursor = cutAt;
-    }
-    return parts;
-  };
-
-  const uploadQueuedFilesInChunks = async (
-    items: QueuedCsvFile[],
-    headers: Record<string, string>,
-    phase: 'analyzing' | 'importing'
-  ): Promise<string> => {
-    const MAX_REQUEST_CHARS = 700_000;
-    type ChunkItem = {
-      fileName: string;
-      folderName: string;
-      partIndex: number;
-      totalParts: number;
-      content: string;
-    };
-
-    const allPieces: ChunkItem[] = [];
-    for (const f of items) {
-      const parts = splitContentOnLines(f.content, MAX_REQUEST_CHARS);
-      parts.forEach((partContent, idx) => {
-        allPieces.push({
-          fileName: f.fileName,
-          folderName: f.folderName,
-          partIndex: idx,
-          totalParts: parts.length,
-          content: partContent,
-        });
-      });
-    }
-
-    const requestBatches: ChunkItem[][] = [];
-    let currentBatch: ChunkItem[] = [];
-    let currentBatchChars = 0;
-    for (const piece of allPieces) {
-      const pieceLen = piece.content.length;
-      if (currentBatch.length > 0 && currentBatchChars + pieceLen > MAX_REQUEST_CHARS) {
-        requestBatches.push(currentBatch);
-        currentBatch = [];
-        currentBatchChars = 0;
-      }
-      currentBatch.push(piece);
-      currentBatchChars += pieceLen;
-    }
-    if (currentBatch.length > 0) {
-      requestBatches.push(currentBatch);
-    }
-
-    const startRes = await fetch('/api/admin/upload-session/start', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({}),
-    });
-    const startData = await parseJsonSafely<any>(startRes);
-    if (!startRes.ok || !startData?.sessionId) {
-      throw new Error(
-        startData?.error ||
-          t('Không thể khởi tạo phiên tải tệp lên máy chủ.', 'Unable to initialize server upload session.')
-      );
-    }
-    const sessionId = String(startData.sessionId);
-
-    const totalBytes = items.reduce((sum, f) => sum + f.size, 0);
-    const totalChars = Math.max(1, allPieces.reduce((sum, p) => sum + p.content.length, 0));
-    let sentChars = 0;
-    const startedAt = Date.now();
-
-    for (let b = 0; b < requestBatches.length; b++) {
-      const batch = requestBatches[b];
-      const chunkRes = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/chunk`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ items: batch }),
-      });
-      const chunkData = await parseJsonSafely<any>(chunkRes);
-      if (!chunkRes.ok) {
-        throw new Error(
-          chunkData?.error ||
-            t(
-              `Lỗi khi gửi gói dữ liệu CSV (${b + 1}/${requestBatches.length}).`,
-              `Error sending CSV data packet (${b + 1}/${requestBatches.length}).`
-            )
-        );
-      }
-
-      sentChars += batch.reduce((sum, p) => sum + p.content.length, 0);
-      const ratio = sentChars / totalChars;
-      const elapsedSec = (Date.now() - startedAt) / 1000;
-      const etaSeconds =
-        ratio > 0.05 && elapsedSec > 0.1
-          ? Math.max(1, Math.ceil((elapsedSec / ratio) * (1 - ratio)))
-          : null;
-
-      setCsvProgress({
-        active: true,
-        phase,
-        totalFiles: items.length,
-        processedFiles: Math.min(items.length, chunkData.receivedFilesCount || items.length),
-        totalBytes,
-        processedBytes: Math.round(totalBytes * ratio),
-        currentFileName:
-          batch[batch.length - 1]?.fileName || t('Đang truyền gói CSV...', 'Streaming CSV packet...'),
-        percent: phase === 'analyzing' ? Math.min(92, 50 + Math.round(ratio * 42)) : Math.min(45, 5 + Math.round(ratio * 40)),
-        etaSeconds,
-        startedAt,
-      });
-    }
-
-    stagedSessionRef.current = {
-      signature: computeQueueSignature(items),
-      sessionId,
-    };
-    return sessionId;
+    const nextState = setWarehouseAutoSyncEnabled(!status.autoSyncEnabled);
+    setStatus({ ...status, autoSyncEnabled: nextState });
   };
 
   const runBatchPreview = async (items: QueuedCsvFile[]) => {
     if (items.length === 0) {
-      stagedSessionRef.current = null;
       setBatchPreview(null);
       await CsvQueueStorage.savePatch({ batchPreview: null });
       return;
     }
     setPreviewing(true);
     setActionErrorMsg(null);
+    const startedAt = Date.now();
     const totalBytes = items.reduce((sum, f) => sum + f.size, 0);
     setCsvProgress({
       active: true,
@@ -992,26 +743,29 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       processedFiles: 0,
       totalBytes,
       processedBytes: 0,
-      currentFileName: t('Đang chia nhỏ & gửi tệp CSV an toàn...', 'Chunking & uploading CSV files safely...'),
-      percent: 50,
+      currentFileName: items[0]?.fileName || '',
+      percent: 5,
       etaSeconds: null,
-      startedAt: Date.now(),
+      startedAt,
     });
     try {
-      const headers = await getAdminHeaders(true);
-      const sessionId = await uploadQueuedFilesInChunks(items, headers, 'analyzing');
-      const res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/preview`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
+      const data = await previewBatchCsvFilesClient(items, (p) => {
+        setCsvProgress({
+          active: true,
+          phase: 'analyzing',
+          totalFiles: p.totalFiles,
+          processedFiles: p.processedFiles,
+          totalBytes: p.totalBytes,
+          processedBytes: p.processedBytes,
+          processedRows: p.processedRows,
+          currentFileName: p.currentFileName,
+          percent: p.percent,
+          etaSeconds: p.etaSeconds,
+          startedAt,
+        });
       });
-      const data = await parseJsonSafely<any>(res);
-      if (res.ok) {
-        setBatchPreview(data);
-        await CsvQueueStorage.savePatch({ batchPreview: data, readingProgress: null });
-      } else {
-        setActionErrorMsg(data.error || t('Không thể kiểm tra cấu trúc các tệp CSV.', 'Unable to validate CSV file structure.'));
-      }
+      setBatchPreview(data);
+      await CsvQueueStorage.savePatch({ batchPreview: data, readingProgress: null });
     } catch (err: any) {
       setActionErrorMsg(err?.message || t('Lỗi khi kiểm tra hàng loạt tệp CSV.', 'Error validating batch CSV files.'));
     } finally {
@@ -1243,7 +997,6 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   };
 
   const handleClearQueue = async () => {
-    stagedSessionRef.current = null;
     queuedFilesRef.current = [];
     setQueuedFiles([]);
     setBatchPreview(null);
@@ -1261,6 +1014,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
 
     setImporting(true);
     setActionErrorMsg(null);
+    const startedAt = Date.now();
     const totalBytes = queuedFiles.reduce((sum, f) => sum + f.size, 0);
     setCsvProgress({
       active: true,
@@ -1271,73 +1025,52 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       processedBytes: 0,
       processedRows: 0,
       currentFileName: queuedFiles[0]?.fileName || '',
-      percent: 2,
+      percent: 5,
       etaSeconds: null,
-      startedAt: Date.now(),
+      startedAt,
     });
     try {
-      const headers = await getAdminHeaders(true);
-      const sig = computeQueueSignature(queuedFiles);
-      let sessionId =
-        stagedSessionRef.current?.signature === sig ? stagedSessionRef.current.sessionId : '';
-
-      if (!sessionId) {
-        sessionId = await uploadQueuedFilesInChunks(queuedFiles, headers, 'importing');
-      }
-
-      let res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/import-async`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
+      const { importRecord, batchSummary } = await runClientBatchImport(queuedFiles, (p) => {
+        setCsvProgress({
+          active: true,
+          phase: 'importing',
+          totalFiles: p.totalFiles,
+          processedFiles: p.processedFiles,
+          totalBytes: p.totalBytes,
+          processedBytes: p.processedBytes,
+          processedRows: p.processedRows,
+          currentFileName: p.currentFileName,
+          percent: Math.max(5, p.percent),
+          etaSeconds: p.etaSeconds,
+          startedAt,
+        });
       });
 
-      if (res.status === 404) {
-        sessionId = await uploadQueuedFilesInChunks(queuedFiles, headers, 'importing');
-        res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/import-async`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({}),
-        });
-      }
-
-      const data = await parseJsonSafely<any>(res);
-      if (res.ok && data.job?.jobId) {
-        stagedSessionRef.current = null;
-        await CsvQueueStorage.savePatch({ activeImportJobId: data.job.jobId });
-        pollImportJob(data.job.jobId);
-      } else {
-        setImporting(false);
-        setCsvProgress(null);
-        setActionErrorMsg(data.error || t('Không thể nhập hàng loạt dữ liệu CSV.', 'Unable to run batch CSV import.'));
-      }
+      await finalizeCompletedImport(importRecord, batchSummary);
     } catch (err: any) {
       setImporting(false);
       setCsvProgress(null);
-      setActionErrorMsg(t(`Lỗi khi nhập dữ liệu: ${err.message}`, `Data import error: ${err.message}`));
+      setActionErrorMsg(t(`Lỗi khi nhập dữ liệu: ${err?.message || 'Unknown error'}`, `Data import error: ${err?.message || 'Unknown error'}`));
     }
   };
 
   const handleRollback = async (version: string) => {
     setActionErrorMsg(null);
     try {
-      const headers = await getAdminHeaders(true);
-      const res = await fetch('/api/admin/rollback', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ version }),
-      });
-
-      const data = await parseJsonSafely<any>(res);
-      if (res.ok) {
-        setRollbackSuccessMsg(data.message);
-        setConfirmRollbackVer(null);
-        fetchStatus();
-        setTimeout(() => setRollbackSuccessMsg(null), 6000);
-      } else {
-        setActionErrorMsg(data.error || t('Không thể khôi phục phiên bản.', 'Unable to roll back version.'));
-      }
+      await FirestoreService.rollbackNasaDatasetVersion(version);
+      setWarehouseActiveVersion(version);
+      setRollbackSuccessMsg(
+        t(
+          `Đã khôi phục thành công kho dữ liệu về phiên bản ${version}.`,
+          `Successfully rolled back warehouse dataset to version ${version}.`
+        )
+      );
+      setConfirmRollbackVer(null);
+      onDatasetUpdated?.();
+      await fetchStatus();
+      setTimeout(() => setRollbackSuccessMsg(null), 6000);
     } catch (err: any) {
-      setActionErrorMsg(err.message);
+      setActionErrorMsg(err?.message || t('Không thể khôi phục phiên bản.', 'Unable to roll back version.'));
     }
   };
 
@@ -1839,7 +1572,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 {t('Danh sách Tài khoản Nông dân & Quản trị viên', 'Farmers & Administrators Directory')}
               </h2>
               <p className="text-xs text-stone-500">
-                {t('Admin gốc mặc định:', 'Default root Admin:')} <strong className="font-mono text-stone-800">{BOOTSTRAP_ADMIN_EMAIL}</strong>. {t('Quản trị viên có thể cấp hoặc gỡ quyền Admin cho các tài khoản Google khác.', 'Administrators can grant or revoke Admin privileges for other Google accounts.')}
+                {t('Admin gốc mặc định:', 'Default root Admins:')} <strong className="font-mono text-stone-800">{BOOTSTRAP_ADMIN_EMAILS.join(', ')}</strong>. {t('Quản trị viên có thể cấp hoặc gỡ quyền Admin cho các tài khoản Google khác.', 'Administrators can grant or revoke Admin privileges for other Google accounts.')}
               </p>
             </div>
           </div>
@@ -1913,8 +1646,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 </thead>
                 <tbody className="divide-y divide-stone-100">
                   {platformStats.users.map((u) => {
-                    const isBootstrap =
-                      u.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+                    const isBootstrap = isBootstrapAdminEmail(u.email);
                     return (
                       <tr key={u.uid} className="hover:bg-stone-50/70">
                         <td className="p-3 font-bold text-stone-900">{u.displayName}</td>
@@ -2763,33 +2495,35 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             </div>
           </div>
 
-          {/* SECTION 4: SUPABASE DDL SCHEMA REFERENCE */}
+          {/* SECTION 4: FIRESTORE WAREHOUSE & ZERO-TRUST RULES REFERENCE */}
           <div className="bg-stone-900 rounded-2xl p-6 text-white border border-stone-800 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-emerald-400" />
                 <h3 className="font-bold text-sm text-stone-100">
-                  {t('Kiến trúc Kho Dữ liệu Tập trung & Bảo mật Phân quyền', 'Central Data Warehouse Architecture & Access Control')}
+                  {t('Kiến trúc Cloud Firestore & Bảo mật Zero-Trust Rules', 'Cloud Firestore Architecture & Zero-Trust Access Control')}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(`-- See /src/db/supabase_schema.sql in repository source`);
+                  navigator.clipboard.writeText(
+                    `users/{uid}/plots/{plotId} · users/{uid}/plans/{planId} · users/{uid}/tasks/{taskId} · users/{uid}/feedbacks/{feedbackId} · nasa_datasets/{datasetId}`
+                  );
                   setCopiedSql(true);
                   setTimeout(() => setCopiedSql(false), 3000);
                 }}
                 className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-300 px-3 py-1.5 rounded-lg border border-stone-700 flex items-center gap-1.5 transition cursor-pointer"
               >
                 {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedSql ? t('Đã sao chép', 'Copied') : t('Sao chép đường dẫn DDL', 'Copy DDL path')}
+                {copiedSql ? t('Đã sao chép', 'Copied') : t('Sao chép cấu trúc Collection', 'Copy Collection Paths')}
               </button>
             </div>
 
             <p className="text-xs text-stone-400 leading-relaxed">
               {t(
-                'Dữ liệu NASA POWER nhập từ nhiều thư mục CSV được chuẩn hóa về 531 ô lưới Việt Nam với khóa duy nhất chống trùng lặp theo ô lưới, ngày và mã chỉ số. Chỉ tài khoản Quản trị viên mới có quyền đọc toàn hệ thống và ghi bổ sung kho dữ liệu NASA.',
-                'NASA POWER CSV batches are normalized onto the 531 Vietnam 0.5° grid cells with a composite uniqueness key on cell, date, and indicator code. Only Administrator accounts can inspect platform-wide records and append data to the NASA warehouse.'
+                'Dữ liệu người dùng (thửa ruộng, kế hoạch luân canh, công việc, phản hồi và chỉ số NASA Earth) được cô lập hoàn toàn theo users/{uid}/* và bảo vệ bởi Firestore Security Rules. Dữ liệu NASA POWER nhiều thư mục CSV được chuẩn hóa trực tiếp trên trình duyệt theo 531 ô lưới Việt Nam và lưu vào Cloud Firestore.',
+                'User farm data (plots, rotation plans, tasks, feedback, and Earth metrics) is strictly isolated under users/{uid}/* and enforced by Firestore Security Rules. Multi-folder NASA POWER CSV batches are normalized client-side onto the 531 Vietnam grid cells and persisted to Cloud Firestore.'
               )}
             </p>
           </div>

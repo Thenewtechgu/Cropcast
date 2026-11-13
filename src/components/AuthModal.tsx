@@ -46,8 +46,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (cleanUser.length < 3) {
       setError(
         t(
-          'Tên đăng nhập cần có ít nhất 3 ký tự (chữ cái, số, dấu chấm hoặc gạch dưới).',
-          'Username must be at least 3 characters (letters, numbers, dot, or underscore).'
+          'Vui lòng nhập Email hợp lệ hoặc tên đăng nhập từ 3 ký tự trở lên.',
+          'Please enter a valid Email or a username of at least 3 characters.'
         )
       );
       return;
@@ -176,14 +176,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-3.5 text-xs sm:text-sm">
             <div>
               <label className="font-bold text-stone-800 block mb-1 text-xs">
-                {t('Tên đăng nhập', 'Username')}
+                {t('Email hoặc Tên đăng nhập', 'Email or Username')}
               </label>
               <div className="relative">
                 <User className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  autoComplete="username"
-                  placeholder={t('VD: nongdan_hanoi', 'e.g. farmer_hanoi')}
+                  autoComplete="email"
+                  placeholder={t('VD: nongdan@gmail.com hoặc nongdan_hanoi', 'e.g. farmer@gmail.com or farmer_hanoi')}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-base sm:text-sm"
@@ -237,8 +237,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               {mode === 'signin'
-                ? t('Đăng nhập bằng Tên đăng nhập', 'Sign in with Username')
-                : t('Đăng ký ngay', 'Register Now')}
+                ? t('Đăng nhập với Email / Tài khoản', 'Sign in with Email / Account')
+                : t('Đăng ký tài khoản mới', 'Create Account')}
             </button>
           </form>
 

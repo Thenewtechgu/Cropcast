@@ -1,4 +1,3 @@
-import { parseJsonSafely } from './httpClient';
 import {
   arrayRemove,
   arrayUnion,
@@ -20,35 +19,48 @@ import {
   signInWithPopup,
   signOut,
   updateProfile,
+  User as FirebaseUser,
 } from 'firebase/auth';
 import {
   auth,
-  BOOTSTRAP_ADMIN_EMAIL,
   db,
   googleProvider,
   handleFirestoreError,
+  isBootstrapAdminEmail,
   OperationType,
 } from '../firebase';
 import {
   AdminPlatformStats,
   AdminUserSummary,
   AppUser,
+  EarthEnvironmentSnapshot,
   FarmTask,
   FeedbackRecord,
   FieldProfile,
+  PlotPlanRecord,
 } from '../types';
 import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
 
-const LOCAL_TOKEN_KEY = 'cropcast_local_auth_token';
-
-function normalizeUsernameToInternalEmail(rawInput: string): {
+function normalizeLoginIdentifier(rawInput: string): {
   username: string;
   email: string;
   displayName: string;
 } {
   const trimmed = rawInput.trim();
-  const base = trimmed.includes('@') ? trimmed.split('@')[0] : trimmed;
-  const safeUser = base
+  if (trimmed.includes('@')) {
+    const email = trimmed.toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+      throw new Error('Địa chỉ Email chưa hợp lệ. Vui lòng kiểm tra lại (VD: nongdan@gmail.com).');
+    }
+    const localPart = email.split('@')[0] || 'farmer';
+    return {
+      username: localPart.slice(0, 60),
+      email,
+      displayName: localPart.slice(0, 120) || 'Nông dân CropCast',
+    };
+  }
+
+  const safeUser = trimmed
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
@@ -56,167 +68,53 @@ function normalizeUsernameToInternalEmail(rawInput: string): {
     .toLowerCase()
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9._-]/g, '');
+
   if (safeUser.length < 3) {
     throw new Error(
-      'Tên đăng nhập cần tối thiểu 3 ký tự (chữ cái, số, dấu chấm hoặc gạch dưới).'
+      'Email hoặc tên đăng nhập cần tối thiểu 3 ký tự hợp lệ.'
     );
   }
+
   return {
     username: safeUser.slice(0, 40),
     email: `${safeUser}@users.cropcast.app`,
-    displayName: trimmed || safeUser,
+    displayName: (trimmed || safeUser).slice(0, 120),
   };
 }
 
 function mapAuthErrorMessage(err: any): string {
   const code = err?.code || '';
   if (code === 'auth/email-already-in-use') {
-    return 'Tên đăng nhập này đã có người sử dụng. Vui lòng chọn tên khác hoặc chuyển sang Đăng nhập.';
+    return 'Email hoặc tài khoản này đã được đăng ký. Vui lòng chuyển sang Đăng nhập.';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'Địa chỉ Email không đúng định dạng.';
   }
   if (
     code === 'auth/invalid-credential' ||
     code === 'auth/wrong-password' ||
     code === 'auth/user-not-found'
   ) {
-    return 'Tên đăng nhập hoặc mật khẩu chưa đúng.';
+    return 'Email / tên đăng nhập hoặc mật khẩu chưa đúng.';
   }
   if (code === 'auth/weak-password') {
     return 'Mật khẩu quá yếu. Vui lòng dùng ít nhất 6 ký tự.';
   }
+  if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
+    return 'Phương thức Email/Mật khẩu chưa được bật trong Firebase Console (Authentication → Sign-in method → Email/Password). Bạn có thể bật trong Firebase Console hoặc đăng nhập nhanh bằng Google.';
+  }
   if (code === 'auth/popup-closed-by-user') {
     return 'Bạn đã đóng cửa sổ đăng nhập Google.';
   }
+  if (code === 'auth/popup-blocked') {
+    return 'Trình duyệt đang chặn cửa sổ bật lên Google Sign-In. Vui lòng cho phép popup cho trang này.';
+  }
   if (code === 'auth/unauthorized-domain') {
     const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    return `Tên miền "${host}" chưa được cấp phép trong Firebase Authentication (Authorized domains). Hãy hoàn tất bước thiết lập Firebase hoặc thêm tên miền này trong Firebase Console -> Authentication -> Settings -> Authorized domains.`;
+    return `Tên miền "${host}" chưa được cấp phép trong Firebase Authentication (Authorized domains). Hãy thêm tên miền này trong Firebase Console → Authentication → Settings → Authorized domains.`;
   }
   return err?.message || 'Không thể đăng nhập lúc này. Vui lòng thử lại.';
 }
-
-async function localApiFetch(path: string, options: RequestInit = {}) {
-  const token = localStorage.getItem(LOCAL_TOKEN_KEY) || '';
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...((options.headers as Record<string, string>) || {}),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(path, { ...options, headers });
-  const data = await parseJsonSafely<any>(res).catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 404 && !data?.error) {
-      throw new Error(
-        'Máy chủ xác thực không tìm thấy dịch vụ tài khoản (404). Vui lòng tải lại trang hoặc đăng nhập bằng tài khoản Google.'
-      );
-    }
-    throw new Error(data?.error || `Lỗi máy chủ (${res.status})`);
-  }
-  return data;
-}
-
-export const LocalServerStorage = {
-  getToken(): string | null {
-    try {
-      return localStorage.getItem(LOCAL_TOKEN_KEY);
-    } catch {
-      return null;
-    }
-  },
-  clearToken() {
-    try {
-      localStorage.removeItem(LOCAL_TOKEN_KEY);
-    } catch {
-      // ignore
-    }
-  },
-  async restoreSession(): Promise<AppUser | null> {
-    const token = this.getToken();
-    if (!token) return null;
-    try {
-      const data = await localApiFetch('/api/auth/me');
-      return data.user as AppUser;
-    } catch {
-      this.clearToken();
-      return null;
-    }
-  },
-  async fetchState(): Promise<{
-    fields: FieldProfile[];
-    tasks: FarmTask[];
-    feedbacks: FeedbackRecord[];
-  }> {
-    return localApiFetch('/api/local/state');
-  },
-  async createField(fieldData: Omit<FieldProfile, 'id' | 'nasaGrid'>): Promise<FieldProfile> {
-    const data = await localApiFetch('/api/local/fields', {
-      method: 'POST',
-      body: JSON.stringify(fieldData),
-    });
-    return data.field;
-  },
-  async updateField(field: FieldProfile): Promise<FieldProfile> {
-    const data = await localApiFetch(`/api/local/fields/${encodeURIComponent(field.id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(field),
-    });
-    return data.field;
-  },
-  async deleteField(fieldId: string): Promise<void> {
-    await localApiFetch(`/api/local/fields/${encodeURIComponent(fieldId)}`, {
-      method: 'DELETE',
-    });
-  },
-  async createTasks(tasks: FarmTask[]): Promise<FarmTask[]> {
-    const data = await localApiFetch('/api/local/tasks', {
-      method: 'POST',
-      body: JSON.stringify({ tasks }),
-    });
-    return data.tasks;
-  },
-  async updateTaskStatus(taskId: string, status: FarmTask['status'], note?: string): Promise<void> {
-    await localApiFetch(`/api/local/tasks/${encodeURIComponent(taskId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status, note }),
-    });
-  },
-  async createFeedback(fb: Omit<FeedbackRecord, 'id' | 'timestamp'>): Promise<void> {
-    await localApiFetch('/api/local/feedbacks', {
-      method: 'POST',
-      body: JSON.stringify(fb),
-    });
-  },
-  async createShareLink(fieldId: string): Promise<string> {
-    const data = await localApiFetch('/api/local/shares/link', {
-      method: 'POST',
-      body: JSON.stringify({ fieldId }),
-    });
-    return data.shareToken;
-  },
-  async revokeShareLink(fieldId: string): Promise<void> {
-    await localApiFetch('/api/local/shares/revoke', {
-      method: 'POST',
-      body: JSON.stringify({ fieldId }),
-    });
-  },
-  async shareByTarget(fieldId: string, target: string): Promise<string> {
-    const data = await localApiFetch('/api/local/shares/target', {
-      method: 'POST',
-      body: JSON.stringify({ fieldId, target }),
-    });
-    return data.target;
-  },
-  async removeSharedTarget(fieldId: string, target: string): Promise<void> {
-    await localApiFetch('/api/local/shares/remove-target', {
-      method: 'POST',
-      body: JSON.stringify({ fieldId, target }),
-    });
-  },
-  async redeemShareLink(token: string): Promise<{ fieldId: string; fieldName: string; ownerName: string }> {
-    return localApiFetch('/api/local/shares/redeem', {
-      method: 'POST',
-      body: JSON.stringify({ token }),
-    });
-  },
-};
 
 export interface UploadedNasaDatasetDoc {
   id: string;
@@ -238,23 +136,75 @@ export interface UploadedNasaDatasetDoc {
   createdAt?: any;
 }
 
+function mapPlotDocToField(d: any, currentUid: string): FieldProfile {
+  const data = d.data();
+  return {
+    id: d.id,
+    ownerId: data.ownerId,
+    ownerName: data.ownerName,
+    sharedWithEmails: data.sharedWithEmails || [],
+    sharedWithUids: data.sharedWithUids || [],
+    activeShareToken: data.activeShareToken || '',
+    isSharedWithMe: data.ownerId !== currentUid,
+    name: data.name,
+    province: data.province,
+    district: data.district,
+    lat: data.lat,
+    lon: data.lon,
+    areaHa: data.areaHa,
+    soilType: data.soilType,
+    soilCharacteristics: data.soilCharacteristics,
+    waterSource: data.waterSource,
+    crop: data.crop,
+    primaryGoal: data.primaryGoal,
+    inspectTime: data.inspectTime,
+    notificationMethod: data.notificationMethod,
+    nasaGrid: data.nasaGrid,
+    adaptiveMemory: data.adaptiveMemory,
+  } as FieldProfile;
+}
+
 export const FirestoreService = {
-  async signUpWithUsername(username: string, password: string): Promise<AppUser> {
-    const { username: cleanUser, email, displayName } = normalizeUsernameToInternalEmail(username);
+  async ensureUserProfile(
+    fbUser: FirebaseUser,
+    fallbackDisplayName?: string,
+    fallbackEmail?: string
+  ): Promise<void> {
+    const userPath = `users/${fbUser.uid}`;
+    const userRef = doc(db, 'users', fbUser.uid);
+    const resolvedName = (
+      fbUser.displayName ||
+      fallbackDisplayName ||
+      'Nông dân CropCast'
+    ).slice(0, 120);
+    const resolvedEmail = (fbUser.email || fallbackEmail || '').slice(0, 200);
+    const resolvedPhoto = (fbUser.photoURL || '').slice(0, 500);
+
+    try {
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) {
+        await setDoc(userRef, {
+          uid: fbUser.uid,
+          displayName: resolvedName,
+          email: resolvedEmail,
+          photoURL: resolvedPhoto,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, userPath);
+    }
+  },
+
+  async signUpWithUsername(identifier: string, password: string): Promise<AppUser> {
+    const { username: cleanUser, email, displayName } = normalizeLoginIdentifier(identifier);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       const fbUser = result.user;
-      await updateProfile(fbUser, { displayName });
+      await updateProfile(fbUser, { displayName }).catch(() => {});
 
-      const userRef = doc(db, 'users', fbUser.uid);
-      await setDoc(userRef, {
-        uid: fbUser.uid,
-        displayName,
-        email,
-        photoURL: '',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await this.ensureUserProfile(fbUser, displayName, email);
 
       return {
         uid: fbUser.uid,
@@ -266,41 +216,19 @@ export const FirestoreService = {
         authMode: 'firebase',
       };
     } catch (err: any) {
-      if (
-        err?.code === 'auth/operation-not-allowed' ||
-        err?.code === 'auth/unauthorized-domain'
-      ) {
-        const data = await localApiFetch('/api/auth/signup', {
-          method: 'POST',
-          body: JSON.stringify({ username, password }),
-        });
-        localStorage.setItem(LOCAL_TOKEN_KEY, data.token);
-        return data.user as AppUser;
-      }
       throw new Error(mapAuthErrorMessage(err));
     }
   },
 
-  async signInWithUsername(username: string, password: string): Promise<AppUser> {
-    const { username: cleanUser, email, displayName } = normalizeUsernameToInternalEmail(username);
+  async signInWithUsername(identifier: string, password: string): Promise<AppUser> {
+    const { username: cleanUser, email, displayName } = normalizeLoginIdentifier(identifier);
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       const fbUser = result.user;
       const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email, fbUser.emailVerified);
-      const resolvedName = fbUser.displayName || displayName || 'Nông dân CropCast';
+      const resolvedName = (fbUser.displayName || displayName || 'Nông dân CropCast').slice(0, 120);
 
-      const userRef = doc(db, 'users', fbUser.uid);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
-        await setDoc(userRef, {
-          uid: fbUser.uid,
-          displayName: resolvedName,
-          email: fbUser.email || email,
-          photoURL: fbUser.photoURL || '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
+      await this.ensureUserProfile(fbUser, resolvedName, email);
 
       return {
         uid: fbUser.uid,
@@ -313,28 +241,6 @@ export const FirestoreService = {
         authMode: 'firebase',
       };
     } catch (err: any) {
-      if (
-        err?.code === 'auth/operation-not-allowed' ||
-        err?.code === 'auth/unauthorized-domain' ||
-        err?.code === 'auth/user-not-found' ||
-        err?.code === 'auth/invalid-credential'
-      ) {
-        try {
-          const data = await localApiFetch('/api/auth/signin', {
-            method: 'POST',
-            body: JSON.stringify({ username, password }),
-          });
-          localStorage.setItem(LOCAL_TOKEN_KEY, data.token);
-          return data.user as AppUser;
-        } catch (localErr: any) {
-          if (
-            err?.code === 'auth/operation-not-allowed' ||
-            err?.code === 'auth/unauthorized-domain'
-          ) {
-            throw localErr;
-          }
-        }
-      }
       throw new Error(mapAuthErrorMessage(err));
     }
   },
@@ -345,33 +251,35 @@ export const FirestoreService = {
       const fbUser = result.user;
       const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email, fbUser.emailVerified);
 
-      // Ensure user profile doc exists in /users/{uid}
+      const userPath = `users/${fbUser.uid}`;
       const userRef = doc(db, 'users', fbUser.uid);
+      const resolvedName = (fbUser.displayName || 'Nông dân CropCast').slice(0, 120);
+      const resolvedPhoto = (fbUser.photoURL || '').slice(0, 500);
       try {
         const existingSnap = await getDoc(userRef);
         if (!existingSnap.exists()) {
           await setDoc(userRef, {
             uid: fbUser.uid,
-            displayName: fbUser.displayName || 'Nông dân CropCast',
-            email: fbUser.email || '',
-            photoURL: fbUser.photoURL || '',
+            displayName: resolvedName,
+            email: (fbUser.email || '').slice(0, 200),
+            photoURL: resolvedPhoto,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
         } else {
           await updateDoc(userRef, {
-            displayName: fbUser.displayName || 'Nông dân CropCast',
-            photoURL: fbUser.photoURL || '',
+            displayName: resolvedName,
+            photoURL: resolvedPhoto,
             updatedAt: serverTimestamp(),
           });
         }
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${fbUser.uid}`);
+        handleFirestoreError(err, OperationType.WRITE, userPath);
       }
 
       return {
         uid: fbUser.uid,
-        displayName: fbUser.displayName || 'Nông dân CropCast',
+        displayName: resolvedName,
         email: fbUser.email || '',
         photoURL: fbUser.photoURL || undefined,
         emailVerified: fbUser.emailVerified,
@@ -384,17 +292,16 @@ export const FirestoreService = {
   },
 
   async signOutUser(): Promise<void> {
-    LocalServerStorage.clearToken();
     try {
       await signOut(auth);
     } catch {
-      // ignore if user was only signed in locally
+      // ignore sign-out error
     }
   },
 
   async checkIsAdmin(uid: string, email?: string | null, emailVerified?: boolean): Promise<boolean> {
     if (!emailVerified) return false;
-    if (email && email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+    if (isBootstrapAdminEmail(email)) {
       return true;
     }
     try {
@@ -412,67 +319,59 @@ export const FirestoreService = {
     onError?: (err: Error) => void
   ) {
     const ownedMap = new Map<string, FieldProfile>();
-    const sharedUidMap = new Map<string, FieldProfile>();
+    const sharedRefMap = new Map<string, FieldProfile>();
     const sharedEmailMap = new Map<string, FieldProfile>();
-
-    const mapDoc = (d: any): FieldProfile => {
-      const data = d.data();
-      return {
-        id: d.id,
-        ownerId: data.ownerId,
-        ownerName: data.ownerName,
-        sharedWithEmails: data.sharedWithEmails || [],
-        sharedWithUids: data.sharedWithUids || [],
-        activeShareToken: data.activeShareToken || '',
-        isSharedWithMe: data.ownerId !== uid,
-        name: data.name,
-        province: data.province,
-        district: data.district,
-        lat: data.lat,
-        lon: data.lon,
-        areaHa: data.areaHa,
-        soilType: data.soilType,
-        soilCharacteristics: data.soilCharacteristics,
-        waterSource: data.waterSource,
-        crop: data.crop,
-        primaryGoal: data.primaryGoal,
-        inspectTime: data.inspectTime,
-        notificationMethod: data.notificationMethod,
-        nasaGrid: data.nasaGrid,
-        adaptiveMemory: data.adaptiveMemory,
-      } as FieldProfile;
-    };
 
     const emitMerged = () => {
       const merged = new Map<string, FieldProfile>();
       sharedEmailMap.forEach((v, k) => merged.set(k, v));
-      sharedUidMap.forEach((v, k) => merged.set(k, v));
+      sharedRefMap.forEach((v, k) => merged.set(k, v));
       ownedMap.forEach((v, k) => merged.set(k, v));
       onData(Array.from(merged.values()));
     };
 
+    const plotsPath = `users/${uid}/plots`;
     const unsubOwned = onSnapshot(
-      query(collection(db, 'fields'), where('ownerId', '==', uid)),
+      collection(db, 'users', uid, 'plots'),
       (snap) => {
         ownedMap.clear();
-        snap.docs.forEach((d) => ownedMap.set(d.id, mapDoc(d)));
+        snap.docs.forEach((d) => ownedMap.set(d.id, mapPlotDocToField(d, uid)));
         emitMerged();
       },
       (err) => {
         if (onError) onError(err);
-        handleFirestoreError(err, OperationType.LIST, 'fields');
+        handleFirestoreError(err, OperationType.LIST, plotsPath);
       }
     );
 
-    const unsubSharedUid = onSnapshot(
-      query(collection(db, 'fields'), where('sharedWithUids', 'array-contains', uid)),
-      (snap) => {
-        sharedUidMap.clear();
-        snap.docs.forEach((d) => sharedUidMap.set(d.id, mapDoc(d)));
+    const sharedRefsPath = `users/${uid}/shared_refs`;
+    const unsubSharedRefs = onSnapshot(
+      collection(db, 'users', uid, 'shared_refs'),
+      async (snap) => {
+        const nextMap = new Map<string, FieldProfile>();
+        await Promise.all(
+          snap.docs.map(async (refDoc) => {
+            const refData = refDoc.data();
+            const ownerId = String(refData.ownerId || '');
+            const plotId = String(refData.plotId || refDoc.id);
+            if (!ownerId || !plotId || ownerId === uid) return;
+            try {
+              const plotSnap = await getDoc(doc(db, 'users', ownerId, 'plots', plotId));
+              if (plotSnap.exists()) {
+                nextMap.set(plotSnap.id, mapPlotDocToField(plotSnap, uid));
+              }
+            } catch {
+              // Revoked or inaccessible shared plot — silently omit
+            }
+          })
+        );
+        sharedRefMap.clear();
+        nextMap.forEach((v, k) => sharedRefMap.set(k, v));
         emitMerged();
       },
-      () => {
-        // Ignore secondary listener permission edge cases
+      (err) => {
+        if (onError) onError(err);
+        handleFirestoreError(err, OperationType.LIST, sharedRefsPath);
       }
     );
 
@@ -480,10 +379,28 @@ export const FirestoreService = {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (normalizedEmail) {
       unsubSharedEmail = onSnapshot(
-        query(collection(db, 'fields'), where('sharedWithEmails', 'array-contains', normalizedEmail)),
-        (snap) => {
+        query(collection(db, 'field_shares'), where('targetEmail', '==', normalizedEmail)),
+        async (snap) => {
+          const nextMap = new Map<string, FieldProfile>();
+          await Promise.all(
+            snap.docs.map(async (shareDoc) => {
+              const shareData = shareDoc.data();
+              if (shareData.isActive === false) return;
+              const ownerId = String(shareData.ownerId || '');
+              const plotId = String(shareData.fieldId || '');
+              if (!ownerId || !plotId || ownerId === uid) return;
+              try {
+                const plotSnap = await getDoc(doc(db, 'users', ownerId, 'plots', plotId));
+                if (plotSnap.exists()) {
+                  nextMap.set(plotSnap.id, mapPlotDocToField(plotSnap, uid));
+                }
+              } catch {
+                // Revoked or inaccessible email invite
+              }
+            })
+          );
           sharedEmailMap.clear();
-          snap.docs.forEach((d) => sharedEmailMap.set(d.id, mapDoc(d)));
+          nextMap.forEach((v, k) => sharedEmailMap.set(k, v));
           emitMerged();
         },
         () => {
@@ -494,15 +411,15 @@ export const FirestoreService = {
 
     return () => {
       unsubOwned();
-      unsubSharedUid();
+      unsubSharedRefs();
       unsubSharedEmail();
     };
   },
 
   subscribeUserTasks(uid: string, onData: (tasks: FarmTask[]) => void) {
-    const q = query(collection(db, 'tasks'), where('ownerId', '==', uid));
+    const tasksPath = `users/${uid}/tasks`;
     return onSnapshot(
-      q,
+      collection(db, 'users', uid, 'tasks'),
       (snap) => {
         const list: FarmTask[] = snap.docs.map((d) => {
           const data = d.data();
@@ -523,14 +440,14 @@ export const FirestoreService = {
         });
         onData(list);
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'tasks')
+      (err) => handleFirestoreError(err, OperationType.LIST, tasksPath)
     );
   },
 
   subscribeUserFeedbacks(uid: string, onData: (items: FeedbackRecord[]) => void) {
-    const q = query(collection(db, 'feedbacks'), where('ownerId', '==', uid));
+    const feedbacksPath = `users/${uid}/feedbacks`;
     return onSnapshot(
-      q,
+      collection(db, 'users', uid, 'feedbacks'),
       (snap) => {
         const list: FeedbackRecord[] = snap.docs.map((d) => {
           const data = d.data();
@@ -548,8 +465,121 @@ export const FirestoreService = {
         });
         onData(list);
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'feedbacks')
+      (err) => handleFirestoreError(err, OperationType.LIST, feedbacksPath)
     );
+  },
+
+  subscribeUserPlans(uid: string, onData: (plans: Record<string, PlotPlanRecord>) => void) {
+    const plansPath = `users/${uid}/plans`;
+    return onSnapshot(
+      collection(db, 'users', uid, 'plans'),
+      (snap) => {
+        const record: Record<string, PlotPlanRecord> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          const plotId = String(data.plotId || d.id);
+          record[plotId] = {
+            id: d.id,
+            ownerId: String(data.ownerId || uid),
+            plotId,
+            priorities: Array.isArray(data.priorities) ? data.priorities : [],
+            constraints: data.constraints || {
+              waterAvailability: 'seasonal_limited',
+              equipmentAccess: 'basic_manual',
+              marketPreference: 'mixed_family',
+            },
+            activeStrategy: data.activeStrategy || undefined,
+            rejectedIds: Array.isArray(data.rejectedIds) ? data.rejectedIds : [],
+            rejectedTitles: Array.isArray(data.rejectedTitles) ? data.rejectedTitles : [],
+            lastRejectionNote: data.lastRejectionNote || undefined,
+            calendarCropKey: data.calendarCropKey || undefined,
+            updatedAt: data.updatedAt?.toDate?.()?.toISOString() || undefined,
+          };
+        });
+        onData(record);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, plansPath)
+    );
+  },
+
+  async savePlotPlan(
+    uid: string,
+    plotId: string,
+    planData: Omit<PlotPlanRecord, 'id' | 'ownerId' | 'plotId' | 'updatedAt'>
+  ): Promise<void> {
+    const planId = plotId;
+    const planPath = `users/${uid}/plans/${planId}`;
+    const ref = doc(db, 'users', uid, 'plans', planId);
+
+    const payload: Record<string, any> = {
+      ownerId: uid,
+      plotId,
+      priorities: (planData.priorities || []).slice(0, 10),
+      constraints: planData.constraints,
+      rejectedIds: (planData.rejectedIds || []).slice(0, 30),
+      rejectedTitles: (planData.rejectedTitles || []).slice(0, 30),
+      updatedAt: serverTimestamp(),
+    };
+    if (planData.activeStrategy) {
+      payload.activeStrategy = planData.activeStrategy;
+    }
+    if (planData.lastRejectionNote) {
+      payload.lastRejectionNote = planData.lastRejectionNote.slice(0, 500);
+    }
+    if (planData.calendarCropKey) {
+      payload.calendarCropKey = planData.calendarCropKey.slice(0, 40);
+    }
+
+    try {
+      const existingSnap = await getDoc(ref);
+      if (existingSnap.exists()) {
+        await updateDoc(ref, payload);
+      } else {
+        await setDoc(ref, {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, planPath);
+    }
+  },
+
+  async saveEarthMetricsSnapshot(
+    uid: string,
+    plotId: string,
+    snapshot: EarthEnvironmentSnapshot
+  ): Promise<void> {
+    const metricPath = `users/${uid}/earth_metrics/${plotId}`;
+    const ref = doc(db, 'users', uid, 'earth_metrics', plotId);
+    const payload: Record<string, any> = {
+      ownerId: uid,
+      fieldId: plotId,
+      syncedAt: snapshot.syncedAt.slice(0, 40),
+      sustainabilityScore: Number(snapshot.sustainabilityScore) || 0,
+      rotationAdvice: (snapshot.rotationAdvice || '').slice(0, 600),
+      rotationAdviceEn: (snapshot.rotationAdviceEn || '').slice(0, 600),
+      nasaPowerLastUpdated: (snapshot.nasaPowerLastUpdated || '').slice(0, 40),
+      smapModis: snapshot.smapModis || null,
+      carbonFluxOco2: snapshot.carbonFluxOco2,
+      groundwaterAnomalyGrace: snapshot.groundwaterAnomalyGrace,
+      greenhouseGasEdgar: snapshot.greenhouseGasEdgar,
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      const existingSnap = await getDoc(ref);
+      if (existingSnap.exists()) {
+        await updateDoc(ref, payload);
+      } else {
+        await setDoc(ref, {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, metricPath);
+    }
   },
 
   async createField(
@@ -593,10 +623,11 @@ export const FirestoreService = {
       payload.adaptiveMemory = fieldData.adaptiveMemory;
     }
 
+    const plotPath = `users/${uid}/plots/${fieldId}`;
     try {
-      await setDoc(doc(db, 'fields', fieldId), payload);
+      await setDoc(doc(db, 'users', uid, 'plots', fieldId), payload);
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `fields/${fieldId}`);
+      handleFirestoreError(err, OperationType.CREATE, plotPath);
     }
 
     return {
@@ -611,7 +642,8 @@ export const FirestoreService = {
     };
   },
 
-  async updateField(field: FieldProfile): Promise<void> {
+  async updateField(uid: string, field: FieldProfile): Promise<void> {
+    const targetOwnerUid = field.ownerId || uid;
     const { cell, distanceKm } = findNearestNasaGrid(field.lat, field.lon);
     const updatedGrid = {
       cellId: cell.cellId,
@@ -638,26 +670,40 @@ export const FirestoreService = {
     if (field.adaptiveMemory) {
       updateData.adaptiveMemory = field.adaptiveMemory;
     }
+    const plotPath = `users/${targetOwnerUid}/plots/${field.id}`;
     try {
-      await updateDoc(doc(db, 'fields', field.id), updateData);
+      await updateDoc(doc(db, 'users', targetOwnerUid, 'plots', field.id), updateData);
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `fields/${field.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, plotPath);
     }
   },
 
-  async deleteField(fieldId: string): Promise<void> {
+  async deleteField(uid: string, fieldId: string): Promise<void> {
+    const plotPath = `users/${uid}/plots/${fieldId}`;
     try {
-      await deleteDoc(doc(db, 'fields', fieldId));
+      await deleteDoc(doc(db, 'users', uid, 'plots', fieldId));
+      // Best-effort cleanup of child plan, earth metrics, tasks, feedbacks
+      await Promise.all([
+        deleteDoc(doc(db, 'users', uid, 'plans', fieldId)).catch(() => {}),
+        deleteDoc(doc(db, 'users', uid, 'earth_metrics', fieldId)).catch(() => {}),
+        getDocs(query(collection(db, 'users', uid, 'tasks'), where('fieldId', '==', fieldId)))
+          .then((snap) => Promise.all(snap.docs.map((d) => deleteDoc(d.ref).catch(() => {}))))
+          .catch(() => {}),
+        getDocs(query(collection(db, 'users', uid, 'feedbacks'), where('fieldId', '==', fieldId)))
+          .then((snap) => Promise.all(snap.docs.map((d) => deleteDoc(d.ref).catch(() => {}))))
+          .catch(() => {}),
+      ]);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `fields/${fieldId}`);
+      handleFirestoreError(err, OperationType.DELETE, plotPath);
     }
   },
 
   async createTasks(uid: string, tasks: FarmTask[]): Promise<void> {
     for (const t of tasks) {
       const taskId = `TASK_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const taskPath = `users/${uid}/tasks/${taskId}`;
       try {
-        await setDoc(doc(db, 'tasks', taskId), {
+        await setDoc(doc(db, 'users', uid, 'tasks', taskId), {
           ownerId: uid,
           fieldId: t.fieldId,
           title: t.title.slice(0, 200),
@@ -670,12 +716,13 @@ export const FirestoreService = {
           updatedAt: serverTimestamp(),
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `tasks/${taskId}`);
+        handleFirestoreError(err, OperationType.CREATE, taskPath);
       }
     }
   },
 
   async updateTaskStatus(
+    uid: string,
     taskId: string,
     status: FarmTask['status'],
     note?: string
@@ -687,10 +734,11 @@ export const FirestoreService = {
     if (note) {
       payload.farmerNote = note.slice(0, 500);
     }
+    const taskPath = `users/${uid}/tasks/${taskId}`;
     try {
-      await updateDoc(doc(db, 'tasks', taskId), payload);
+      await updateDoc(doc(db, 'users', uid, 'tasks', taskId), payload);
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `tasks/${taskId}`);
+      handleFirestoreError(err, OperationType.UPDATE, taskPath);
     }
   },
 
@@ -708,10 +756,11 @@ export const FirestoreService = {
     };
     if (fb.userComment) payload.userComment = fb.userComment.slice(0, 1000);
     if (fb.systemActionTaken) payload.systemActionTaken = fb.systemActionTaken.slice(0, 500);
+    const fbPath = `users/${uid}/feedbacks/${fbId}`;
     try {
-      await setDoc(doc(db, 'feedbacks', fbId), payload);
+      await setDoc(doc(db, 'users', uid, 'feedbacks', fbId), payload);
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `feedbacks/${fbId}`);
+      handleFirestoreError(err, OperationType.CREATE, fbPath);
     }
   },
 
@@ -721,6 +770,7 @@ export const FirestoreService = {
     dataset: Omit<UploadedNasaDatasetDoc, 'id' | 'uploadedBy' | 'isPublic' | 'createdAt'>
   ): Promise<string> {
     const datasetId = `NASA_DS_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const dsPath = `nasa_datasets/${datasetId}`;
     try {
       await setDoc(doc(db, 'nasa_datasets', datasetId), {
         version: dataset.version.slice(0, 80),
@@ -737,9 +787,43 @@ export const FirestoreService = {
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `nasa_datasets/${datasetId}`);
+      handleFirestoreError(err, OperationType.CREATE, dsPath);
     }
     return datasetId;
+  },
+
+  async rollbackNasaDatasetVersion(targetVersion: string): Promise<string> {
+    try {
+      const snap = await getDocs(collection(db, 'nasa_datasets'));
+      const docs = snap.docs
+        .map((d) => ({ id: d.id, ref: d.ref, ...(d.data() as Omit<UploadedNasaDatasetDoc, 'id'>) }))
+        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+
+      const targetDoc = docs.find((d) => d.version === targetVersion);
+      const targetMs = targetDoc?.createdAt?.toMillis?.() || 0;
+
+      await Promise.all(
+        docs.map(async (d) => {
+          if (d.version === targetVersion) {
+            await updateDoc(d.ref, {
+              status: 'COMPLETED',
+              isPublic: true,
+              updatedAt: serverTimestamp(),
+            });
+          } else if (targetDoc && (d.createdAt?.toMillis?.() || 0) > targetMs) {
+            await updateDoc(d.ref, {
+              status: 'ROLLED_BACK',
+              isPublic: false,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        })
+      );
+
+      return targetVersion;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'nasa_datasets');
+    }
   },
 
   async saveNasaSyncLog(
@@ -753,6 +837,7 @@ export const FirestoreService = {
     }
   ): Promise<void> {
     const logId = `SYNC_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const logPath = `nasa_sync_logs/${logId}`;
     try {
       await setDoc(doc(db, 'nasa_sync_logs', logId), {
         syncType: log.syncType.slice(0, 40),
@@ -764,7 +849,7 @@ export const FirestoreService = {
         createdAt: serverTimestamp(),
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `nasa_sync_logs/${logId}`);
+      handleFirestoreError(err, OperationType.CREATE, logPath);
     }
   },
 
@@ -855,6 +940,7 @@ export const FirestoreService = {
     ownerName: string
   ): Promise<string> {
     const shareToken = `SHR_${Date.now()}_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
+    const sharePath = `field_shares/${shareToken}`;
     try {
       await setDoc(doc(db, 'field_shares', shareToken), {
         fieldId: field.id,
@@ -865,30 +951,35 @@ export const FirestoreService = {
         isActive: true,
         createdAt: serverTimestamp(),
       });
-      await updateDoc(doc(db, 'fields', field.id), {
+      await updateDoc(doc(db, 'users', ownerUid, 'plots', field.id), {
         activeShareToken: shareToken,
         ownerName: (ownerName || 'Nông dân CropCast').slice(0, 120),
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `field_shares/${shareToken}`);
+      handleFirestoreError(err, OperationType.CREATE, sharePath);
     }
     return shareToken;
   },
 
-  async revokeFieldShareLink(fieldId: string, shareToken?: string): Promise<void> {
+  async revokeFieldShareLink(
+    ownerUid: string,
+    fieldId: string,
+    shareToken?: string
+  ): Promise<void> {
+    const plotPath = `users/${ownerUid}/plots/${fieldId}`;
     try {
       if (shareToken) {
         await updateDoc(doc(db, 'field_shares', shareToken), {
           isActive: false,
         }).catch(() => {});
       }
-      await updateDoc(doc(db, 'fields', fieldId), {
+      await updateDoc(doc(db, 'users', ownerUid, 'plots', fieldId), {
         activeShareToken: '',
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `fields/${fieldId}`);
+      handleFirestoreError(err, OperationType.UPDATE, plotPath);
     }
   },
 
@@ -908,8 +999,9 @@ export const FirestoreService = {
     }
 
     const shareId = `INV_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const plotPath = `users/${ownerUid}/plots/${field.id}`;
     try {
-      await updateDoc(doc(db, 'fields', field.id), {
+      await updateDoc(doc(db, 'users', ownerUid, 'plots', field.id), {
         sharedWithEmails: arrayUnion(targetEmail),
         ownerName: (ownerName || 'Nông dân CropCast').slice(0, 120),
         updatedAt: serverTimestamp(),
@@ -925,19 +1017,38 @@ export const FirestoreService = {
         createdAt: serverTimestamp(),
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `fields/${field.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, plotPath);
     }
     return targetEmail;
   },
 
-  async removeSharedEmail(fieldId: string, email: string): Promise<void> {
+  async removeSharedEmail(ownerUid: string, fieldId: string, email: string): Promise<void> {
+    const plotPath = `users/${ownerUid}/plots/${fieldId}`;
+    const normalized = email.trim().toLowerCase();
     try {
-      await updateDoc(doc(db, 'fields', fieldId), {
-        sharedWithEmails: arrayRemove(email.toLowerCase()),
+      await updateDoc(doc(db, 'users', ownerUid, 'plots', fieldId), {
+        sharedWithEmails: arrayRemove(normalized),
         updatedAt: serverTimestamp(),
       });
+      // Deactivate matching email share invites owned by ownerUid
+      const sharesSnap = await getDocs(
+        query(collection(db, 'field_shares'), where('ownerId', '==', ownerUid))
+      );
+      await Promise.all(
+        sharesSnap.docs
+          .filter((d) => {
+            const s = d.data();
+            return (
+              s.fieldId === fieldId &&
+              s.shareType === 'email' &&
+              String(s.targetEmail || '').toLowerCase() === normalized &&
+              s.isActive === true
+            );
+          })
+          .map((d) => updateDoc(d.ref, { isActive: false }).catch(() => {}))
+      );
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `fields/${fieldId}`);
+      handleFirestoreError(err, OperationType.UPDATE, plotPath);
     }
   },
 
@@ -960,19 +1071,35 @@ export const FirestoreService = {
       throw new Error('Liên kết chia sẻ này đã bị chủ ruộng tắt quyền truy cập.');
     }
     const fieldId = String(shareData.fieldId || '');
-    if (!fieldId) {
+    const ownerId = String(shareData.ownerId || '');
+    if (!fieldId || !ownerId) {
       throw new Error('Liên kết chia sẻ không hợp lệ.');
     }
 
-    if (shareData.ownerId !== uid) {
+    if (ownerId !== uid) {
+      const plotRef = doc(db, 'users', ownerId, 'plots', fieldId);
+      const plotPath = `users/${ownerId}/plots/${fieldId}`;
       try {
-        await updateDoc(doc(db, 'fields', fieldId), {
+        await updateDoc(plotRef, {
           sharedWithUids: arrayUnion(uid),
           presentedShareToken: shareToken,
           updatedAt: serverTimestamp(),
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `fields/${fieldId}`);
+        handleFirestoreError(err, OperationType.UPDATE, plotPath);
+      }
+
+      const refPath = `users/${uid}/shared_refs/${fieldId}`;
+      try {
+        await setDoc(doc(db, 'users', uid, 'shared_refs', fieldId), {
+          recipientUid: uid,
+          ownerId,
+          plotId: fieldId,
+          shareToken,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, refPath);
       }
     }
 
@@ -989,19 +1116,14 @@ export const FirestoreService = {
 
   async getAdminPlatformStats(): Promise<AdminPlatformStats> {
     try {
-      const [usersSnap, adminsSnap, fieldsSnap, tasksSnap, feedbacksSnap, sharesSnap, datasetsSnap] =
-        await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'admins')),
-          getDocs(collection(db, 'fields')),
-          getDocs(collection(db, 'tasks')),
-          getDocs(collection(db, 'feedbacks')),
-          getDocs(collection(db, 'field_shares')),
-          getDocs(collection(db, 'nasa_datasets')),
-        ]);
+      const [usersSnap, adminsSnap, sharesSnap, datasetsSnap] = await Promise.all([
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'admins')),
+        getDocs(collection(db, 'field_shares')),
+        getDocs(collection(db, 'nasa_datasets')),
+      ]);
 
       const adminUids = new Set<string>(adminsSnap.docs.map((d) => d.id));
-
       const userDirectoryMap = new Map<string, { displayName: string; email: string }>();
       usersSnap.docs.forEach((d) => {
         const uData = d.data();
@@ -1011,70 +1133,99 @@ export const FirestoreService = {
         });
       });
 
+      const perUserSnaps = await Promise.all(
+        usersSnap.docs.map(async (uDoc) => {
+          const uid = uDoc.id;
+          const [plotsSnap, tasksSnap, feedbacksSnap] = await Promise.all([
+            getDocs(collection(db, 'users', uid, 'plots')),
+            getDocs(collection(db, 'users', uid, 'tasks')),
+            getDocs(collection(db, 'users', uid, 'feedbacks')),
+          ]);
+          return { uid, plotsSnap, tasksSnap, feedbacksSnap };
+        })
+      );
+
       const fieldStatsByOwner = new Map<string, { count: number; areaHa: number }>();
       const provinceMap = new Map<string, { count: number; areaHa: number }>();
       const cropMap = new Map<string, number>();
       const soilMap = new Map<string, number>();
 
+      let totalFields = 0;
       let totalAreaHa = 0;
+      let totalTasks = 0;
+      let completedTasks = 0;
+      let pendingTasks = 0;
+      let totalFeedbacks = 0;
       const allFields: AdminPlatformStats['allFields'] = [];
 
-      fieldsSnap.docs.forEach((d) => {
-        const data = d.data();
-        const area = Number(data.areaHa) || 0;
-        totalAreaHa += area;
+      for (const { uid, plotsSnap, tasksSnap, feedbacksSnap } of perUserSnaps) {
+        totalFields += plotsSnap.size;
+        totalTasks += tasksSnap.size;
+        totalFeedbacks += feedbacksSnap.size;
 
-        const oid = String(data.ownerId || '');
-        const prevOwner = fieldStatsByOwner.get(oid) || { count: 0, areaHa: 0 };
-        fieldStatsByOwner.set(oid, {
-          count: prevOwner.count + 1,
-          areaHa: prevOwner.areaHa + area,
+        tasksSnap.docs.forEach((d) => {
+          const status = d.data().status;
+          if (status === 'completed') completedTasks++;
+          else if (status === 'pending' || status === 'skipped') pendingTasks++;
         });
 
-        const prov = String(data.province || 'Khác');
-        const prevProv = provinceMap.get(prov) || { count: 0, areaHa: 0 };
-        provinceMap.set(prov, {
-          count: prevProv.count + 1,
-          areaHa: prevProv.areaHa + area,
+        plotsSnap.docs.forEach((d) => {
+          const data = d.data();
+          const area = Number(data.areaHa) || 0;
+          totalAreaHa += area;
+
+          const oid = String(data.ownerId || uid);
+          const prevOwner = fieldStatsByOwner.get(oid) || { count: 0, areaHa: 0 };
+          fieldStatsByOwner.set(oid, {
+            count: prevOwner.count + 1,
+            areaHa: prevOwner.areaHa + area,
+          });
+
+          const prov = String(data.province || 'Khác');
+          const prevProv = provinceMap.get(prov) || { count: 0, areaHa: 0 };
+          provinceMap.set(prov, {
+            count: prevProv.count + 1,
+            areaHa: prevProv.areaHa + area,
+          });
+
+          const cropName = String(data.crop?.name || 'Chưa rõ');
+          cropMap.set(cropName, (cropMap.get(cropName) || 0) + 1);
+
+          const soilType = String(data.soilType || 'unknown');
+          soilMap.set(soilType, (soilMap.get(soilType) || 0) + 1);
+
+          const ownerProfile = userDirectoryMap.get(oid);
+          const sharedEmailsCount = Array.isArray(data.sharedWithEmails)
+            ? data.sharedWithEmails.length
+            : 0;
+          const sharedUidsCount = Array.isArray(data.sharedWithUids)
+            ? data.sharedWithUids.length
+            : 0;
+          const hasLink = data.activeShareToken ? 1 : 0;
+
+          allFields.push({
+            id: d.id,
+            name: String(data.name || 'Thửa ruộng'),
+            ownerId: oid,
+            ownerName: String(data.ownerName || ownerProfile?.displayName || 'Nông dân CropCast'),
+            ownerEmail: ownerProfile?.email || '',
+            province: prov,
+            district: String(data.district || ''),
+            lat: Number(data.lat) || 0,
+            lon: Number(data.lon) || 0,
+            areaHa: Number(area.toFixed(2)),
+            cropName,
+            cropVariety: String(data.crop?.variety || '—'),
+            currentStage: String(data.crop?.currentStage || '—'),
+            soilType: (data.soilType || 'unknown') as any,
+            waterSourceType: (data.waterSource?.type || 'other') as any,
+            nasaCellId: String(data.nasaGrid?.cellId || '—'),
+            nasaDistanceKm: Number(data.nasaGrid?.distanceKm) || 0,
+            sharedCount: sharedEmailsCount + sharedUidsCount + hasLink,
+            createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          });
         });
-
-        const cropName = String(data.crop?.name || 'Chưa rõ');
-        cropMap.set(cropName, (cropMap.get(cropName) || 0) + 1);
-
-        const soilType = String(data.soilType || 'unknown');
-        soilMap.set(soilType, (soilMap.get(soilType) || 0) + 1);
-
-        const ownerProfile = userDirectoryMap.get(oid);
-        const sharedEmailsCount = Array.isArray(data.sharedWithEmails)
-          ? data.sharedWithEmails.length
-          : 0;
-        const sharedUidsCount = Array.isArray(data.sharedWithUids)
-          ? data.sharedWithUids.length
-          : 0;
-        const hasLink = data.activeShareToken ? 1 : 0;
-
-        allFields.push({
-          id: d.id,
-          name: String(data.name || 'Thửa ruộng'),
-          ownerId: oid,
-          ownerName: String(data.ownerName || ownerProfile?.displayName || 'Nông dân CropCast'),
-          ownerEmail: ownerProfile?.email || '',
-          province: prov,
-          district: String(data.district || ''),
-          lat: Number(data.lat) || 0,
-          lon: Number(data.lon) || 0,
-          areaHa: Number(area.toFixed(2)),
-          cropName,
-          cropVariety: String(data.crop?.variety || '—'),
-          currentStage: String(data.crop?.currentStage || '—'),
-          soilType: (data.soilType || 'unknown') as any,
-          waterSourceType: (data.waterSource?.type || 'other') as any,
-          nasaCellId: String(data.nasaGrid?.cellId || '—'),
-          nasaDistanceKm: Number(data.nasaGrid?.distanceKm) || 0,
-          sharedCount: sharedEmailsCount + sharedUidsCount + hasLink,
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        });
-      });
+      }
 
       allFields.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
 
@@ -1082,7 +1233,7 @@ export const FirestoreService = {
         const data = d.data();
         const email = String(data.email || '');
         const ownerStat = fieldStatsByOwner.get(d.id) || { count: 0, areaHa: 0 };
-        const isBootstrap = email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+        const isBootstrap = isBootstrapAdminEmail(email);
         return {
           uid: d.id,
           displayName: String(data.displayName || 'Nông dân CropCast'),
@@ -1097,24 +1248,16 @@ export const FirestoreService = {
 
       users.sort((a, b) => b.fieldCount - a.fieldCount);
 
-      let completedTasks = 0;
-      let pendingTasks = 0;
-      tasksSnap.docs.forEach((d) => {
-        const status = d.data().status;
-        if (status === 'completed') completedTasks++;
-        else if (status === 'pending' || status === 'skipped') pendingTasks++;
-      });
-
       const totalActiveShares = sharesSnap.docs.filter((d) => d.data().isActive === true).length;
 
       return {
         totalUsers: users.length,
-        totalFields: fieldsSnap.size,
+        totalFields,
         totalAreaHa: Number(totalAreaHa.toFixed(2)),
-        totalTasks: tasksSnap.size,
+        totalTasks,
         completedTasks,
         pendingTasks,
-        totalFeedbacks: feedbacksSnap.size,
+        totalFeedbacks,
         totalActiveShares,
         totalNasaDatasets: datasetsSnap.size,
         users,
@@ -1144,7 +1287,7 @@ export const FirestoreService = {
       if (grant) {
         await setDoc(ref, {
           uid: targetUid,
-          email: targetEmail,
+          email: targetEmail.slice(0, 200),
           grantedAt: serverTimestamp(),
         });
       } else {

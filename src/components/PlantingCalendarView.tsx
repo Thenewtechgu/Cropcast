@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CalendarDays, Sparkles } from 'lucide-react';
 import { FieldProfile, PlantingRiskEvaluation } from '../types';
 import { evaluatePlantingCalendar } from '../services/agronomyEngine';
@@ -8,12 +8,23 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface PlantingCalendarViewProps {
   activeField: FieldProfile;
+  savedCropKey?: string;
+  onSelectCropKey?: (plotId: string, cropKey: string) => void;
 }
 
-export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({ activeField }) => {
+export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
+  activeField,
+  savedCropKey,
+  onSelectCropKey,
+}) => {
   const { lang, t } = useLanguage();
-  const [selectedCropKey, setSelectedCropKey] = useState<string>('active');
+  const [selectedCropKey, setSelectedCropKey] = useState<string>(savedCropKey || 'active');
   const [selectedDetail, setSelectedDetail] = useState<PlantingRiskEvaluation | null>(null);
+
+  useEffect(() => {
+    setSelectedCropKey(savedCropKey || 'active');
+    setSelectedDetail(null);
+  }, [activeField.id, savedCropKey]);
 
   const cropOptions = [
     {
@@ -122,8 +133,12 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({ acti
           <select
             value={selectedOption.id}
             onChange={(e) => {
-              setSelectedCropKey(e.target.value);
+              const nextKey = e.target.value;
+              setSelectedCropKey(nextKey);
               setSelectedDetail(null);
+              if (onSelectCropKey && !activeField.isSharedWithMe) {
+                onSelectCropKey(activeField.id, nextKey);
+              }
             }}
             className="px-3 py-2 border border-stone-300 rounded-xl bg-white font-bold text-xs text-stone-900 shadow-2xs"
           >

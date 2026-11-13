@@ -56,7 +56,7 @@
     },
     "Field": {
       "title": "Field",
-      "description": "Personalized agricultural field profile owned by a farmer.",
+      "description": "Personalized agricultural plot profile stored under a farmer's user scope.",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -163,9 +163,167 @@
         "updatedAt"
       ]
     },
+    "PlotPlan": {
+      "title": "PlotPlan",
+      "description": "Persisted crop rotation strategy, farmer constraints, rejected proposals, and 12-month calendar selection per plot.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "plotId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "priorities": {
+          "type": "array"
+        },
+        "constraints": {
+          "type": "object"
+        },
+        "activeStrategy": {
+          "type": "object"
+        },
+        "rejectedIds": {
+          "type": "array"
+        },
+        "rejectedTitles": {
+          "type": "array"
+        },
+        "lastRejectionNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "calendarCropKey": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "plotId",
+        "priorities",
+        "constraints",
+        "rejectedIds",
+        "rejectedTitles",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EarthMetric": {
+      "title": "EarthMetric",
+      "description": "NASA OCO-2/3 carbon flux, GRACE groundwater anomaly, GHGx/EDGAR emissions, and SMAP/MODIS snapshot linked to a plot.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fieldId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "syncedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "sustainabilityScore": {
+          "type": "number"
+        },
+        "rotationAdvice": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "rotationAdviceEn": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "nasaPowerLastUpdated": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "smapModis": {
+          "type": "object"
+        },
+        "carbonFluxOco2": {
+          "type": "object"
+        },
+        "groundwaterAnomalyGrace": {
+          "type": "object"
+        },
+        "greenhouseGasEdgar": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "fieldId",
+        "syncedAt",
+        "sustainabilityScore",
+        "rotationAdvice",
+        "carbonFluxOco2",
+        "groundwaterAnomalyGrace",
+        "greenhouseGasEdgar",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SharedRef": {
+      "title": "SharedRef",
+      "description": "Recipient reference pointer allowing zero-index access to shared plots redeemed via share token.",
+      "type": "object",
+      "properties": {
+        "recipientUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "plotId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "shareToken": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["recipientUid", "ownerId", "plotId", "shareToken", "createdAt"]
+    },
     "FarmTask": {
       "title": "FarmTask",
-      "description": "Agronomic action task linked to a farmer's field.",
+      "description": "Agronomic action task linked to a farmer's plot.",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -273,7 +431,7 @@
     },
     "NasaDataset": {
       "title": "NasaDataset",
-      "description": "Admin-uploaded NASA climate observation dataset manifest and latest metrics.",
+      "description": "Admin-uploaded NASA climate observation dataset manifest and representative overrides.",
       "type": "object",
       "properties": {
         "version": {
@@ -380,7 +538,7 @@
     },
     "FieldShare": {
       "title": "FieldShare",
-      "description": "Share link or email invitation granting read access to a farmer's field.",
+      "description": "Share link or email invitation granting read access to a farmer's plot.",
       "type": "object",
       "properties": {
         "fieldId": {
@@ -426,51 +584,6 @@
         "isActive",
         "createdAt"
       ]
-    },
-    "CarbonFluxOco2": {
-      "title": "CarbonFluxOco2",
-      "description": "NASA OCO-2/3 SIF photosynthesis and carbon uptake metric linked to a field.",
-      "type": "object",
-      "properties": {
-        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "rotationId": { "type": "string", "maxLength": 128 },
-        "observationDate": { "type": "string", "maxLength": 20 },
-        "sifWm2SrUm": { "type": "number" },
-        "carbonUptakeTonHaYr": { "type": "number" },
-        "photosynthesisStatus": { "type": "string", "enum": ["high", "moderate", "low"] }
-      },
-      "required": ["ownerId", "fieldId", "observationDate", "sifWm2SrUm", "carbonUptakeTonHaYr"]
-    },
-    "GroundwaterAnomalyGrace": {
-      "title": "GroundwaterAnomalyGrace",
-      "description": "NASA GRACE/GRACE-FO groundwater storage anomaly linked to a field.",
-      "type": "object",
-      "properties": {
-        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "rotationId": { "type": "string", "maxLength": 128 },
-        "observationDate": { "type": "string", "maxLength": 20 },
-        "lweThicknessCm": { "type": "number" },
-        "groundwaterStatus": { "type": "string", "enum": ["recharging", "stable", "depleting"] }
-      },
-      "required": ["ownerId", "fieldId", "observationDate", "lweThicknessCm", "groundwaterStatus"]
-    },
-    "GreenhouseGasEdgar": {
-      "title": "GreenhouseGasEdgar",
-      "description": "GHGx/EDGAR CH4 and N2O agricultural emissions linked to a field.",
-      "type": "object",
-      "properties": {
-        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "rotationId": { "type": "string", "maxLength": 128 },
-        "observationDate": { "type": "string", "maxLength": 20 },
-        "ch4KgHa": { "type": "number" },
-        "n2oKgHa": { "type": "number" },
-        "co2eqTonHa": { "type": "number" },
-        "emissionLevel": { "type": "string", "enum": ["low", "moderate", "high"] }
-      },
-      "required": ["ownerId", "fieldId", "observationDate", "ch4KgHa", "n2oKgHa", "co2eqTonHa"]
     }
   },
   "firestore": {
@@ -478,45 +591,45 @@
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Private user account profile isolated to owner and admin."
     },
+    "/users/{userId}/plots/{plotId}": {
+      "schema": { "$ref": "#/entities/Field" },
+      "description": "Farmer-owned agricultural plot profiles strictly isolated to owner, explicitly shared recipients, and admin."
+    },
+    "/users/{userId}/plans/{planId}": {
+      "schema": { "$ref": "#/entities/PlotPlan" },
+      "description": "Crop rotation strategy, constraints, rejection history, and 12-month calendar choice linked to a plot."
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/FarmTask" },
+      "description": "Agronomic action tasks linked to a farmer's plot."
+    },
+    "/users/{userId}/feedbacks/{feedbackId}": {
+      "schema": { "$ref": "#/entities/FeedbackRecord" },
+      "description": "Farmer plot observations and field feedback records."
+    },
+    "/users/{userId}/earth_metrics/{metricId}": {
+      "schema": { "$ref": "#/entities/EarthMetric" },
+      "description": "NASA OCO-2/GRACE/GHGx/SMAP sustainability snapshots tied to a plot."
+    },
+    "/users/{userId}/shared_refs/{plotId}": {
+      "schema": { "$ref": "#/entities/SharedRef" },
+      "description": "Pointer entries for plots shared with the user via share token."
+    },
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminUser" },
       "description": "Trusted admin allowlist records."
     },
-    "/fields/{fieldId}": {
-      "schema": { "$ref": "#/entities/Field" },
-      "description": "Farmer-owned field profiles strictly isolated to creator, explicitly shared recipients, and admin stats."
-    },
     "/field_shares/{shareId}": {
       "schema": { "$ref": "#/entities/FieldShare" },
-      "description": "Field sharing links and email invitations created by field owners."
-    },
-    "/tasks/{taskId}": {
-      "schema": { "$ref": "#/entities/FarmTask" },
-      "description": "Agronomic tasks tied to a farmer's field."
-    },
-    "/feedbacks/{feedbackId}": {
-      "schema": { "$ref": "#/entities/FeedbackRecord" },
-      "description": "Farmer field observations tied to a field."
+      "description": "Plot sharing links and email invitations created by plot owners."
     },
     "/nasa_datasets/{datasetId}": {
       "schema": { "$ref": "#/entities/NasaDataset" },
-      "description": "Admin-uploaded NASA dataset versions and overrides."
+      "description": "Admin-uploaded NASA dataset manifests and representative climate overrides."
     },
     "/nasa_sync_logs/{logId}": {
       "schema": { "$ref": "#/entities/NasaSyncLog" },
-      "description": "Admin-only NASA synchronization logs."
-    },
-    "/carbon_flux_oco2/{recordId}": {
-      "schema": { "$ref": "#/entities/CarbonFluxOco2" },
-      "description": "NASA OCO-2/3 carbon flux observations linked to fields."
-    },
-    "/groundwater_anomaly_grace/{recordId}": {
-      "schema": { "$ref": "#/entities/GroundwaterAnomalyGrace" },
-      "description": "NASA GRACE groundwater anomaly records linked to fields."
-    },
-    "/greenhouse_gas_edgar/{recordId}": {
-      "schema": { "$ref": "#/entities/GreenhouseGasEdgar" },
-      "description": "GHGx/EDGAR emissions records linked to fields."
+      "description": "Admin-only NASA synchronization audit logs."
     }
   }
 }

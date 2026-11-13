@@ -22,6 +22,7 @@ import {
   FarmerConstraints,
   FarmerPriorityId,
   FieldProfile,
+  PlotPlanRecord,
   RotationStrategy,
   WeatherObservation,
   EarthEnvironmentSnapshot,
@@ -49,33 +50,50 @@ import { useLanguage } from '../contexts/LanguageContext';
 interface RotationExplorerViewProps {
   field: FieldProfile;
   weather: WeatherObservation;
+  savedPlan?: PlotPlanRecord;
+  onSavePlan?: (
+    plotId: string,
+    plan: Omit<PlotPlanRecord, 'id' | 'ownerId' | 'plotId' | 'updatedAt'>
+  ) => Promise<void> | void;
   onOpenMap: () => void;
 }
+
+const DEFAULT_PRIORITIES: FarmerPriorityId[] = [
+  'water_saving',
+  'nitrogen_fixing',
+  'pest_break',
+  'erosion_control',
+];
 
 export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
   field,
   weather,
+  savedPlan,
+  onSavePlan,
   onOpenMap,
 }) => {
   const { lang, t } = useLanguage();
-  const [priorities, setPriorities] = useState<FarmerPriorityId[]>([
-    'water_saving',
-    'nitrogen_fixing',
-    'pest_break',
-    'erosion_control',
-  ]);
-  const [constraints, setConstraints] = useState<FarmerConstraints>({
-    waterAvailability: field.waterSource.isStable ? 'seasonal_limited' : 'scarce',
-    equipmentAccess: 'basic_manual',
-    marketPreference: 'mixed_family',
-  });
+  const [priorities, setPriorities] = useState<FarmerPriorityId[]>(
+    savedPlan?.priorities?.length ? savedPlan.priorities : DEFAULT_PRIORITIES
+  );
+  const [constraints, setConstraints] = useState<FarmerConstraints>(
+    savedPlan?.constraints || {
+      waterAvailability: field.waterSource.isStable ? 'seasonal_limited' : 'scarce',
+      equipmentAccess: 'basic_manual',
+      marketPreference: 'mixed_family',
+    }
+  );
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   // Single Best Strategy & AI Rethink State
-  const [customBestStrategy, setCustomBestStrategy] = useState<RotationStrategy | null>(null);
-  const [rejectedIds, setRejectedIds] = useState<string[]>([]);
-  const [rejectedTitles, setRejectedTitles] = useState<string[]>([]);
-  const [lastRejectionNote, setLastRejectionNote] = useState<string | null>(null);
+  const [customBestStrategy, setCustomBestStrategy] = useState<RotationStrategy | null>(
+    savedPlan?.activeStrategy || null
+  );
+  const [rejectedIds, setRejectedIds] = useState<string[]>(savedPlan?.rejectedIds || []);
+  const [rejectedTitles, setRejectedTitles] = useState<string[]>(savedPlan?.rejectedTitles || []);
+  const [lastRejectionNote, setLastRejectionNote] = useState<string | null>(
+    savedPlan?.lastRejectionNote || null
+  );
   const [aiSourceLabel, setAiSourceLabel] = useState<string | null>(null);
 
   // Rejection Reason UI
@@ -120,21 +138,69 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
     };
   }, [field.id, field.adaptiveMemory?.earthMetrics]);
 
-  // Reset AI override when user switches fields, priorities, constraints, or language
+  // Hydrate saved Firestore plan whenever switching fields
   useEffect(() => {
-    setCustomBestStrategy(null);
-    setRejectedIds([]);
-    setRejectedTitles([]);
-    setLastRejectionNote(null);
+    setPriorities(
+      savedPlan?.priorities?.length ? savedPlan.priorities : DEFAULT_PRIORITIES
+    );
+    setConstraints(
+      savedPlan?.constraints || {
+        waterAvailability: field.waterSource.isStable ? 'seasonal_limited' : 'scarce',
+        equipmentAccess: 'basic_manual',
+        marketPreference: 'mixed_family',
+      }
+    );
+    setCustomBestStrategy(savedPlan?.activeStrategy || null);
+    setRejectedIds(savedPlan?.rejectedIds || []);
+    setRejectedTitles(savedPlan?.rejectedTitles || []);
+    setLastRejectionNote(savedPlan?.lastRejectionNote || null);
     setAiSourceLabel(null);
     setRejectPanelOpen(false);
     setRejectionInput('');
-  }, [field.id, priorities, constraints, lang]);
+  }, [field.id, savedPlan?.id, savedPlan?.updatedAt]);
+
+  const persistPlanPatch = (
+    nextPriorities: FarmerPriorityId[],
+    nextConstraints: FarmerConstraints,
+    nextStrategy: RotationStrategy | null,
+    nextRejectedIds: string[],
+    nextRejectedTitles: string[],
+    nextNote: string | null
+  ) => {
+    if (!onSavePlan || field.isSharedWithMe) return;
+    onSavePlan(field.id, {
+      priorities: nextPriorities,
+      constraints: nextConstraints,
+      activeStrategy: nextStrategy || undefined,
+      rejectedIds: nextRejectedIds,
+      rejectedTitles: nextRejectedTitles,
+      lastRejectionNote: nextNote || undefined,
+      calendarCropKey: savedPlan?.calendarCropKey,
+    });
+  };
 
   const togglePriority = (id: FarmerPriorityId) => {
-    setPriorities((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
-    );
+    setPriorities((prev) => {
+      const next = prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      setCustomBestStrategy(null);
+      setRejectedIds([]);
+      setRejectedTitles([]);
+      setLastRejectionNote(null);
+      persistPlanPatch(next, constraints, null, [], [], null);
+      return next;
+    });
+  };
+
+  const updateConstraints = (patch: Partial<FarmerConstraints>) => {
+    setConstraints((prev) => {
+      const next = { ...prev, ...patch };
+      setCustomBestStrategy(null);
+      setRejectedIds([]);
+      setRejectedTitles([]);
+      setLastRejectionNote(null);
+      persistPlanPatch(priorities, next, null, [], [], null);
+      return next;
+    });
   };
 
   const currentFamily = getSeedFamilyById(
@@ -187,6 +253,14 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
       setRejectedTitles(nextTitles);
       setCustomBestStrategy(strategy);
       setLastRejectionNote(cleanReason);
+      persistPlanPatch(
+        priorities,
+        constraints,
+        strategy,
+        nextExcluded,
+        nextTitles,
+        cleanReason
+      );
       setAiSourceLabel(
         source === 'gemini'
           ? t(
@@ -214,6 +288,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
     setRejectPanelOpen(false);
     setRejectionInput('');
     setRejectError(null);
+    persistPlanPatch(priorities, constraints, null, [], [], null);
   };
 
   const formatTimestamp = (iso?: string) => {
@@ -379,7 +454,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
               <select
                 value={constraints.waterAvailability}
                 onChange={(e) =>
-                  setConstraints((prev) => ({ ...prev, waterAvailability: e.target.value as any }))
+                  updateConstraints({ waterAvailability: e.target.value as any })
                 }
                 className="w-full px-2.5 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
               >
@@ -397,7 +472,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
               <select
                 value={constraints.equipmentAccess}
                 onChange={(e) =>
-                  setConstraints((prev) => ({ ...prev, equipmentAccess: e.target.value as any }))
+                  updateConstraints({ equipmentAccess: e.target.value as any })
                 }
                 className="w-full px-2.5 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
               >
@@ -412,7 +487,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
               <select
                 value={constraints.marketPreference}
                 onChange={(e) =>
-                  setConstraints((prev) => ({ ...prev, marketPreference: e.target.value as any }))
+                  updateConstraints({ marketPreference: e.target.value as any })
                 }
                 className="w-full px-2.5 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
               >

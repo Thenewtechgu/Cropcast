@@ -332,8 +332,7 @@ export interface SyncLogRecord {
 }
 
 export interface CentralDataStatus {
-  isConnectedToSupabase: boolean;
-  supabaseUrl?: string;
+  isConnectedToFirebase: boolean;
   latestNasaDate: string;
   lastSyncTime: string;
   dataSource: string;
@@ -408,6 +407,20 @@ export interface RotationStrategy {
   alignedPriorities: FarmerPriorityId[];
 }
 
+export interface PlotPlanRecord {
+  id: string;
+  ownerId: string;
+  plotId: string;
+  priorities: FarmerPriorityId[];
+  constraints: FarmerConstraints;
+  activeStrategy?: RotationStrategy;
+  rejectedIds: string[];
+  rejectedTitles: string[];
+  lastRejectionNote?: string;
+  calendarCropKey?: string;
+  updatedAt?: string;
+}
+
 export interface AppUser {
   uid: string;
   displayName: string;
@@ -416,7 +429,7 @@ export interface AppUser {
   photoURL?: string;
   emailVerified: boolean;
   isAdmin: boolean;
-  authMode?: 'firebase' | 'local_server';
+  authMode?: 'firebase';
 }
 
 export interface TrendPoint {

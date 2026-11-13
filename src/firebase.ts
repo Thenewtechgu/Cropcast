@@ -1,15 +1,59 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import appletConfig from '../firebase-applet-config.json';
+
+const env = import.meta.env;
+
+const explicitProjectId = (env.VITE_FIREBASE_PROJECT_ID || '').trim();
+const isOverriddenProject = Boolean(
+  explicitProjectId && explicitProjectId !== appletConfig.projectId
+);
+const rawDbId = (env.VITE_FIREBASE_DATABASE_ID || '').trim();
+const resolvedDatabaseId = rawDbId
+  ? rawDbId === '(default)'
+    ? ''
+    : rawDbId
+  : isOverriddenProject
+  ? ''
+  : appletConfig.firestoreDatabaseId || '';
+
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || appletConfig.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain,
+  projectId: explicitProjectId || appletConfig.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || appletConfig.appId,
+  ...(env.VITE_FIREBASE_MEASUREMENT_ID || (!isOverriddenProject && appletConfig.measurementId)
+    ? {
+        measurementId:
+          env.VITE_FIREBASE_MEASUREMENT_ID ||
+          (!isOverriddenProject ? appletConfig.measurementId : ''),
+      }
+    : {}),
+};
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = resolvedDatabaseId
+  ? getFirestore(app, resolvedDatabaseId)
+  : getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const BOOTSTRAP_ADMIN_EMAIL = 'fss01211cg@gmail.com';
+export const BOOTSTRAP_ADMIN_EMAILS = [
+  'vanha.uow@gmail.com',
+  'fss01211cg@gmail.com',
+] as const;
+
+export const BOOTSTRAP_ADMIN_EMAIL = BOOTSTRAP_ADMIN_EMAILS[0];
+
+export function isBootstrapAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  return BOOTSTRAP_ADMIN_EMAILS.some((e) => e.toLowerCase() === normalized);
+}
 
 export enum OperationType {
   CREATE = 'create',

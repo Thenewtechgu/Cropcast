@@ -33,9 +33,17 @@ service cloud.firestore {
 
     function isAdmin() {
       return isEmailVerified() && (
-        request.auth.token.email == 'fss01211cg@gmail.com' ||
+        request.auth.token.email in ['vanha.uow@gmail.com', 'fss01211cg@gmail.com'] ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
+    }
+
+    function hasParentUser(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function hasParentPlot(userId, plotId) {
+      return isValidId(plotId) && exists(/databases/$(database)/documents/users/$(userId)/plots/$(plotId));
     }
 
     // 3. Entity Validation Blueprints
@@ -100,6 +108,67 @@ service cloud.firestore {
         && data.notificationMethod is string && data.notificationMethod.size() <= 30
         && data.nasaGrid is map
         && (!('adaptiveMemory' in data) || data.adaptiveMemory is map);
+    }
+
+    function isValidPlotPlan(data) {
+      return data.keys().hasAll([
+          'ownerId', 'plotId', 'priorities', 'constraints',
+          'rejectedIds', 'rejectedTitles', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'plotId', 'priorities', 'constraints', 'activeStrategy',
+          'rejectedIds', 'rejectedTitles', 'lastRejectionNote', 'calendarCropKey',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && isValidId(data.plotId)
+        && data.priorities is list
+        && data.priorities.size() <= 10
+        && (data.priorities.size() == 0 || data.priorities[0] is string)
+        && data.constraints is map
+        && (!('activeStrategy' in data) || data.activeStrategy is map)
+        && data.rejectedIds is list
+        && data.rejectedIds.size() <= 30
+        && (data.rejectedIds.size() == 0 || data.rejectedIds[0] is string)
+        && data.rejectedTitles is list
+        && data.rejectedTitles.size() <= 30
+        && (data.rejectedTitles.size() == 0 || data.rejectedTitles[0] is string)
+        && (!('lastRejectionNote' in data) || (data.lastRejectionNote is string && data.lastRejectionNote.size() <= 500))
+        && (!('calendarCropKey' in data) || (data.calendarCropKey is string && data.calendarCropKey.size() <= 40));
+    }
+
+    function isValidEarthMetric(data) {
+      return data.keys().hasAll([
+          'ownerId', 'fieldId', 'syncedAt', 'sustainabilityScore',
+          'rotationAdvice', 'carbonFluxOco2', 'groundwaterAnomalyGrace',
+          'greenhouseGasEdgar', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'fieldId', 'syncedAt', 'sustainabilityScore',
+          'rotationAdvice', 'rotationAdviceEn', 'nasaPowerLastUpdated',
+          'smapModis', 'carbonFluxOco2', 'groundwaterAnomalyGrace',
+          'greenhouseGasEdgar', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && isValidId(data.fieldId)
+        && data.syncedAt is string && data.syncedAt.size() <= 40
+        && data.sustainabilityScore is number && data.sustainabilityScore >= 0 && data.sustainabilityScore <= 100
+        && data.rotationAdvice is string && data.rotationAdvice.size() <= 600
+        && (!('rotationAdviceEn' in data) || (data.rotationAdviceEn is string && data.rotationAdviceEn.size() <= 600))
+        && (!('nasaPowerLastUpdated' in data) || (data.nasaPowerLastUpdated is string && data.nasaPowerLastUpdated.size() <= 40))
+        && (!('smapModis' in data) || data.smapModis == null || data.smapModis is map)
+        && data.carbonFluxOco2 is map
+        && data.groundwaterAnomalyGrace is map
+        && data.greenhouseGasEdgar is map;
+    }
+
+    function isValidSharedRef(data) {
+      return data.keys().hasAll(['recipientUid', 'ownerId', 'plotId', 'shareToken', 'createdAt'])
+        && data.keys().hasOnly(['recipientUid', 'ownerId', 'plotId', 'shareToken', 'createdAt'])
+        && isValidId(data.recipientUid)
+        && isValidId(data.ownerId)
+        && isValidId(data.plotId)
+        && isValidId(data.shareToken);
     }
 
     function isValidFieldShare(data) {
@@ -169,7 +238,11 @@ service cloud.firestore {
         && data.status in ['COMPLETED', 'ROLLED_BACK']
         && isValidId(data.uploadedBy)
         && data.isPublic is bool
-        && (!('sampleOverrides' in data) || (data.sampleOverrides is list && data.sampleOverrides.size() <= 500));
+        && (!('sampleOverrides' in data) || (
+          data.sampleOverrides is list &&
+          data.sampleOverrides.size() <= 500 &&
+          (data.sampleOverrides.size() == 0 || data.sampleOverrides[0] is map)
+        ));
     }
 
     function isValidNasaSyncLog(data) {
@@ -195,8 +268,8 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isSignedIn()
         && isValidId(userId)
-        && isOwner(userId)
         && isValidUserProfile(incoming())
+        && isOwner(userId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isSignedIn()
@@ -208,6 +281,262 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(userId);
+
+      // User-scoped Plots (users/{userId}/plots/{plotId})
+      match /plots/{plotId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(plotId) && (
+          isOwner(userId) ||
+          ('sharedWithUids' in existing() && request.auth.uid in existing().sharedWithUids) ||
+          ('sharedWithEmails' in existing() && request.auth.token.email != null && request.auth.token.email in existing().sharedWithEmails) ||
+          isAdmin()
+        );
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.ownerId == request.auth.uid ||
+          ('sharedWithUids' in resource.data && request.auth.uid in resource.data.sharedWithUids) ||
+          ('sharedWithEmails' in resource.data && request.auth.token.email != null && request.auth.token.email in resource.data.sharedWithEmails) ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && isValidField(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId);
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && isValidField(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            (
+              isOwner(userId)
+              && existing().ownerId == request.auth.uid
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'province', 'district', 'lat', 'lon', 'areaHa',
+                'soilType', 'soilCharacteristics', 'waterSource', 'crop',
+                'primaryGoal', 'inspectTime', 'notificationMethod',
+                'nasaGrid', 'adaptiveMemory', 'ownerName',
+                'sharedWithEmails', 'sharedWithUids', 'activeShareToken',
+                'updatedAt'
+              ])
+            ) ||
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'presentedShareToken', 'updatedAt'])
+              && ('activeShareToken' in existing())
+              && existing().activeShareToken is string
+              && existing().activeShareToken.size() >= 12
+              && incoming().presentedShareToken == existing().activeShareToken
+              && incoming().sharedWithUids is list
+              && incoming().sharedWithUids.size() <= 50
+              && request.auth.uid in incoming().sharedWithUids
+              && (
+                (!('sharedWithUids' in existing()) && incoming().sharedWithUids.size() == 1) ||
+                ('sharedWithUids' in existing() && incoming().sharedWithUids.hasAll(existing().sharedWithUids) && incoming().sharedWithUids.size() <= existing().sharedWithUids.size() + 1)
+              )
+            )
+          );
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+      }
+
+      // User-scoped Rotation & Calendar Plans (users/{userId}/plans/{planId})
+      match /plans/{planId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(planId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.ownerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(planId)
+          && isValidPlotPlan(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId)
+          && hasParentPlot(userId, incoming().plotId);
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(planId)
+          && isValidPlotPlan(incoming())
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid
+          && incoming().ownerId == existing().ownerId
+          && incoming().plotId == existing().plotId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'priorities', 'constraints', 'activeStrategy',
+            'rejectedIds', 'rejectedTitles', 'lastRejectionNote',
+            'calendarCropKey', 'updatedAt'
+          ]);
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(planId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+      }
+
+      // User-scoped Agronomic Tasks (users/{userId}/tasks/{taskId})
+      match /tasks/{taskId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(taskId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.ownerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isValidFarmTask(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId)
+          && hasParentPlot(userId, incoming().fieldId);
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isValidFarmTask(incoming())
+          && (isOwner(userId) || isAdmin())
+          && (existing().ownerId == request.auth.uid || isAdmin())
+          && incoming().ownerId == existing().ownerId
+          && incoming().fieldId == existing().fieldId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (
+              !(existing().status in ['completed', 'skipped']) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'farmerNote', 'updatedAt'])
+            )
+          );
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+      }
+
+      // User-scoped Feedbacks (users/{userId}/feedbacks/{feedbackId})
+      match /feedbacks/{feedbackId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(feedbackId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.ownerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(feedbackId)
+          && isValidFeedback(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && hasParentUser(userId)
+          && hasParentPlot(userId, incoming().fieldId);
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(feedbackId)
+          && isValidFeedback(incoming())
+          && (isOwner(userId) || isAdmin())
+          && incoming().ownerId == existing().ownerId
+          && incoming().fieldId == existing().fieldId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['userComment', 'systemActionTaken', 'appliedToProfile']);
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(feedbackId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+      }
+
+      // User-scoped Earth Sustainability Snapshots (users/{userId}/earth_metrics/{metricId})
+      match /earth_metrics/{metricId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(metricId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.ownerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(metricId)
+          && isValidEarthMetric(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId)
+          && hasParentPlot(userId, incoming().fieldId);
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(metricId)
+          && isValidEarthMetric(incoming())
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid
+          && incoming().ownerId == existing().ownerId
+          && incoming().fieldId == existing().fieldId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'syncedAt', 'sustainabilityScore', 'rotationAdvice', 'rotationAdviceEn',
+            'nasaPowerLastUpdated', 'smapModis', 'carbonFluxOco2',
+            'groundwaterAnomalyGrace', 'greenhouseGasEdgar', 'updatedAt'
+          ]);
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(metricId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+      }
+
+      // User-scoped Shared Plot References (users/{userId}/shared_refs/{plotId})
+      match /shared_refs/{plotId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          resource.data.recipientUid == request.auth.uid ||
+          isAdmin()
+        );
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && isValidSharedRef(incoming())
+          && isOwner(userId)
+          && incoming().recipientUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && hasParentUser(userId)
+          && exists(/databases/$(database)/documents/field_shares/$(incoming().shareToken));
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && isValidSharedRef(incoming())
+          && isOwner(userId)
+          && existing().recipientUid == request.auth.uid
+          && incoming().recipientUid == existing().recipientUid
+          && incoming().ownerId == existing().ownerId
+          && incoming().plotId == existing().plotId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['shareToken'])
+          && exists(/databases/$(database)/documents/field_shares/$(incoming().shareToken));
+        allow delete: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(plotId)
+          && (isOwner(userId) || isAdmin());
+      }
     }
 
     // Admins (strictly admin managed)
@@ -218,62 +547,13 @@ service cloud.firestore {
         && isValidId(userId)
         && isValidAdminEntry(incoming())
         && incoming().grantedAt == request.time;
-      allow update, delete: if isAdmin() && isValidId(userId);
-    }
-
-    // Fields (Strictly private to the creator, explicitly shared recipients, or admin stats)
-    match /fields/{fieldId} {
-      allow get: if isSignedIn() && isValidId(fieldId) && (
-        existing().ownerId == request.auth.uid ||
-        ('sharedWithUids' in existing() && request.auth.uid in existing().sharedWithUids) ||
-        ('sharedWithEmails' in existing() && request.auth.token.email != null && request.auth.token.email in existing().sharedWithEmails) ||
-        isAdmin()
-      );
-      allow list: if isSignedIn() && (
-        resource.data.ownerId == request.auth.uid ||
-        ('sharedWithUids' in resource.data && request.auth.uid in resource.data.sharedWithUids) ||
-        ('sharedWithEmails' in resource.data && request.auth.token.email != null && request.auth.token.email in resource.data.sharedWithEmails) ||
-        isAdmin()
-      );
-      allow create: if isSignedIn()
-        && isValidId(fieldId)
-        && isValidField(incoming())
-        && incoming().ownerId == request.auth.uid
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
-      allow update: if isSignedIn()
-        && isValidId(fieldId)
-        && isValidField(incoming())
-        && incoming().ownerId == existing().ownerId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && (
-          (
-            existing().ownerId == request.auth.uid
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'name', 'province', 'district', 'lat', 'lon', 'areaHa',
-              'soilType', 'soilCharacteristics', 'waterSource', 'crop',
-              'primaryGoal', 'inspectTime', 'nasaGrid', 'adaptiveMemory',
-              'ownerName', 'sharedWithEmails', 'sharedWithUids', 'activeShareToken',
-              'updatedAt'
-            ])
-          ) ||
-          (
-            incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithUids', 'presentedShareToken', 'updatedAt'])
-            && ('activeShareToken' in existing())
-            && existing().activeShareToken is string
-            && existing().activeShareToken.size() >= 12
-            && incoming().presentedShareToken == existing().activeShareToken
-            && incoming().sharedWithUids is list
-            && incoming().sharedWithUids.size() <= 50
-            && request.auth.uid in incoming().sharedWithUids
-            && (
-              (!('sharedWithUids' in existing()) && incoming().sharedWithUids.size() == 1) ||
-              ('sharedWithUids' in existing() && incoming().sharedWithUids.hasAll(existing().sharedWithUids) && incoming().sharedWithUids.size() <= existing().sharedWithUids.size() + 1)
-            )
-          )
-        );
-      allow delete: if isSignedIn() && isValidId(fieldId) && existing().ownerId == request.auth.uid;
+      allow update: if isAdmin()
+        && isValidId(userId)
+        && isValidAdminEntry(incoming())
+        && incoming().uid == existing().uid
+        && incoming().grantedAt == existing().grantedAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email']);
+      allow delete: if isAdmin() && isValidId(userId);
     }
 
     // Field Shares (Link tokens & Email invitations)
@@ -293,8 +573,8 @@ service cloud.firestore {
         && isValidId(shareId)
         && isValidFieldShare(incoming())
         && incoming().ownerId == request.auth.uid
-        && exists(/databases/$(database)/documents/fields/$(incoming().fieldId))
-        && get(/databases/$(database)/documents/fields/$(incoming().fieldId)).data.ownerId == request.auth.uid
+        && hasParentPlot(request.auth.uid, incoming().fieldId)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/plots/$(incoming().fieldId)).data.ownerId == request.auth.uid
         && incoming().createdAt == request.time;
       allow update: if isSignedIn()
         && isValidId(shareId)
@@ -307,45 +587,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(shareId) && (existing().ownerId == request.auth.uid || isAdmin());
     }
 
-    // Tasks (Strictly linked to field creator + owner, admin read for stats)
-    match /tasks/{taskId} {
-      allow get: if isSignedIn() && isValidId(taskId) && (existing().ownerId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn()
-        && isValidId(taskId)
-        && isValidFarmTask(incoming())
-        && incoming().ownerId == request.auth.uid
-        && exists(/databases/$(database)/documents/fields/$(incoming().fieldId))
-        && get(/databases/$(database)/documents/fields/$(incoming().fieldId)).data.ownerId == request.auth.uid
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
-      allow update: if isSignedIn()
-        && isValidId(taskId)
-        && isValidFarmTask(incoming())
-        && existing().ownerId == request.auth.uid
-        && incoming().ownerId == existing().ownerId
-        && incoming().fieldId == existing().fieldId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'farmerNote', 'updatedAt']);
-      allow delete: if isSignedIn() && isValidId(taskId) && existing().ownerId == request.auth.uid;
-    }
-
-    // Feedbacks (Strictly linked to field creator + owner, admin read for stats)
-    match /feedbacks/{feedbackId} {
-      allow get: if isSignedIn() && isValidId(feedbackId) && (existing().ownerId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn()
-        && isValidId(feedbackId)
-        && isValidFeedback(incoming())
-        && incoming().ownerId == request.auth.uid
-        && exists(/databases/$(database)/documents/fields/$(incoming().fieldId))
-        && get(/databases/$(database)/documents/fields/$(incoming().fieldId)).data.ownerId == request.auth.uid
-        && incoming().createdAt == request.time;
-      allow update, delete: if isSignedIn() && isValidId(feedbackId) && existing().ownerId == request.auth.uid;
-    }
-
-    // NASA Datasets (Public/SignedIn read of active climate overrides, STRICTLY Admin write)
+    // NASA Datasets (Public read of active climate overrides, STRICTLY Admin write)
     match /nasa_datasets/{datasetId} {
       allow get: if isValidId(datasetId) && (existing().isPublic == true || isAdmin());
       allow list: if resource.data.isPublic == true || isAdmin();
@@ -365,7 +607,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(datasetId);
     }
 
-    // NASA Sync Logs (Strictly Admin ONLY - invisible to public/farmers)
+    // NASA Sync Logs (Strictly Admin ONLY)
     match /nasa_sync_logs/{logId} {
       allow get, list: if isAdmin();
       allow create: if isAdmin()
@@ -373,7 +615,8 @@ service cloud.firestore {
         && isValidNasaSyncLog(incoming())
         && incoming().actorUid == request.auth.uid
         && incoming().createdAt == request.time;
-      allow update, delete: if isAdmin() && isValidId(logId);
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
     }
   }
 }
