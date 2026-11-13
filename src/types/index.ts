@@ -119,12 +119,13 @@ export interface FieldProfile {
     lon: number;
     distanceKm: number;
   };
-  // Learned farmer behavioral adjustments
+  // Learned farmer behavioral adjustments + synced earth metrics
   adaptiveMemory?: {
     soilAdjustment?: string;
     irrigationSensitivity?: 'higher' | 'normal' | 'lower';
     consecutiveDryAlerts?: number;
     lastFeedbackDate?: string;
+    earthMetrics?: EarthEnvironmentSnapshot;
   };
 }
 
@@ -202,6 +203,7 @@ export interface ProvenanceBadge {
   label: string;
   type: DataProvenanceType;
   description: string;
+  lastUpdated?: string;
 }
 
 export interface WeatherObservation {
@@ -415,4 +417,76 @@ export interface AppUser {
   emailVerified: boolean;
   isAdmin: boolean;
   authMode?: 'firebase' | 'local_server';
+}
+
+export interface TrendPoint {
+  label: string;
+  value: number;
+}
+
+export interface CarbonFluxOco2Record {
+  fieldId: string;
+  rotationId?: string;
+  lat: number;
+  lon: number;
+  observationDate: string;
+  lastUpdated: string;
+  sifWm2SrUm: number;
+  xco2Ppm: number;
+  carbonUptakeTonHaYr: number;
+  photosynthesisStatus: 'high' | 'moderate' | 'low';
+  dataSource: string;
+  trendSeries: TrendPoint[];
+}
+
+export interface GroundwaterAnomalyGraceRecord {
+  fieldId: string;
+  rotationId?: string;
+  lat: number;
+  lon: number;
+  observationDate: string;
+  lastUpdated: string;
+  lweThicknessCm: number;
+  groundwaterStatus: 'recharging' | 'stable' | 'depleting';
+  soilWaterBalancePct: number;
+  dataSource: string;
+  trendSeries: TrendPoint[];
+}
+
+export interface GreenhouseGasEdgarRecord {
+  fieldId: string;
+  rotationId?: string;
+  lat: number;
+  lon: number;
+  observationDate: string;
+  lastUpdated: string;
+  ch4KgHa: number;
+  n2oKgHa: number;
+  co2eqTonHa: number;
+  emissionLevel: 'low' | 'moderate' | 'high';
+  cropContext: string;
+  dataSource: string;
+  trendSeries: TrendPoint[];
+}
+
+export interface SmapModisGpmSummary {
+  observationDate: string;
+  lastUpdated: string;
+  smapSoilMoisturePct: number;
+  modisNdvi: number;
+  gpmPrecipitation7dMm: number;
+  dataSource: string;
+}
+
+export interface EarthEnvironmentSnapshot {
+  fieldId: string;
+  syncedAt: string;
+  sustainabilityScore: number;
+  rotationAdvice: string;
+  rotationAdviceEn?: string;
+  nasaPowerLastUpdated?: string;
+  smapModis?: SmapModisGpmSummary;
+  carbonFluxOco2: CarbonFluxOco2Record;
+  groundwaterAnomalyGrace: GroundwaterAnomalyGraceRecord;
+  greenhouseGasEdgar: GreenhouseGasEdgarRecord;
 }

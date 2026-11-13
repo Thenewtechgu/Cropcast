@@ -426,6 +426,51 @@
         "isActive",
         "createdAt"
       ]
+    },
+    "CarbonFluxOco2": {
+      "title": "CarbonFluxOco2",
+      "description": "NASA OCO-2/3 SIF photosynthesis and carbon uptake metric linked to a field.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rotationId": { "type": "string", "maxLength": 128 },
+        "observationDate": { "type": "string", "maxLength": 20 },
+        "sifWm2SrUm": { "type": "number" },
+        "carbonUptakeTonHaYr": { "type": "number" },
+        "photosynthesisStatus": { "type": "string", "enum": ["high", "moderate", "low"] }
+      },
+      "required": ["ownerId", "fieldId", "observationDate", "sifWm2SrUm", "carbonUptakeTonHaYr"]
+    },
+    "GroundwaterAnomalyGrace": {
+      "title": "GroundwaterAnomalyGrace",
+      "description": "NASA GRACE/GRACE-FO groundwater storage anomaly linked to a field.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rotationId": { "type": "string", "maxLength": 128 },
+        "observationDate": { "type": "string", "maxLength": 20 },
+        "lweThicknessCm": { "type": "number" },
+        "groundwaterStatus": { "type": "string", "enum": ["recharging", "stable", "depleting"] }
+      },
+      "required": ["ownerId", "fieldId", "observationDate", "lweThicknessCm", "groundwaterStatus"]
+    },
+    "GreenhouseGasEdgar": {
+      "title": "GreenhouseGasEdgar",
+      "description": "GHGx/EDGAR CH4 and N2O agricultural emissions linked to a field.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fieldId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rotationId": { "type": "string", "maxLength": 128 },
+        "observationDate": { "type": "string", "maxLength": 20 },
+        "ch4KgHa": { "type": "number" },
+        "n2oKgHa": { "type": "number" },
+        "co2eqTonHa": { "type": "number" },
+        "emissionLevel": { "type": "string", "enum": ["low", "moderate", "high"] }
+      },
+      "required": ["ownerId", "fieldId", "observationDate", "ch4KgHa", "n2oKgHa", "co2eqTonHa"]
     }
   },
   "firestore": {
@@ -460,6 +505,18 @@
     "/nasa_sync_logs/{logId}": {
       "schema": { "$ref": "#/entities/NasaSyncLog" },
       "description": "Admin-only NASA synchronization logs."
+    },
+    "/carbon_flux_oco2/{recordId}": {
+      "schema": { "$ref": "#/entities/CarbonFluxOco2" },
+      "description": "NASA OCO-2/3 carbon flux observations linked to fields."
+    },
+    "/groundwater_anomaly_grace/{recordId}": {
+      "schema": { "$ref": "#/entities/GroundwaterAnomalyGrace" },
+      "description": "NASA GRACE groundwater anomaly records linked to fields."
+    },
+    "/greenhouse_gas_edgar/{recordId}": {
+      "schema": { "$ref": "#/entities/GreenhouseGasEdgar" },
+      "description": "GHGx/EDGAR emissions records linked to fields."
     }
   }
 }

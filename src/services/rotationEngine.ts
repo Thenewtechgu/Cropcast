@@ -9,18 +9,19 @@ import {
 import { findNearestNasaGrid, getCellMonthlyProfile } from '../data/nasaVietnamGrid';
 import { getSeedFamilyById, inferSeedFamilyFromCrop } from '../data/cropTaxonomy';
 import { getSoilLabel, getDrainageLabel } from './agronomyEngine';
+import type { AppLanguage } from '../contexts/LanguageContext';
 
 export interface ScenarioAdjustments {
-  rainDeltaPct: number; // -40 to +40
-  tempDeltaC: number;   // -3 to +4
+  rainDeltaPct: number;
+  tempDeltaC: number;
 }
 
 export interface HarmonizedFieldIndicators {
   rootMoisturePct: number;
   surfaceMoisturePct: number;
   evapotranspirationMmDay: number;
-  heatStressIndex: 'Thấp' | 'Trung bình' | 'Cao';
-  erosionRisk: 'Thấp' | 'Trung bình' | 'Cao';
+  heatStressIndex: string;
+  erosionRisk: string;
   frostRiskMonths: number[];
   droughtRiskMonths: number[];
   floodRiskMonths: number[];
@@ -38,6 +39,20 @@ export const FARMER_PRIORITIES: Array<{ id: FarmerPriorityId; label: string; des
   { id: 'supplemental_income', label: 'Tăng thu nhập phụ / Thức ăn gia súc', desc: 'Tận dụng vụ xen để bán nông sản hoặc nuôi trâu bò' },
 ];
 
+export function getFarmerPriorities(lang: AppLanguage = 'vi') {
+  if (lang === 'en') {
+    return [
+      { id: 'water_saving' as const, label: 'Save irrigation water', desc: 'Reduce dry-season pumping demand' },
+      { id: 'nitrogen_fixing' as const, label: 'Natural nitrogen fixation', desc: 'Cut synthetic N fertilizer & N₂O emissions' },
+      { id: 'erosion_control' as const, label: 'Erosion & runoff control', desc: 'Cover bare soil against heavy rainfall' },
+      { id: 'pest_break' as const, label: 'Break pest & disease cycles', desc: 'Rotate crop families to disrupt pathogens' },
+      { id: 'organic_matter' as const, label: 'Build soil organic matter', desc: 'Add deep roots and biomass carbon' },
+      { id: 'supplemental_income' as const, label: 'Extra income / livestock forage', desc: 'Sell intercrops or feed farm livestock' },
+    ];
+  }
+  return FARMER_PRIORITIES;
+}
+
 export const SCIENTIFIC_GLOSSARY: Array<{
   term: string;
   simpleName: string;
@@ -53,52 +68,75 @@ export const SCIENTIFIC_GLOSSARY: Array<{
       'Khi nắng to và gió khô, đất cát trống mất ẩm rất nhanh; che phủ rơm rạ hoặc trồng cây họ Đậu giúp giảm mạnh lượng nước thất thoát này.',
   },
   {
-    term: 'Bất thường độ ẩm đất',
-    simpleName: 'Đất đang khô hơn hay ẩm hơn mức bình thường nhiều năm',
+    term: 'Quang hợp SIF (NASA OCO-2/3)',
+    simpleName: 'Tốc độ quang hợp và hấp thụ CO₂ thực tế của tán lá',
     explanation:
-      'So sánh độ ẩm đất hiện tại với mức trung bình cùng tháng trong 21 năm lịch sử để phát hiện sớm hạn cục bộ hoặc ngập úng tiềm ẩn.',
+      'Vệ tinh OCO-2 đo ánh sáng huỳnh quang phát ra từ diệp lục khi cây quang hợp, giúp ước tính lượng Carbon hấp thụ (tấn CO₂/ha).',
     fieldExample:
-      'Nếu độ ẩm vùng rễ thấp hơn mức trung bình tháng 3 từ 15% trở lên, cây dễ bị héo tạm thời vào buổi trưa dù sáng sớm lá vẫn tươi.',
+      'SIF giảm thấp báo hiệu tán lá đang thiếu nước, thiếu đạm hoặc bị che mây kéo dài.',
   },
   {
-    term: 'Chỉ số độ xanh và che phủ thảm thực vật',
-    simpleName: 'Mức độ xanh tốt và độ che phủ của tán lá nhìn từ vệ tinh',
+    term: 'Trữ lượng nước ngầm (GRACE)',
+    simpleName: 'Biến động mực nước tầng ngậm sâu (cm LWE)',
     explanation:
-      'Vệ tinh đo ánh sáng phản xạ từ lá xanh. Tán cây khỏe mạnh che phủ kín ruộng cho chỉ số cao; đất trống sau thu hoạch hoặc cây bị suy yếu cho chỉ số thấp.',
+      'Vệ tinh GRACE-FO đo thay đổi trọng lực của khối lượng nước ngầm dưới lòng đất so với trung bình nhiều năm.',
     fieldExample:
-      'Khi độ che phủ giảm xuống thấp kéo dài nhiều tuần giữa hai vụ, mặt ruộng đang bị phơi nắng và dễ xói mòn khi gặp mưa đầu mùa.',
+      'Chỉ số âm (suy giảm) cảnh báo nên chuyển sang tưới tiết kiệm và ưu tiên cây chịu hạn.',
   },
   {
-    term: 'Nguy cơ rét hại & sương muối',
-    simpleName: 'Đợt nhiệt độ ban đêm xuống thấp làm tổn thương mô lá non',
+    term: 'Phát thải CH₄ & N₂O (GHGx / EDGAR)',
+    simpleName: 'Khí nhà kính từ ruộng ngập nước và phân đạm',
     explanation:
-      'Dựa trên chuỗi nhiệt độ tối thiểu ban đêm (đặc biệt ở miền Bắc và vùng núi cao) kết hợp với độ ẩm không khí.',
+      'Ước tính lượng Mê-tan (ruộng lúa ngập liên tục) và Nitơ oxit (từ phân đạm dư thừa), quy đổi sang tấn CO₂e/ha.',
     fieldExample:
-      'Nếu nhiệt độ đêm dưới 13°C vào tháng 1, cây mạ non hoặc rau họ Cà rất dễ thâm ngọn; cần che phủ hoặc chuyển sang cây chịu lạnh.',
-  },
-  {
-    term: 'Cân bằng nước vùng rễ',
-    simpleName: 'Chênh lệch giữa lượng nước nhận vào (mưa, tưới) và lượng nước mất đi',
-    explanation:
-      'Cho biết tầng đất nuôi rễ đang tích nước hay thâm hụt nước, giúp quyết định tưới vừa đủ hoặc ưu tiên tiêu thoát nước.',
-    fieldExample:
-      'Đất sét thoát chậm khi lượng mưa vượt xa mức bốc hơi sẽ nhanh chóng bão hòa, cần khơi rãnh trước khi xuất hiện ngập úng.',
+      'Rút nước ngập–khô xen kẽ (AWD) và luân canh 1 vụ Đậu giúp cắt giảm đáng kể phát thải.',
   },
 ];
 
-/**
- * Harmonizes multi-source satellite & field observations onto the field's grid cell
- */
+export function getScientificGlossary(lang: AppLanguage = 'vi') {
+  if (lang === 'en') {
+    return [
+      {
+        term: 'Evapotranspiration (ET₀)',
+        simpleName: 'Water lost from soil surface and plant leaves',
+        explanation: 'Combined evaporation from bare soil and transpiration through crop foliage under sun and wind.',
+        fieldExample: 'Straw mulching or cover legumes sharply cut moisture loss during hot, windy weeks.',
+      },
+      {
+        term: 'Solar-Induced Fluorescence (OCO-2 SIF)',
+        simpleName: 'Satellite measure of active canopy photosynthesis & CO₂ uptake',
+        explanation: 'NASA OCO-2/3 measures chlorophyll fluorescence emitted during photosynthesis to estimate CO₂ uptake (t CO₂/ha).',
+        fieldExample: 'Low SIF highlights nitrogen deficiency, drought stress, or dense cloud cover early.',
+      },
+      {
+        term: 'Groundwater Anomaly (GRACE-FO)',
+        simpleName: 'Subsurface aquifer storage change (cm LWE)',
+        explanation: 'GRACE satellites track gravity shifts caused by groundwater recharge or depletion.',
+        fieldExample: 'Negative values warn against deep borewell pumping and favor drought-resilient crops.',
+      },
+      {
+        term: 'Agricultural CH₄ & N₂O (GHGx / EDGAR)',
+        simpleName: 'Greenhouse gas intensity from flooded soils & nitrogen fertilizer',
+        explanation: 'Combines methane from anaerobic rice soils and nitrous oxide from synthetic nitrogen converted to t CO₂e/ha.',
+        fieldExample: 'Alternate Wetting & Drying (AWD) plus legume rotation reduce both gases and fertilizer cost.',
+      },
+    ];
+  }
+  return SCIENTIFIC_GLOSSARY;
+}
+
 export function computeHarmonizedIndicators(
   field: FieldProfile,
   weather: WeatherObservation,
-  scenario: ScenarioAdjustments
+  scenario: ScenarioAdjustments,
+  lang: AppLanguage = 'vi'
 ): HarmonizedFieldIndicators {
+  const isEn = lang === 'en';
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const adjustedTemp = weather.temp + scenario.tempDeltaC;
   const rainFactor = 1 + scenario.rainDeltaPct / 100;
+  const earth = field.adaptiveMemory?.earthMetrics;
 
-  // Estimate root and surface moisture response to scenario adjustments & soil drainage
   const drainageMultiplier =
     field.soilCharacteristics.drainage === 'fast'
       ? 0.88
@@ -114,39 +152,63 @@ export function computeHarmonizedIndicators(
     Math.min(99, Math.max(8, (weather.gwettop + moistureShift * 1.2) * drainageMultiplier * 100))
   );
 
-  // Simplified Penman-style evapotranspiration estimate (mm/day)
   const et0 = Math.max(
     1.5,
     Number((0.18 * adjustedTemp + 0.14 * weather.solarRadiation - 0.02 * weather.humidity).toFixed(1))
   );
 
-  const heatStressIndex: 'Thấp' | 'Trung bình' | 'Cao' =
+  const heatStressIndex =
     adjustedTemp >= 33 || weather.maxTemp + scenario.tempDeltaC >= 36
-      ? 'Cao'
+      ? isEn
+        ? 'High'
+        : 'Cao'
       : adjustedTemp >= 28
-      ? 'Trung bình'
+      ? isEn
+        ? 'Moderate'
+        : 'Trung bình'
+      : isEn
+      ? 'Low'
       : 'Thấp';
 
   const projectedAnnualRain = cell.climatology21Yr.annualRainfallMm * rainFactor;
-  const erosionRisk: 'Thấp' | 'Trung bình' | 'Cao' =
+  const erosionRisk =
     projectedAnnualRain > 2000 || (field.soilCharacteristics.drainage === 'fast' && scenario.rainDeltaPct > 15)
-      ? 'Cao'
+      ? isEn
+        ? 'High'
+        : 'Cao'
       : projectedAnnualRain > 1500
-      ? 'Trung bình'
+      ? isEn
+        ? 'Moderate'
+        : 'Trung bình'
+      : isEn
+      ? 'Low'
       : 'Thấp';
 
-  const longTermWaterTrend =
-    cell.lat < 11.5
-      ? 'Vùng đồng bằng hạ lưu có xu hướng gia tăng dao động mực nước mùa khô và xâm nhập mặn cục bộ.'
-      : cell.lat > 20
-      ? 'Biên độ mưa giữa mùa khô và mùa lũ đang giãn rộng, dễ gặp hạn đầu vụ Xuân và mưa tập trung cuối hè.'
-      : 'Lượng nước mặt phân bố lệch rõ rệt theo mùa, cần tích ẩm tầng rễ trong thời kỳ nắng gắt.';
+  const grace = earth?.groundwaterAnomalyGrace;
+  const longTermWaterTrend = grace
+    ? isEn
+      ? `GRACE-FO aquifer anomaly: ${grace.lweThicknessCm >= 0 ? '+' : ''}${grace.lweThicknessCm} cm LWE (${grace.groundwaterStatus}). Root water balance ${grace.soilWaterBalancePct}%.`
+      : `Vệ tinh GRACE-FO ghi nhận biến động nước ngầm ${grace.lweThicknessCm >= 0 ? '+' : ''}${grace.lweThicknessCm} cm LWE (${grace.groundwaterStatus === 'depleting' ? 'đang suy giảm' : grace.groundwaterStatus === 'recharging' ? 'đang phục hồi' : 'ổn định'}), cân bằng ẩm rễ ${grace.soilWaterBalancePct}%.`
+    : cell.lat < 11.5
+    ? isEn
+      ? 'Lower delta region shows heightened dry-season water table swings and local salinity risk.'
+      : 'Vùng đồng bằng hạ lưu có xu hướng gia tăng dao động mực nước mùa khô và xâm nhập mặn cục bộ.'
+    : isEn
+    ? 'Distinct wet/dry seasonal water distribution; store root-zone moisture ahead of dry months.'
+    : 'Lượng nước phân bố lệch rõ rệt theo mùa, cần tích ẩm tầng rễ trong thời kỳ nắng gắt.';
 
+  const oco2 = earth?.carbonFluxOco2;
   const vegetationStressNote =
-    rootMoisturePct < 35
-      ? 'Độ ẩm vùng rễ xuống thấp, tán lá có nguy cơ giảm quang hợp và héo rũ trưa nắng.'
-      : rootMoisturePct > 82 && field.soilCharacteristics.drainage === 'slow'
-      ? 'Độ ẩm bão hòa cao dễ làm rễ thiếu oxy và vàng lá sinh lý.'
+    oco2 && oco2.photosynthesisStatus === 'low'
+      ? isEn
+        ? `OCO-2 SIF (${oco2.sifWm2SrUm}) shows low photosynthetic activity (${oco2.carbonUptakeTonHaYr} t CO₂/ha); inspect leaf nitrogen and moisture.`
+        : `Chỉ số OCO-2 SIF (${oco2.sifWm2SrUm}) cho thấy cường độ quang hợp thấp (${oco2.carbonUptakeTonHaYr} tấn CO₂/ha); cần kiểm tra đạm và độ ẩm tán.`
+      : rootMoisturePct < 35
+      ? isEn
+        ? 'Low root moisture weakens photosynthesis and risks midday wilting.'
+        : 'Độ ẩm vùng rễ xuống thấp, tán lá có nguy cơ giảm quang hợp và héo rũ trưa nắng.'
+      : isEn
+      ? 'Canopy cover and root moisture remain within a healthy range.'
       : 'Độ che phủ và cân bằng ẩm đang trong vùng an toàn cho cây phát triển.';
 
   return {
@@ -160,28 +222,27 @@ export function computeHarmonizedIndicators(
     floodRiskMonths: cell.climatology21Yr.riskMonthsFlood,
     longTermWaterTrend,
     vegetationStressNote,
-    dataFusionSummary: `Hệ thống đồng bộ thông tin khí hậu 21 năm tại lưới vùng ${cell.region} (độ phân giải ~55 km) với đặc điểm đất ${getSoilLabel(field.soilType).toLowerCase()}, chế độ thoát nước (${getDrainageLabel(field.soilCharacteristics.drainage).toLowerCase()}) và giống cây tại thửa ruộng của bạn.`,
+    dataFusionSummary: isEn
+      ? `Harmonizing 21-year NASA POWER (${cell.region}), ${getSoilLabel(field.soilType, 'en')}, and ${earth ? 'OCO-2 + GRACE + GHGx satellite observations' : 'field soil/water physics'}.`
+      : `Đồng bộ dữ liệu NASA POWER 21 năm (${cell.region}), đất ${getSoilLabel(field.soilType, 'vi').toLowerCase()} (${getDrainageLabel(field.soilCharacteristics.drainage, 'vi').toLowerCase()})${earth ? ' cùng chỉ số OCO-2, GRACE và GHGx' : ''}.`,
   };
 }
 
-/**
- * Generates 12-month bare-field & crop stress vulnerability timeline
- */
 export function analyzeBareFieldAndStressTimeline(
   field: FieldProfile,
-  scenario: ScenarioAdjustments
+  scenario: ScenarioAdjustments,
+  lang: AppLanguage = 'vi'
 ): BareFieldMonthAnalysis[] {
+  const isEn = lang === 'en';
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthly = getCellMonthlyProfile(cell);
   const plantingMonth = field.crop.plantingDate
     ? new Date(field.crop.plantingDate).getMonth() + 1
     : 11;
 
-  // Approximate 3-4 month active cycle from plantingMonth
   const activeMonths = new Set<number>();
   for (let offset = 0; offset < 4; offset++) {
-    const m = ((plantingMonth - 1 + offset) % 12) + 1;
-    activeMonths.add(m);
+    activeMonths.add(((plantingMonth - 1 + offset) % 12) + 1);
   }
   const transitionMonth = ((plantingMonth - 1 + 4) % 12) + 1;
 
@@ -202,26 +263,38 @@ export function analyzeBareFieldAndStressTimeline(
     if (activeMonths.has(monthNum)) fieldState = 'active_crop';
     else if (monthNum === transitionMonth) fieldState = 'harvest_transition';
 
-    let dominantRisk = 'Điều kiện tương đối ổn định';
+    let dominantRisk = isEn ? 'Relatively stable conditions' : 'Điều kiện tương đối ổn định';
     let stressLevel: 'low' | 'moderate' | 'high' = 'low';
 
     if (isFlood) {
       dominantRisk =
         fieldState === 'bare_fallow'
-          ? 'Đất trống gặp mưa lớn — nguy cơ xói mòn & rửa trôi dinh dưỡng'
+          ? isEn
+            ? 'Bare soil + heavy rain — erosion & nutrient leaching risk'
+            : 'Đất trống gặp mưa lớn — nguy cơ xói mòn & rửa trôi dinh dưỡng'
+          : isEn
+          ? 'Extreme rain — root waterlogging risk'
           : 'Mưa cực đoan — nguy cơ ngập úng vùng rễ';
       stressLevel = 'high';
     } else if (isDrought) {
       dominantRisk =
         fieldState === 'bare_fallow'
-          ? 'Đất trống phơi nắng — bốc hơi ẩm mạnh & chai cứng mặt đất'
+          ? isEn
+            ? 'Exposed bare soil — rapid moisture loss & crusting'
+            : 'Đất trống phơi nắng — bốc hơi ẩm mạnh & chai cứng mặt đất'
+          : isEn
+          ? 'Root moisture deficit & high evapotranspiration'
           : 'Thiếu ẩm vùng rễ & bốc thoát hơi nước cao';
       stressLevel = 'high';
     } else if (isCold) {
-      dominantRisk = 'Nhiệt độ đêm thấp — nguy cơ rét hại cho mạ và cây non';
+      dominantRisk = isEn
+        ? 'Low night temp — cold stress risk for seedlings'
+        : 'Nhiệt độ đêm thấp — nguy cơ rét hại cho mạ và cây non';
       stressLevel = 'moderate';
     } else if (adjTemp > 31) {
-      dominantRisk = 'Nắng nóng cao điểm — cây dễ sốc nhiệt buổi trưa';
+      dominantRisk = isEn
+        ? 'High daytime heat — midday thermal stress'
+        : 'Nắng nóng cao điểm — cây dễ sốc nhiệt buổi trưa';
       stressLevel = 'moderate';
     }
 
@@ -232,20 +305,28 @@ export function analyzeBareFieldAndStressTimeline(
         ? 'Trung bình'
         : 'Thấp';
 
-    let recommendationNote = 'Duy trì theo dõi định kỳ.';
+    let recommendationNote = isEn ? 'Maintain routine monitoring.' : 'Duy trì theo dõi định kỳ.';
     if (fieldState === 'bare_fallow') {
       recommendationNote = isFlood
-        ? 'Tránh để đất trống: nên gieo cây che phủ họ Đậu (điền thanh, đậu đen) để giữ đất.'
+        ? isEn
+          ? 'Avoid bare soil: sow cover legumes (sesbania/black bean) to anchor topsoil.'
+          : 'Tránh để đất trống: nên gieo cây che phủ họ Đậu (điền thanh, đậu đen) để giữ đất.'
+        : isEn
+        ? 'Fallow gap: plant short-season mungbean or mulch straw to preserve moisture.'
         : 'Khoảng trống giữa vụ: thích hợp trồng đậu xanh ngắn ngày hoặc tủ rơm giữ ẩm.';
     } else if (fieldState === 'harvest_transition') {
-      recommendationNote = 'Giai đoạn chuyển vụ: chuẩn bị hạt giống họ khác để ngắt chu kỳ sâu bệnh.';
+      recommendationNote = isEn
+        ? 'Transition window: prepare seeds from a different plant family to break pests.'
+        : 'Giai đoạn chuyển vụ: chuẩn bị hạt giống họ khác để ngắt chu kỳ sâu bệnh.';
     } else if (stressLevel === 'high') {
-      recommendationNote = 'Cây trồng hiện tại nhạy cảm cao trong tháng này; cân nhắc giống chịu hạn/úng tốt hơn.';
+      recommendationNote = isEn
+        ? 'High climate stress for current crop; choose drought/flood resilient rotation.'
+        : 'Cây trồng hiện tại nhạy cảm cao trong tháng này; cân nhắc giống chịu hạn/úng tốt hơn.';
     }
 
     return {
       month: monthNum,
-      monthLabel: `Tháng ${monthNum}`,
+      monthLabel: isEn ? `Month ${monthNum}` : `Tháng ${monthNum}`,
       fieldState,
       stressLevel,
       dominantRisk,
@@ -258,131 +339,163 @@ export function analyzeBareFieldAndStressTimeline(
   });
 }
 
-/**
- * Generates at least 3 comparable crop rotation strategies (including existing baseline)
- */
 export function generateRotationStrategies(
   field: FieldProfile,
   weather: WeatherObservation,
   priorities: FarmerPriorityId[],
   constraints: FarmerConstraints,
-  scenario: ScenarioAdjustments
+  scenario: ScenarioAdjustments,
+  lang: AppLanguage = 'vi'
 ): RotationStrategy[] {
+  const isEn = lang === 'en';
   const familyId = field.crop.seedFamily || inferSeedFamilyFromCrop(field.crop.name, field.crop.category);
   const currentFamily = getSeedFamilyById(familyId);
-  const indicators = computeHarmonizedIndicators(field, weather, scenario);
+  const indicators = computeHarmonizedIndicators(field, weather, scenario, lang);
+  const earth = field.adaptiveMemory?.earthMetrics;
+
+  const graceDepleting = earth?.groundwaterAnomalyGrace?.groundwaterStatus === 'depleting';
+  const ghgHigh = earth?.greenhouseGasEdgar?.emissionLevel === 'high';
+  const oco2Low = earth?.carbonFluxOco2?.photosynthesisStatus === 'low';
+
   const isWaterTight =
     constraints.waterAvailability !== 'abundant' ||
     priorities.includes('water_saving') ||
-    indicators.rootMoisturePct < 45;
+    indicators.rootMoisturePct < 45 ||
+    graceDepleting;
   const isSlowDrainage =
     field.soilCharacteristics.drainage === 'slow' ||
     ['clay', 'clay_loam', 'acid_sulfate', 'peat_muck'].includes(field.soilType);
   const wantsForageOrIncome =
     priorities.includes('supplemental_income') || constraints.marketPreference !== 'cash_crop';
 
-  // Strategy 1: Existing Baseline (Monoculture / Continue current crop family)
   const baseline: RotationStrategy = {
     id: 'rot-baseline',
     isCurrentBaseline: true,
-    title: `Phương án hiện tại: Tiếp tục trồng ${field.crop.name} (${currentFamily.name})`,
-    sequenceSummary: `${field.crop.name} → Nghỉ đất trống → ${field.crop.name}`,
+    title: isEn
+      ? `Current Baseline: Continue ${field.crop.name}`
+      : `Phương án hiện tại: Tiếp tục trồng ${field.crop.name} (${currentFamily.name})`,
+    sequenceSummary: isEn
+      ? `${field.crop.name} → Bare fallow → ${field.crop.name}`
+      : `${field.crop.name} → Nghỉ đất trống → ${field.crop.name}`,
     nextCropFamily: familyId,
     nextCropName: field.crop.name,
-    suitabilityScore: isWaterTight || priorities.includes('pest_break') ? 54 : 68,
-    whySuggested:
-      'Là phương án đối chứng dựa trên tập quán canh tác hiện tại của thửa ruộng để bạn so sánh chi phí, lượng nước và rủi ro sâu bệnh.',
+    suitabilityScore: isWaterTight || ghgHigh || priorities.includes('pest_break') ? 52 : 68,
+    whySuggested: isEn
+      ? 'Reference baseline reflecting your current monoculture setup to compare water, emissions, and pest risk.'
+      : 'Là phương án đối chứng dựa trên tập quán canh tác hiện tại của thửa ruộng để bạn so sánh chi phí, nước ngầm, phát thải và rủi ro sâu bệnh.',
     supportingEvidence: [
-      `Nông hộ đã quen kỹ thuật canh tác và đầu ra cho ${field.crop.name}.`,
-      `Đất ${getSoilLabel(field.soilType).toLowerCase()} hiện có độ ẩm vùng rễ ước tính ${indicators.rootMoisturePct}% và tốc độ bốc thoát hơi nước ${indicators.evapotranspirationMmDay} mm/ngày.`,
-      `Nếu để đất trống giữa các vụ vào tháng mưa (${indicators.floodRiskMonths.map(m => 'T' + m).join(', ') || 'giữa năm'}), mặt ruộng dễ bị rửa trôi dinh dưỡng.`,
+      isEn
+        ? `Estimated root moisture ${indicators.rootMoisturePct}% and ET₀ ${indicators.evapotranspirationMmDay} mm/day.`
+        : `Đất ${getSoilLabel(field.soilType, 'vi').toLowerCase()} hiện có độ ẩm rễ ${indicators.rootMoisturePct}% và bốc thoát hơi nước ${indicators.evapotranspirationMmDay} mm/ngày.`,
+      earth
+        ? isEn
+          ? `GHGx/EDGAR baseline: ${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha; GRACE groundwater: ${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE.`
+          : `Phát thải hiện tại (GHGx): ${earth.greenhouseGasEdgar.co2eqTonHa} tấn CO₂e/ha; Nước ngầm GRACE: ${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE.`
+        : isEn
+        ? 'Sync NASA Earth metrics to include groundwater & emission baseline.'
+        : 'Đồng bộ dữ liệu NASA để bổ sung đối chiếu nước ngầm & phát thải.',
     ],
     benefits: {
-      nutrientCycling: 'Không bổ sung đạm sinh học tự nhiên; phụ thuộc hoàn toàn vào phân bón từ bên ngoài.',
-      waterDemand:
-        field.crop.category === 'rice'
-          ? 'Nhu cầu nước cao; khó duy trì nếu nguồn nước mùa khô bị thu hẹp.'
-          : 'Nhu cầu nước giữ nguyên như các vụ trước.',
-      erosionAndOrganicMatter: 'Thời gian đất trống giữa hai vụ làm giảm mùn và tăng xói mòn tầng mặt.',
-      pestCycleDisruption: 'Không cắt được chu kỳ sâu bệnh do trồng lặp lại cùng họ thực vật.',
-      forageAndIncome: 'Thu nhập ổn định theo thói quen nhưng dễ bị ảnh hưởng nếu giá nông sản giảm hoặc thời tiết cực đoan.',
+      nutrientCycling: isEn ? 'No biological N fixation; relies on synthetic inputs.' : 'Không bổ sung đạm sinh học tự nhiên; phụ thuộc hoàn toàn vào phân bón.',
+      waterDemand: isEn ? 'High seasonal irrigation dependence.' : 'Nhu cầu nước giữ nguyên như các vụ trước.',
+      erosionAndOrganicMatter: isEn ? 'Bare fallow degrades topsoil carbon.' : 'Thời gian đất trống làm giảm mùn và tăng xói mòn.',
+      pestCycleDisruption: isEn ? 'Same plant family does not interrupt pest cycles.' : 'Không cắt được chu kỳ sâu bệnh do trồng lặp cùng họ.',
+      forageAndIncome: isEn ? 'Familiar local market channel.' : 'Đầu ra quen thuộc nhưng dễ rủi ro khi thời tiết cực đoan.',
     },
     informationGaps: [
-      'Chưa có kết quả phân tích hàm lượng dinh dưỡng (đạm, lân, kali, vi lượng) thực tế trong đất sau nhiều vụ liên tiếp.',
-      'Chưa đo mật độ bào tử nấm hoặc tuyến trùng lưu tồn trong rễ vụ vừa rồi.',
+      isEn ? 'Actual post-harvest NPK & soil pH lab test needed.' : 'Chưa có kết quả kiểm nghiệm NPK & pH đất thực tế sau vụ thu hoạch.',
     ],
     localReviewRisks: [
-      'Nguy cơ tích tụ sâu bệnh chuyên biệt trên cùng họ cây trồng tăng dần sau 2–3 vụ liên tiếp.',
-      'Rủi ro thiếu nước hoặc sụt giảm năng suất nếu thời tiết mùa tới nóng hơn hoặc khô hơn trung bình nhiều năm.',
+      isEn ? 'Higher pest buildup after 2–3 consecutive same-family cycles.' : 'Nguy cơ tích tụ sâu bệnh chuyên tính sau 2–3 vụ liên tiếp.',
     ],
     alignedPriorities: [],
   };
 
-  // Strategy 2: Legume Nitrogen-Fixing Rotation (Fabaceae)
-  const isLightOrDrySoil = ['sand', 'sandy_loam', 'gray_degraded', 'gravelly', 'ferralsol'].includes(
-    field.soilType
-  );
+  const isLightOrDrySoil = ['sand', 'sandy_loam', 'gray_degraded', 'gravelly', 'ferralsol'].includes(field.soilType);
   const legumeCrop =
     isLightOrDrySoil || isWaterTight
-      ? 'Lạc (Đậu phộng) hoặc Đậu xanh ngắn ngày'
+      ? isEn
+        ? 'Peanut or Short-season Mungbean'
+        : 'Lạc (Đậu phộng) hoặc Đậu xanh ngắn ngày'
+      : isEn
+      ? 'Soybean or Mungbean'
       : 'Đậu tương (Đậu nành) hoặc Đậu xanh';
+
   const legumeScore =
     82 +
     (priorities.includes('nitrogen_fixing') ? 6 : 0) +
     (priorities.includes('pest_break') ? 5 : 0) +
-    (priorities.includes('water_saving') ? 4 : 0) -
+    (priorities.includes('water_saving') ? 4 : 0) +
+    (ghgHigh ? 7 : 0) +
+    (graceDepleting ? 4 : 0) -
     (isSlowDrainage ? 6 : 0);
 
   const legumeStrategy: RotationStrategy = {
     id: 'rot-legume',
     isCurrentBaseline: false,
-    title: `Luân canh Cố định đạm & Ngắt sâu bệnh: Xen vụ ${legumeCrop}`,
-    sequenceSummary: `${field.crop.name} → ${legumeCrop} (Họ Đậu) → Vụ chính kế tiếp`,
+    title: isEn
+      ? `Nitrogen-Fixing & Low-Emission Rotation: ${legumeCrop}`
+      : `Luân canh Cố định đạm & Giảm phát thải: Xen vụ ${legumeCrop}`,
+    sequenceSummary: isEn
+      ? `${field.crop.name} → ${legumeCrop} (Legume) → Main season`
+      : `${field.crop.name} → ${legumeCrop} (Họ Đậu) → Vụ chính kế tiếp`,
     nextCropFamily: 'fabaceae',
     nextCropName: legumeCrop,
-    suitabilityScore: Math.min(97, legumeScore),
-    whySuggested:
-      familyId === 'fabaceae'
-        ? 'Ruộng hiện đang trồng họ Đậu; có thể chuyển sang đậu ngắn ngày chịu hạn kết hợp rơm rạ phủ gốc hoặc luân phiên sang ngũ cốc rễ sâu ở vụ sau.'
-        : `Chuyển đổi từ ${currentFamily.name} sang Họ Đậu giúp rễ cộng sinh cố định đạm từ không khí, cắt đứt chu kỳ sâu bệnh cũ và giảm lượng nước tưới.`,
+    suitabilityScore: Math.min(98, legumeScore),
+    whySuggested: isEn
+      ? `Rotating to Legumes fixes 40–70 kg N/ha naturally, cuts N₂O/CH₄ emissions tracked by GHGx, breaks pest cycles, and uses far less groundwater.`
+      : `Chuyển sang Họ Đậu giúp cố định 40–70 kg đạm/ha tự nhiên, giảm mạnh phát thải CH₄/N₂O (GHGx), cắt sâu bệnh và tiết kiệm nước ngầm (GRACE).`,
     supportingEvidence: [
-      `Đất ${getSoilLabel(field.soilType).toLowerCase()} (${getDrainageLabel(field.soilCharacteristics.drainage).toLowerCase()}) phù hợp với cây họ Đậu nếu lên luống thoát nước tốt.`,
-      `Trong kịch bản bốc thoát hơi nước ${indicators.evapotranspirationMmDay} mm/ngày, đậu xanh và lạc tiêu thụ ít nước hơn hẳn so với lúa nước hoặc rau ăn lá dài ngày.`,
-      'Cây họ Đậu che phủ mặt ruộng trong giai đoạn chuyển vụ, giúp giảm nhiệt độ bề mặt đất và hạn chế cỏ dại.',
+      earth
+        ? isEn
+          ? `GHGx/EDGAR (${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha) drops sharply when replacing flooded monoculture with a legume break crop.`
+          : `GHGx/EDGAR ghi nhận ${earth.greenhouseGasEdgar.co2eqTonHa} tấn CO₂e/ha; xen 1 vụ Đậu giúp cắt mạnh phát thải N₂O và CH₄.`
+        : isEn
+        ? 'Legumes enrich soil nitrogen and cut synthetic Urea costs.'
+        : 'Họ Đậu bổ sung đạm sinh học, giảm 20–30% phân Urê cho vụ sau.',
+      isEn
+        ? `At ET₀ ${indicators.evapotranspirationMmDay} mm/day, short-season legumes consume 35–50% less water than flooded crops.`
+        : `Trong điều kiện bốc thoát hơi ${indicators.evapotranspirationMmDay} mm/ngày, đậu xanh/lạc tiêu thụ ít nước hơn hẳn lúa nước hoặc rau dài ngày.`,
     ],
     benefits: {
-      nutrientCycling: 'Nốt sần rễ bổ sung khoảng 40–70 kg đạm tự nhiên/ha, giúp giảm 20–30% phân đạm hóa học cho vụ sau.',
-      waterDemand: 'Tiết kiệm nước rõ rệt nhờ bộ rễ cọc hút ẩm sâu và chu kỳ sinh trưởng ngắn (65–95 ngày).',
-      erosionAndOrganicMatter: 'Thân lá đậu sau thu hoạch có thể cày vùi hoặc tủ gốc, tăng chất hữu cơ và giữ ẩm cho tầng mặt.',
-      pestCycleDisruption: 'Thay đổi hoàn toàn ký chủ thực vật, làm gián đoạn vòng đời sâu đục thân, rầy và nấm hại của vụ trước.',
-      forageAndIncome: 'Cho thu hoạch hạt thương phẩm dễ bán và phụ phẩm thân lá giàu đạm cho gia súc.',
+      nutrientCycling: isEn ? 'Fixes 40–70 kg N/ha naturally for the next crop.' : 'Nốt sần rễ cố định 40–70 kg đạm tự nhiên/ha cho vụ sau.',
+      waterDemand: isEn ? 'Deep taproot & short 65–95 day cycle saves groundwater.' : 'Rễ cọc hút ẩm sâu và chu kỳ ngắn 65–95 ngày tiết kiệm nước.',
+      erosionAndOrganicMatter: isEn ? 'Biomass residues build topsoil carbon.' : 'Thân lá đậu cày vùi giúp tăng mùn và giữ ẩm tầng mặt.',
+      pestCycleDisruption: isEn ? 'Non-host family breaks rice/cereal pest cycles.' : 'Khác họ thực vật giúp ngắt triệt để sâu đục thân và nấm bệnh cũ.',
+      forageAndIncome: isEn ? 'High-value grain plus protein-rich haulms for livestock.' : 'Thu hạt thương phẩm giá tốt kèm phụ phẩm làm thức ăn gia súc.',
     },
     informationGaps: [
-      'Cần kiểm tra độ pH đất thực tế tại ruộng (cây họ Đậu phát triển kém nếu đất quá chua pH < 5.2 mà chưa bón vôi).',
-      'Chưa có thông tin về giá thu mua hạt đậu/lạc tại thương lái địa phương ở thời điểm thu hoạch.',
+      isEn ? 'Verify topsoil pH (>5.2) before sowing legumes.' : 'Cần kiểm tra pH đất (đậu kém phát triển nếu đất quá chua pH < 5.2).',
     ],
     localReviewRisks: [
       isSlowDrainage
-        ? 'Đất thoát nước chậm có nguy cơ thối rễ nếu gặp mưa lớn bất thường — bắt buộc lên luống cao và đánh rãnh sâu.'
-        : 'Cần phòng trừ sâu ăn lá và kiểm tra vi khuẩn nốt sần nếu ruộng lần đầu trồng cây họ Đậu.',
-      'Tham khảo cán bộ khuyến nông xã về giống đậu kháng bệnh gỉ sắt phù hợp mùa vụ địa phương.',
+        ? isEn
+          ? 'Slow-draining soil requires raised beds & drainage furrows.'
+          : 'Đất thoát nước chậm bắt buộc lên luống cao và đánh rãnh sâu tránh thối rễ.'
+        : isEn
+        ? 'Scout for rust and leaf-eating caterpillars during vegetative stage.'
+        : 'Theo dõi sâu ăn lá và bệnh gỉ sắt theo mùa.',
     ],
     alignedPriorities: ['nitrogen_fixing', 'pest_break', 'water_saving', 'organic_matter', 'supplemental_income'],
   };
 
-  // Strategy 3: Drought-Tolerant / Forage & Supplemental Income Rotation
   const resilientCrop =
     constraints.marketPreference === 'forage_livestock'
-      ? 'Ngô sinh khối / Cao lương chịu hạn'
-      : ['sand', 'sandy_loam', 'loam', 'sandy_clay_loam', 'gray_degraded', 'basalt'].includes(
-          field.soilType
-        )
-      ? 'Khoai lang mật / Khoai lang tím'
+      ? isEn
+        ? 'Drought-Tolerant Biomass Maize / Sorghum'
+        : 'Ngô sinh khối / Cao lương chịu hạn'
+      : ['sand', 'sandy_loam', 'loam', 'sandy_clay_loam', 'gray_degraded', 'basalt'].includes(field.soilType)
+      ? isEn
+        ? 'Sweet Potato (Ground-cover Tuber)'
+        : 'Khoai lang mật / Khoai lang tím'
+      : isEn
+      ? 'Short-season Corn or Squash Cover'
       : 'Ngô nếp ngắn ngày hoặc Bí đỏ phủ đất';
+
   const resilientFamily =
-    resilientCrop.includes('Khoai lang')
+    resilientCrop.includes('Khoai lang') || resilientCrop.includes('Potato')
       ? 'other_perennial'
-      : resilientCrop.includes('Bí')
+      : resilientCrop.includes('Bí') || resilientCrop.includes('Squash')
       ? 'cucurbitaceae'
       : 'poaceae';
 
@@ -390,81 +503,102 @@ export function generateRotationStrategies(
     78 +
     (wantsForageOrIncome ? 7 : 0) +
     (priorities.includes('erosion_control') ? 5 : 0) +
-    (priorities.includes('water_saving') ? 5 : 0) -
+    (priorities.includes('water_saving') ? 5 : 0) +
+    (graceDepleting ? 6 : 0) -
     (familyId === resilientFamily ? 10 : 0);
 
   const resilientStrategy: RotationStrategy = {
     id: 'rot-resilient',
     isCurrentBaseline: false,
-    title: `Luân canh Chịu hạn & Tăng thu nhập: Trồng ${resilientCrop}`,
-    sequenceSummary: `${field.crop.name} → ${resilientCrop} → Họ Đậu / Vụ chính`,
+    title: isEn
+      ? `Drought-Resilient & Income Rotation: ${resilientCrop}`
+      : `Luân canh Chịu hạn & Tăng thu nhập: Trồng ${resilientCrop}`,
+    sequenceSummary: isEn
+      ? `${field.crop.name} → ${resilientCrop} → Legume / Main crop`
+      : `${field.crop.name} → ${resilientCrop} → Họ Đậu / Vụ chính`,
     nextCropFamily: resilientFamily,
     nextCropName: resilientCrop,
-    suitabilityScore: Math.min(95, Math.max(60, resilientScore)),
-    whySuggested:
-      'Tối ưu cho nông hộ muốn đa dạng hóa nguồn thu hoặc có nhu cầu thức ăn chăn nuôi, đồng thời tận dụng rễ sâu và tán lá rộng để bảo vệ đất.',
+    suitabilityScore: Math.min(96, Math.max(60, resilientScore)),
+    whySuggested: isEn
+      ? `Adapted to groundwater deficits (GRACE) and erratic dry spells while diversifying farm income or livestock fodder.`
+      : `Tối ưu khi mực nước ngầm suy giảm (GRACE) hoặc nắng hạn thất thường, vừa tăng thu nhập phụ vừa bảo vệ đất mặt.`,
     supportingEvidence: [
-      `Khi độ ẩm tầng mặt biến động mạnh (hiện ước tính ${indicators.surfaceMoisturePct}%), cây rễ sâu hoặc thân bò che phủ mặt đất giúp giữ ẩm tốt hơn cây rễ nông.`,
-      `Kịch bản nhiệt độ dịch chuyển ${scenario.tempDeltaC >= 0 ? '+' : ''}${scenario.tempDeltaC}°C đòi hỏi giống cây chịu nắng nóng khá và ít phụ thuộc tưới liên tục.`,
-      `Phù hợp với điều kiện ${constraints.equipmentAccess === 'basic_manual' ? 'canh tác thủ công hộ gia đình, ít tốn công làm cỏ nhờ tán lá che kín luống' : 'cơ giới hóa làm đất và thu hoạch nhanh'}.`,
+      earth?.groundwaterAnomalyGrace
+        ? isEn
+          ? `GRACE LWE anomaly (${earth.groundwaterAnomalyGrace.lweThicknessCm} cm) favors deep-rooted or low-irrigation crops.`
+          : `GRACE ghi nhận mực nước ngầm ${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE, phù hợp cây chịu hạn ít bơm tưới.`
+        : isEn
+        ? `Surface moisture ${indicators.surfaceMoisturePct}% favors broad canopy crops to shade soil.`
+        : `Độ ẩm tầng mặt ${indicators.surfaceMoisturePct}% phù hợp cây có tán che phủ giữ ẩm.`,
     ],
     benefits: {
-      nutrientCycling: 'Rễ cắm sâu giúp khai thác khoáng chất bị rửa trôi xuống tầng đất dưới, hạn chế thoái hóa tầng mặt.',
-      waterDemand: 'Chịu khô hạn tốt hơn rau ăn lá và lúa; có thể tận dụng ẩm dư sau vụ mưa.',
-      erosionAndOrganicMatter: 'Tán lá rộng che chắn giọt mưa rơi trực tiếp, giảm rõ rệt xói mòn đất mặt.',
+      nutrientCycling: isEn ? 'Deep roots recover leached subsoil nutrients.' : 'Rễ sâu thu hồi khoáng chất bị rửa trôi xuống tầng đất dưới.',
+      waterDemand: isEn ? 'Tolerates dry intervals with residual soil moisture.' : 'Chịu khô hạn tốt, tận dụng ẩm dư sau vụ mưa.',
+      erosionAndOrganicMatter: isEn ? 'Broad canopy shields topsoil from heavy raindrop impact.' : 'Tán lá rộng giảm xói mòn khi mưa lớn.',
       pestCycleDisruption:
         familyId === resilientFamily
-          ? 'Lưu ý: cùng họ Hòa thảo với lúa/ngô nên cần kết hợp thêm 1 vụ họ Đậu sau đó để ngắt sâu bệnh triệt để.'
-          : 'Khác họ thực vật với cây hiện tại, giúp hạn chế sâu bệnh chuyên tính từ vụ trước.',
-      forageAndIncome: 'Cung cấp nguồn thức ăn xanh giá trị cao cho chăn nuôi (thân ngô, dây khoai) hoặc củ/quả dễ bảo quản chờ giá.',
+          ? isEn
+            ? 'Same grass family — follow with a legume season.'
+            : 'Cùng họ Hòa thảo — nên xen thêm 1 vụ họ Đậu sau đó.'
+          : isEn
+          ? 'Different family disrupts specialist soil pests.'
+          : 'Khác họ thực vật giúp hạn chế sâu bệnh lưu tồn.',
+      forageAndIncome: isEn ? 'Dual-purpose cash crop and livestock silage/vines.' : 'Dễ bán củ/quả hoặc tận dụng thân lá nuôi gia súc.',
     },
     informationGaps: [
-      'Chưa biết cụ thể số lượng vật nuôi hoặc hợp đồng bao tiêu sinh khối tại địa phương.',
-      'Cần kiểm tra mực nước ngầm thực tế vào đỉnh điểm tháng khô nếu trồng khoai lấy củ.',
+      isEn ? 'Confirm local wholesale demand before sowing.' : 'Kiểm tra nhu cầu thu mua tại thương lái/chợ địa phương.',
     ],
     localReviewRisks: [
-      'Cây lấy củ và ngô lấy hạt tiêu thụ khá nhiều kali và lân — cần bón cân đối hữu cơ hoai mục để không làm bạc màu đất.',
-      'Kiểm tra bọ hà (với khoai lang) hoặc sâu keo mùa thu (với ngô) theo cảnh báo bảo vệ thực vật địa phương.',
+      isEn ? 'Supplement balanced potassium & compost for tubers/maize.' : 'Cây lấy củ/ngô cần bổ sung thêm kali & hữu cơ để tránh bạc màu đất.',
     ],
     alignedPriorities: ['supplemental_income', 'erosion_control', 'water_saving', 'organic_matter'],
   };
 
-  // Strategy 4: Cover Crop / Bare-Field Protection Strategy
   const coverScore =
     76 +
     (priorities.includes('erosion_control') ? 9 : 0) +
     (priorities.includes('organic_matter') ? 8 : 0) +
-    (indicators.erosionRisk === 'Cao' ? 6 : 0);
+    (oco2Low ? 6 : 0) +
+    (indicators.erosionRisk === 'Cao' || indicators.erosionRisk === 'High' ? 6 : 0);
 
   const coverStrategy: RotationStrategy = {
     id: 'rot-cover',
     isCurrentBaseline: false,
-    title: 'Luân canh Cây che phủ & Phục hồi đất: Gieo Điền thanh / Muồng hoa vàng xen vụ trống',
-    sequenceSummary: `${field.crop.name} → Cây che phủ họ Đậu (45–55 ngày) → Vụ chính`,
+    title: isEn
+      ? 'Carbon Cover Crop & Soil Recovery: Sesbania / Sunn Hemp / Black Bean'
+      : 'Luân canh Cây che phủ & Phục hồi Carbon đất: Gieo Điền thanh / Muồng hoa vàng',
+    sequenceSummary: isEn
+      ? `${field.crop.name} → Green Manure Cover (45–55d) → Main crop`
+      : `${field.crop.name} → Cây che phủ họ Đậu (45–55 ngày) → Vụ chính`,
     nextCropFamily: 'fabaceae',
-    nextCropName: 'Điền thanh / Muồng hoa vàng hoặc Đậu đen che phủ',
-    suitabilityScore: Math.min(96, coverScore),
-    whySuggested:
-      'Giải quyết trực tiếp giai đoạn đất bị bỏ trống giữa hai vụ — thời điểm ruộng mất nhiều mùn, mất ẩm và dễ xói mòn nhất.',
+    nextCropName: isEn
+      ? 'Sesbania / Sunn Hemp / Cover Black Bean'
+      : 'Điền thanh / Muồng hoa vàng hoặc Đậu đen che phủ',
+    suitabilityScore: Math.min(97, coverScore),
+    whySuggested: isEn
+      ? 'Protects bare soil during off-season gaps, boosts OCO-2 biomass carbon uptake, and prevents nutrient runoff.'
+      : 'Lấp khoảng trống đất trống giữa 2 vụ để chống xói mòn, tăng hấp thụ Carbon (OCO-2) và cải tạo độ phì đất.',
     supportingEvidence: [
-      `Nguy cơ xói mòn & rửa trôi tại khu vực được đánh giá ở mức ${indicators.erosionRisk.toLowerCase()}, đặc biệt vào các tháng mưa lớn (${indicators.floodRiskMonths.map(m => 'T' + m).join(', ') || 'mùa mưa'}).`,
-      `Tốc độ bốc hơi nước từ mặt đất trống tăng mạnh khi nhiệt độ cao và bức xạ lớn.`,
-      'Cây che phủ ngắn ngày (45–55 ngày) không làm chậm lịch gieo vụ chính mà còn làm đất tơi xốp hơn.',
+      earth?.carbonFluxOco2
+        ? isEn
+          ? `OCO-2 carbon uptake (${earth.carbonFluxOco2.carbonUptakeTonHaYr} t CO₂/ha) rises when off-season bare ground is covered with fast-growing green manure.`
+          : `Hấp thụ Carbon (OCO-2: ${earth.carbonFluxOco2.carbonUptakeTonHaYr} tấn CO₂/ha) sẽ tăng rõ rệt khi phủ xanh ruộng thay vì để đất trống.`
+        : isEn
+        ? '45–55 day cover crop builds topsoil humus without delaying main planting.'
+        : 'Cây che phủ 45–55 ngày không làm chậm lịch gieo vụ chính.',
     ],
     benefits: {
-      nutrientCycling: 'Cố định đạm sinh học và giữ lại lượng phân bón tồn dư tránh bị mưa rửa trôi.',
-      waterDemand: 'Gần như chỉ dùng nước mưa hoặc ẩm tồn dư, không đòi hỏi tưới bổ sung.',
-      erosionAndOrganicMatter: 'Tăng lượng chất hữu cơ (mùn) nhanh nhất trong 4 phương án, cải thiện khả năng giữ nước của đất cát và độ tơi của đất sét.',
-      pestCycleDisruption: 'Ức chế cỏ dại tự nhiên và tăng mật độ thiên địch có ích trên đồng ruộng.',
-      forageAndIncome: 'Không tạo thu nhập tiền mặt trực tiếp ngay trong 50 ngày nhưng giúp tiết kiệm chi phí phân bón và công làm cỏ cho vụ sau.',
+      nutrientCycling: isEn ? 'Fixes atmospheric N and traps residual nutrients.' : 'Cố định đạm sinh học và giữ lại dinh dưỡng tồn dư.',
+      waterDemand: isEn ? 'Rainfed / residual moisture only; zero irrigation needed.' : 'Gần như chỉ dùng ẩm tồn dư, không cần bơm tưới.',
+      erosionAndOrganicMatter: isEn ? 'Fastest organic carbon restoration across strategies.' : 'Tăng mùn hữu cơ nhanh nhất và chống rửa trôi hiệu quả.',
+      pestCycleDisruption: isEn ? 'Suppresses weeds and supports beneficial insects.' : 'Ức chế cỏ dại tự nhiên và tăng thiên địch.',
+      forageAndIncome: isEn ? 'Cuts synthetic fertilizer bills for the following main crop.' : 'Giảm mạnh chi phí phân bón & công làm cỏ cho vụ chính sau.',
     },
     informationGaps: [
-      'Cần xác định nông hộ có sẵn giống cây phân xanh (điền thanh, muồng, đậu đen) tại hợp tác xã hay không.',
-      'Cần ước lượng công cày vùi sinh khối trước khi gieo vụ chính khoảng 10–14 ngày.',
+      isEn ? 'Check green-manure seed availability at local cooperative.' : 'Kiểm tra nguồn giống điền thanh/đậu đen tại hợp tác xã.',
     ],
     localReviewRisks: [
-      'Phải cắt và cày vùi đúng lúc cây bắt đầu ra hoa (trước khi kết hạt già) để tránh mọc lẫn thành cỏ dại ở vụ sau.',
-      'Nếu đất quá ngập nước, cần ưu tiên điền thanh chịu úng thay vì muồng hoa vàng.',
+      isEn ? 'Incorporate biomass at flowering before seed set to avoid weeds.' : 'Cày vùi trước khi cây kết hạt già (10–14 ngày trước vụ chính).',
     ],
     alignedPriorities: ['erosion_control', 'organic_matter', 'nitrogen_fixing', 'pest_break', 'water_saving'],
   };
@@ -474,23 +608,24 @@ export function generateRotationStrategies(
   );
 }
 
-/**
- * Picks ONLY the single best rotation strategy (excluding baseline & any strategies rejected by the farmer).
- * If the farmer provides a rejection reason and all 3 core proposals have been skipped, synthesizes a
- * tailored alternative addressing their constraint.
- */
 export function pickBestRotationStrategy(
   field: FieldProfile,
   weather: WeatherObservation,
   priorities: FarmerPriorityId[],
   constraints: FarmerConstraints,
   excludedIds: string[] = [],
-  rejectionReason?: string
+  rejectionReason?: string,
+  lang: AppLanguage = 'vi'
 ): RotationStrategy {
-  const all = generateRotationStrategies(field, weather, priorities, constraints, {
-    rainDeltaPct: 0,
-    tempDeltaC: 0,
-  });
+  const isEn = lang === 'en';
+  const all = generateRotationStrategies(
+    field,
+    weather,
+    priorities,
+    constraints,
+    { rainDeltaPct: 0, tempDeltaC: 0 },
+    lang
+  );
 
   const nonBaselineCandidates = all
     .filter((s) => !s.isCurrentBaseline && !excludedIds.includes(s.id))
@@ -501,60 +636,78 @@ export function pickBestRotationStrategy(
     if (rejectionReason) {
       return {
         ...picked,
-        whySuggested: `${picked.whySuggested} (Đã chọn ưu tiên thay thế vì lý do của bạn: "${rejectionReason}").`,
+        whySuggested: isEn
+          ? `${picked.whySuggested} (Selected to address your constraint: "${rejectionReason}").`
+          : `${picked.whySuggested} (Đã chọn ưu tiên thay thế vì lý do của bạn: "${rejectionReason}").`,
       };
     }
     return picked;
   }
 
-  // Synthesize an adaptive fallback strategy if all core candidates were rejected
   const lowerReason = (rejectionReason || '').toLowerCase();
   const isMarketConcern =
-    lowerReason.includes('bán') || lowerReason.includes('đầu ra') || lowerReason.includes('giá') || lowerReason.includes('tiền');
+    lowerReason.includes('bán') || lowerReason.includes('đầu ra') || lowerReason.includes('market') || lowerReason.includes('sell');
   const isFloodConcern =
-    lowerReason.includes('úng') || lowerReason.includes('ngập') || lowerReason.includes('mưa') || lowerReason.includes('nước');
+    lowerReason.includes('úng') || lowerReason.includes('ngập') || lowerReason.includes('flood') || lowerReason.includes('wet');
 
   const altCrop = isFloodConcern
-    ? 'Khoai môn nước hoặc Rau muống / Mè (Vừng) lên luống cao'
+    ? isEn
+      ? 'Taro / Raised-bed Sesame'
+      : 'Khoai môn nước hoặc Mè (Vừng) lên luống cao'
     : isMarketConcern
-    ? 'Dưa leo / Bí xanh hoặc Rau ăn lá ngắn ngày dễ bán chợ địa phương'
-    : 'Vừng (Mè) đen chịu hạn hoặc Đậu bắp ngắn ngày ít công chăm';
+    ? isEn
+      ? 'Cucumber / Wax Gourd / Leafy Greens'
+      : 'Dưa leo / Bí xanh hoặc Rau ăn lá ngắn ngày dễ bán'
+    : isEn
+    ? 'Drought-Tolerant Black Sesame or Okra'
+    : 'Vừng (Mè) đen chịu hạn hoặc Đậu bắp ngắn ngày ít công';
 
   const altFamily = isMarketConcern ? 'cucurbitaceae' : 'other_perennial';
-  const indicators = computeHarmonizedIndicators(field, weather, { rainDeltaPct: 0, tempDeltaC: 0 });
+  const indicators = computeHarmonizedIndicators(field, weather, { rainDeltaPct: 0, tempDeltaC: 0 }, lang);
 
   return {
     id: `rot-adaptive-${Date.now()}`,
     isCurrentBaseline: false,
-    title: `Phương án điều chỉnh riêng cho ruộng của bạn: Trồng ${altCrop}`,
-    sequenceSummary: `${field.crop.name} → ${altCrop} → Phủ rơm giữ ẩm`,
+    title: isEn
+      ? `Tailored Rotation for Your Field: ${altCrop}`
+      : `Phương án điều chỉnh riêng cho ruộng của bạn: Trồng ${altCrop}`,
+    sequenceSummary: isEn
+      ? `${field.crop.name} → ${altCrop} → Straw Mulch`
+      : `${field.crop.name} → ${altCrop} → Phủ rơm giữ ẩm`,
     nextCropFamily: altFamily,
     nextCropName: altCrop,
     suitabilityScore: 89,
     whySuggested: rejectionReason
-      ? `Được điều chỉnh trực tiếp theo phản hồi thực tế của bạn ("${rejectionReason}") để khắc phục trở ngại về đầu ra, công lao động hoặc điều kiện đất tại ruộng.`
-      : 'Phương án thay thế linh hoạt khác họ với cây đang trồng, ngắn ngày và dễ tiêu thụ tại địa phương.',
+      ? isEn
+        ? `Tailored directly to your feedback ("${rejectionReason}") to resolve market, labor, or soil constraints.`
+        : `Được điều chỉnh trực tiếp theo phản hồi thực tế của bạn ("${rejectionReason}") để khắc phục trở ngại về đầu ra, công lao động hoặc đất.`
+      : isEn
+      ? 'Flexible cross-family alternative with fast cash turnaround.'
+      : 'Phương án thay thế linh hoạt khác họ, ngắn ngày và dễ tiêu thụ tại địa phương.',
     supportingEvidence: [
-      `Độ ẩm vùng rễ hiện tại ${indicators.rootMoisturePct}% và đất ${getSoilLabel(field.soilType).toLowerCase()} vẫn đảm bảo cho cây ngắn ngày phát triển nhanh.`,
-      'Khác họ thực vật với cây trồng hiện tại nên vẫn giữ được hiệu quả cắt đứt chu kỳ sâu bệnh.',
-      'Thời gian thu hoạch nhanh (50–70 ngày), xoay vòng vốn sớm và phù hợp tiêu thụ tại chợ địa phương.',
+      isEn
+        ? `Root moisture ${indicators.rootMoisturePct}% and ${getSoilLabel(field.soilType, 'en')} support rapid 50–70 day maturity.`
+        : `Độ ẩm rễ ${indicators.rootMoisturePct}% và đất ${getSoilLabel(field.soilType, 'vi').toLowerCase()} phù hợp cây ngắn ngày 50–70 ngày.`,
     ],
     benefits: {
-      nutrientCycling: 'Kết hợp bón phân hữu cơ hoai mục và vùi tàn dư thân lá sau thu hoạch giúp duy trì độ phì đất.',
+      nutrientCycling: isEn ? 'Pair composted manure with crop residue incorporation.' : 'Kết hợp hữu cơ hoai mục và vùi tàn dư sau thu hoạch.',
       waterDemand: isFloodConcern
-        ? 'Chịu ẩm tốt hơn khi được lên luống cao thoát nước.'
-        : 'Nhu cầu nước vừa phải, dễ điều tiết theo tuần.',
-      erosionAndOrganicMatter: 'Che phủ mặt ruộng trong giai đoạn chuyển vụ, giảm bốc hơi nước.',
-      pestCycleDisruption: 'Thay đổi nhóm cây ký chủ hoàn toàn so với vụ trước.',
-      forageAndIncome: 'Dễ tiêu thụ trực tiếp cho thương lái địa phương hoặc sử dụng trong hộ gia đình.',
+        ? isEn
+          ? 'Tolerates wet periods when planted on raised beds.'
+          : 'Chịu ẩm tốt khi lên luống cao thoát nước.'
+        : isEn
+        ? 'Moderate water demand.'
+        : 'Nhu cầu nước vừa phải, dễ điều tiết.',
+      erosionAndOrganicMatter: isEn ? 'Covers soil during inter-season gap.' : 'Che phủ đất trong giai đoạn chuyển vụ.',
+      pestCycleDisruption: isEn ? 'Switches host family completely.' : 'Thay đổi nhóm cây ký chủ hoàn toàn.',
+      forageAndIncome: isEn ? 'Quick cash harvest for local markets.' : 'Dễ bán nhanh tại chợ địa phương.',
     },
     informationGaps: [
-      'Cần kiểm tra nhu cầu thu mua thực tế tại chợ xã/hợp tác xã trong 2 tuần trước khi xuống giống.',
+      isEn ? 'Confirm local market buyers 2 weeks before sowing.' : 'Kiểm tra nhu cầu thu mua tại chợ xã/hợp tác xã trước khi xuống giống.',
     ],
     localReviewRisks: [
-      'Theo dõi thoát nước mặt luống khi có mưa lớn đột ngột và hỏi cán bộ khuyến nông địa phương về giống kháng bệnh tại vùng.',
+      isEn ? 'Check bed drainage during heavy rainstorms.' : 'Theo dõi thoát nước mặt luống khi có mưa lớn đột ngột.',
     ],
     alignedPriorities: priorities,
   };
 }
-

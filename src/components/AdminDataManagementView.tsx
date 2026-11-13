@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { parseJsonSafely } from '../services/httpClient';
 import {
   Database,
   CloudUpload,
@@ -291,8 +292,8 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         FirestoreService.getAdminSyncLogs(),
       ]);
 
-      const serverStatus: CentralDataStatus | null = resStatus.ok ? await resStatus.json() : null;
-      const serverLogsJson = resLogs.ok ? await resLogs.json() : { logs: [], imports: [] };
+      const serverStatus: CentralDataStatus | null = resStatus.ok ? await parseJsonSafely<CentralDataStatus>(resStatus) : null;
+      const serverLogsJson = resLogs.ok ? await parseJsonSafely<any>(resLogs) : { logs: [], imports: [] };
 
       // Merge sync logs (server + persisted Firestore logs)
       const serverLogs: SyncLogRecord[] = serverLogsJson.logs || [];
@@ -454,7 +455,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         await CsvQueueStorage.savePatch({ activeImportJobId: null });
         return;
       }
-      const { job } = await res.json();
+      const { job } = await parseJsonSafely<any>(res);
       if (!job) return;
 
       if (job.status === 'RUNNING') {
@@ -685,7 +686,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         headers,
         body: JSON.stringify({}),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely<any>(res);
       if (res.ok) {
         setSyncMessage(
           `Đồng bộ thành công! Đã xử lý ${data.recordsSynced} bản ghi. Dữ liệu mới nhất: ${data.latestNasaDate}`
@@ -763,7 +764,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
           })),
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonSafely<any>(res);
       if (res.ok) {
         setBatchPreview(data);
         await CsvQueueStorage.savePatch({ batchPreview: data, readingProgress: null });
@@ -1023,7 +1024,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonSafely<any>(res);
       if (res.ok && data.job?.jobId) {
         await CsvQueueStorage.savePatch({ activeImportJobId: data.job.jobId });
         pollImportJob(data.job.jobId);
@@ -1049,7 +1050,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         body: JSON.stringify({ version }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonSafely<any>(res);
       if (res.ok) {
         setRollbackSuccessMsg(data.message);
         setConfirmRollbackVer(null);

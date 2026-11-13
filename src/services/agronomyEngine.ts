@@ -8,278 +8,394 @@ import {
   FeedbackRecord,
   PlantingRiskEvaluation,
 } from '../types';
+import type { AppLanguage } from '../contexts/LanguageContext';
 
 /**
  * Tier 4 Agronomic Engine: Multi-Factor Decision Analysis
- * Combines Soil Physics + Crop Phenology + Weather Observations + 21-Yr NASA Baseline + Farmer Adaptive Memory
+ * Combines Soil Physics + Crop Phenology + NASA POWER 21-Yr Baseline +
+ * OCO-2 Carbon/SIF + GRACE Groundwater + GHGx/EDGAR + SMAP/MODIS + Farmer Adaptive Memory
  */
-
 export function analyzeFieldAgronomy(
   field: FieldProfile,
   weather: WeatherObservation,
-  feedbackHistory: FeedbackRecord[] = []
+  feedbackHistory: FeedbackRecord[] = [],
+  lang: AppLanguage = 'vi'
 ): DailyAgronomicBrief {
+  const isEn = lang === 'en';
   const topActions: RecommendationAction[] = [];
   const postponeActions: string[] = [];
   const provenances: ProvenanceBadge[] = [];
+  const earth = field.adaptiveMemory?.earthMetrics;
 
-  // Track data provenance
+  // 1. Track multi-source data provenance with explicit "Last updated" timestamps
   provenances.push({
-    label: 'NASA POWER Lịch sử (2005–2025)',
+    label: isEn ? 'NASA POWER Historical (2005–2025)' : 'NASA POWER Lịch sử (2005–2025)',
     type: 'NASA_HISTORICAL',
-    description: `Ô ${field.nasaGrid.lat}°N, ${field.nasaGrid.lon}°E (cách ${field.nasaGrid.distanceKm} km). Chuỗi 21 năm đối chiếu khí hậu vùng.`,
+    lastUpdated: '2025-12-31',
+    description: isEn
+      ? `Cell ${field.nasaGrid.lat}°N, ${field.nasaGrid.lon}°E (${field.nasaGrid.distanceKm} km away). 21-year regional climate baseline.`
+      : `Ô ${field.nasaGrid.lat}°N, ${field.nasaGrid.lon}°E (cách ${field.nasaGrid.distanceKm} km). Chuỗi 21 năm đối chiếu khí hậu vùng.`,
   });
 
   if (weather.isRealtimeAvailable) {
     provenances.push({
-      label: weather.source === 'NASA_POWER_UPDATED' ? 'NASA POWER Cập nhật' : 'Dữ liệu Quan trắc Trạm/Địa phương',
+      label:
+        weather.source === 'NASA_POWER_UPDATED'
+          ? isEn
+            ? 'NASA POWER Daily Weather'
+            : 'NASA POWER Cập nhật'
+          : isEn
+          ? 'Local Station / Field Observation'
+          : 'Dữ liệu Quan trắc Trạm/Địa phương',
       type: 'NASA_CURRENT',
-      description: `Ghi nhận ngày ${weather.observationDate}: ${weather.temp}°C, mưa ${weather.rain}mm, ẩm ${weather.humidity}%.`,
+      lastUpdated: earth?.nasaPowerLastUpdated || weather.observationDate,
+      description: isEn
+        ? `Observed ${weather.observationDate}: ${weather.temp}°C, rain ${weather.rain}mm, humidity ${weather.humidity}%.`
+        : `Ghi nhận ngày ${weather.observationDate}: ${weather.temp}°C, mưa ${weather.rain}mm, ẩm ${weather.humidity}%.`,
     });
   } else {
     provenances.push({
-      label: 'Dữ liệu Quan sát Người dùng cung cấp',
+      label: isEn ? 'User Field Observation' : 'Dữ liệu Quan sát Người dùng cung cấp',
       type: 'USER_OBSERVATION',
-      description: 'Chưa có trạm đo tự động trực tiếp, AI sử dụng thông số nông dân nhập và khí hậu lịch sử.',
+      lastUpdated: weather.observationDate,
+      description: isEn
+        ? 'No automated local station; using farmer profile & 21-year climate baseline.'
+        : 'Chưa có trạm đo tự động trực tiếp, AI sử dụng thông số nông dân nhập và khí hậu lịch sử.',
     });
   }
 
-  provenances.push({
-    label: 'Hồ sơ Thửa ruộng Cá nhân hóa',
-    type: 'USER_OBSERVATION',
-    description: `Đất: ${getSoilLabel(field.soilType)}, Thoát nước: ${getDrainageLabel(field.soilCharacteristics.drainage)}, Cây: ${field.crop.name} (${field.crop.variety}), Giai đoạn: ${field.crop.currentStage}.`,
-  });
+  if (earth) {
+    provenances.push({
+      label: 'NASA OCO-2/3 (Carbon & SIF)',
+      type: 'NASA_CURRENT',
+      lastUpdated: earth.carbonFluxOco2.lastUpdated || earth.syncedAt,
+      description: isEn
+        ? `Photosynthesis SIF ${earth.carbonFluxOco2.sifWm2SrUm}, carbon uptake ${earth.carbonFluxOco2.carbonUptakeTonHaYr} t CO₂/ha, XCO₂ ${earth.carbonFluxOco2.xco2Ppm} ppm.`
+        : `Quang hợp SIF ${earth.carbonFluxOco2.sifWm2SrUm}, hấp thụ ${earth.carbonFluxOco2.carbonUptakeTonHaYr} tấn CO₂/ha, XCO₂ ${earth.carbonFluxOco2.xco2Ppm} ppm.`,
+    });
+
+    provenances.push({
+      label: 'NASA GRACE / GRACE-FO',
+      type: 'NASA_CURRENT',
+      lastUpdated: earth.groundwaterAnomalyGrace.lastUpdated || earth.syncedAt,
+      description: isEn
+        ? `Groundwater storage ${earth.groundwaterAnomalyGrace.lweThicknessCm >= 0 ? '+' : ''}${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE (${earth.groundwaterAnomalyGrace.groundwaterStatus}).`
+        : `Trữ lượng nước ngầm ${earth.groundwaterAnomalyGrace.lweThicknessCm >= 0 ? '+' : ''}${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE (${earth.groundwaterAnomalyGrace.groundwaterStatus === 'recharging' ? 'phục hồi' : earth.groundwaterAnomalyGrace.groundwaterStatus === 'depleting' ? 'suy giảm' : 'ổn định'}).`,
+    });
+
+    provenances.push({
+      label: 'GHGx / EDGAR Agricultural Inventory',
+      type: 'EXTERNAL_FORECAST',
+      lastUpdated: earth.greenhouseGasEdgar.lastUpdated || earth.syncedAt,
+      description: isEn
+        ? `CH₄ ${earth.greenhouseGasEdgar.ch4KgHa} kg/ha, N₂O ${earth.greenhouseGasEdgar.n2oKgHa} kg/ha (${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha).`
+        : `CH₄ ${earth.greenhouseGasEdgar.ch4KgHa} kg/ha, N₂O ${earth.greenhouseGasEdgar.n2oKgHa} kg/ha (${earth.greenhouseGasEdgar.co2eqTonHa} tấn CO₂e/ha).`,
+    });
+
+    if (earth.smapModis) {
+      provenances.push({
+        label: 'NASA SMAP / MODIS / GPM',
+        type: 'NASA_CURRENT',
+        lastUpdated: earth.smapModis.lastUpdated || earth.syncedAt,
+        description: isEn
+          ? `SMAP surface moisture ${earth.smapModis.smapSoilMoisturePct}%, MODIS NDVI ${earth.smapModis.modisNdvi}, 7d GPM rain ${earth.smapModis.gpmPrecipitation7dMm} mm.`
+          : `Ẩm tầng mặt SMAP ${earth.smapModis.smapSoilMoisturePct}%, MODIS NDVI ${earth.smapModis.modisNdvi}, mưa 7 ngày GPM ${earth.smapModis.gpmPrecipitation7dMm} mm.`,
+      });
+    }
+  }
 
   provenances.push({
-    label: 'Mô hình Suy luận Nông học & Gemini AI',
-    type: 'AI_INFERENCE',
-    description: 'Quy tắc cân bằng nước mặt ruộng, tích lũy độ lạnh/nhiệt, và cửa sổ dịch hại cây trồng.',
+    label: isEn ? 'Personalized Field Profile' : 'Hồ sơ Thửa ruộng Cá nhân hóa',
+    type: 'USER_OBSERVATION',
+    lastUpdated: field.adaptiveMemory?.lastFeedbackDate || field.crop.plantingDate,
+    description: isEn
+      ? `Soil: ${getSoilLabel(field.soilType, lang)}, Drainage: ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}, Crop: ${field.crop.name} (${field.crop.currentStage}).`
+      : `Đất: ${getSoilLabel(field.soilType, lang)}, Thoát nước: ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}, Cây: ${field.crop.name} (${field.crop.variety}), Giai đoạn: ${field.crop.currentStage}.`,
   });
 
   // Check learned farmer feedback
   let adjustedDrainage = field.soilCharacteristics.drainage;
-  const recentDryFeedbacks = feedbackHistory.filter(f => f.feedbackType === 'soil_still_dry').length;
-  const recentWetFeedbacks = feedbackHistory.filter(f => f.feedbackType === 'soil_too_wet').length;
+  const recentDryFeedbacks = feedbackHistory.filter((f) => f.feedbackType === 'soil_still_dry').length;
+  const recentWetFeedbacks = feedbackHistory.filter((f) => f.feedbackType === 'soil_too_wet').length;
 
-  if (recentDryFeedbacks >= 2 && adjustedDrainage !== 'fast') {
-    adjustedDrainage = 'fast';
-  } else if (recentWetFeedbacks >= 2 && adjustedDrainage !== 'slow') {
-    adjustedDrainage = 'slow';
-  }
+  if (recentDryFeedbacks >= 2 && adjustedDrainage !== 'fast') adjustedDrainage = 'fast';
+  else if (recentWetFeedbacks >= 2 && adjustedDrainage !== 'slow') adjustedDrainage = 'slow';
 
-  // --- RULE 1: WATER & SOIL IRRIGATION DYNAMICS ---
-  const isHighMoisture = weather.gwetroot > 0.75 || weather.rain > 15;
-  const isLowMoisture = weather.gwetroot < 0.35 && weather.rain < 2;
+  // Effective root moisture blended with GRACE / SMAP if synced
+  const graceDepleting = earth?.groundwaterAnomalyGrace?.groundwaterStatus === 'depleting';
+  const graceRecharging = earth?.groundwaterAnomalyGrace?.groundwaterStatus === 'recharging';
+  const oco2LowPhotosynthesis = earth?.carbonFluxOco2?.photosynthesisStatus === 'low';
+  const ghgHigh = earth?.greenhouseGasEdgar?.emissionLevel === 'high';
+  const smapMoistPct = earth?.smapModis?.smapSoilMoisturePct;
+
+  const isLowMoisture =
+    (weather.gwetroot < 0.35 && weather.rain < 2) ||
+    (graceDepleting && weather.gwetroot < 0.48 && weather.rain < 3);
   const isColdWet = weather.temp < 20 && (weather.rain > 0 || weather.humidity > 85);
   const isExtremeHeat = weather.maxTemp >= 35 || (weather.temp >= 33 && weather.solarRadiation > 22);
 
-  // Crop Sensitivity
-  const isSeedling = field.crop.currentStage.toLowerCase().includes('con') ||
-    field.crop.currentStage.toLowerCase().includes('mạ') ||
-    field.crop.currentStage.toLowerCase().includes('gieo');
-  const isFlowering = field.crop.currentStage.toLowerCase().includes('hoa') ||
+  const isFlowering =
+    field.crop.currentStage.toLowerCase().includes('hoa') ||
     field.crop.currentStage.toLowerCase().includes('trổ') ||
-    field.crop.currentStage.toLowerCase().includes('đòng');
+    field.crop.currentStage.toLowerCase().includes('đòng') ||
+    field.crop.currentStage.toLowerCase().includes('flower');
 
-  let riskLevel: 'LOW' | 'CAUTION' | 'WARNING' | 'CRITICAL' = 'LOW';
-  let headline = `ỔN ĐỊNH: Điều kiện thuận lợi cho ${field.crop.name}`;
-  let situation = `Nhiệt độ ${weather.temp}°C, lượng mưa ${weather.rain}mm. Điều kiện ruộng ${field.name} duy trì trạng thái tốt.`;
-  let analysis = `Độ ẩm rễ đạt ${(weather.gwetroot * 100).toFixed(0)}%. Đất ${getSoilLabel(field.soilType)} đang giữ độ ẩm phù hợp với nhu cầu sinh trưởng giai đoạn ${field.crop.currentStage}.`;
+  let riskLevel: DailyAgronomicBrief['riskLevel'] = 'LOW';
+  let headline = isEn
+    ? `STABLE: Favorable conditions for ${field.crop.name}`
+    : `ỔN ĐỊNH: Điều kiện thuận lợi cho ${field.crop.name}`;
+  let situation = isEn
+    ? `Temperature ${weather.temp}°C, rainfall ${weather.rain}mm. Field "${field.name}" remains in stable condition.`
+    : `Nhiệt độ ${weather.temp}°C, lượng mưa ${weather.rain}mm. Điều kiện ruộng ${field.name} duy trì trạng thái tốt.`;
+  let analysis = isEn
+    ? `Root-zone moisture is ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (SMAP surface: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} maintains suitable water retention for ${field.crop.currentStage}.`
+    : `Độ ẩm rễ đạt ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (SMAP tầng mặt: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} đang giữ độ ẩm phù hợp với nhu cầu sinh trưởng giai đoạn ${field.crop.currentStage}.`;
 
-  // --- COLD & WET SCENARIO ---
   if (isColdWet) {
     riskLevel = 'WARNING';
-    headline = `CẢNH BÁO: Điều kiện lạnh ẩm cần theo dõi`;
-    situation = `Nhiệt độ hạ thấp (${weather.temp}°C), độ ẩm không khí cao (${weather.humidity}%) và có mưa phùn/ẩm ướt.`;
+    headline = isEn
+      ? `WARNING: Cold & damp conditions require monitoring`
+      : `CẢNH BÁO: Điều kiện lạnh ẩm cần theo dõi`;
+    situation = isEn
+      ? `Low temperature (${weather.temp}°C), high air humidity (${weather.humidity}%) and light rain/wet surface.`
+      : `Nhiệt độ hạ thấp (${weather.temp}°C), độ ẩm không khí cao (${weather.humidity}%) và có mưa phùn/ẩm ướt.`;
 
     const isSlowSoil =
       adjustedDrainage === 'slow' ||
       ['clay', 'clay_loam', 'acid_sulfate', 'peat_muck'].includes(field.soilType);
     if (isSlowSoil) {
-      analysis = `Thửa ruộng ${field.name} có kết cấu ${getSoilLabel(field.soilType).toLowerCase()} thoát nước chậm, kết hợp giai đoạn ${field.crop.currentStage}. Nước đọng lâu ngày trong điều kiện nhiệt độ dưới 20°C cản trở hô hấp rễ và kích hoạt nấm hại (như lở cổ rễ, nghẹt rễ).`;
+      analysis = isEn
+        ? `${field.name} has slow-draining ${getSoilLabel(field.soilType, lang)} during ${field.crop.currentStage}. Standing moisture below 20°C restricts root oxygen and increases fungal pressure.`
+        : `Thửa ruộng ${field.name} có kết cấu ${getSoilLabel(field.soilType, lang).toLowerCase()} thoát nước chậm, kết hợp giai đoạn ${field.crop.currentStage}. Nước đọng lâu ngày dưới 20°C cản trở hô hấp rễ và kích hoạt nấm hại.`;
       topActions.push({
         id: 'act-drain',
-        title: 'Khơi thông rãnh thoát nước ngay đầu bờ',
+        title: isEn ? 'Clear edge drainage furrows immediately' : 'Khơi thông rãnh thoát nước ngay đầu bờ',
         priority: 'HIGH',
-        reason: `${getSoilLabel(field.soilType)} thoát nước chậm, nguy cơ bí khí nghẹt rễ khi lạnh ẩm kéo dài`,
-        dataBasis: `Nhiệt độ: ${weather.temp}°C, Độ ẩm vùng rễ: ${(weather.gwetroot * 100).toFixed(0)}%, Đất: ${getSoilLabel(field.soilType)}`,
-      });
-      topActions.push({
-        id: 'act-check-root',
-        title: 'Kiểm tra độ ẩm đất bề mặt trước khi thao tác',
-        priority: 'HIGH',
-        reason: 'Xác minh độ nhão thực tế của tầng đất 0-5cm trước khi tưới hoặc đi lại trên ruộng',
-        dataBasis: 'Độ ẩm tầng mặt và phản hồi thực địa',
+        reason: isEn
+          ? `Slow drainage increases root suffocation risk in cold, damp weather`
+          : `${getSoilLabel(field.soilType, lang)} thoát nước chậm, nguy cơ bí khí nghẹt rễ khi lạnh ẩm kéo dài`,
+        dataBasis: `Temp ${weather.temp}°C · Root ${(weather.gwetroot * 100).toFixed(0)}%`,
       });
       topActions.push({
         id: 'act-leaf-check',
-        title: 'Quan sát mặt dưới lá và gốc để phát hiện đốm nấm ẩm',
+        title: isEn ? 'Scout undersides of leaves for fungal spots' : 'Quan sát mặt dưới lá và gốc để phát hiện đốm nấm ẩm',
         priority: 'MEDIUM',
-        reason: 'Ẩm độ không khí >85% tạo màng ẩm thuận lợi cho nấm bệnh phát triển',
-        dataBasis: `Độ ẩm không khí: ${weather.humidity}%, Lượng mưa: ${weather.rain}mm`,
+        reason: isEn ? 'Humidity >85% creates prolonged leaf wetness' : 'Ẩm độ không khí >85% tạo màng ẩm thuận lợi cho nấm bệnh phát triển',
+        dataBasis: `RH ${weather.humidity}% · Rain ${weather.rain}mm`,
       });
-      postponeActions.push('Tạm hoãn tưới nước vì đất đang giữ ẩm bão hòa, tưới thêm sẽ gây ngạt rễ.');
-      postponeActions.push('Hoãn bón phân đạm (Urê) vì cây hấp thu kém khi lạnh ẩm, dễ gây xót và bùng phát bệnh nấm.');
+      postponeActions.push(
+        isEn
+          ? 'Postpone irrigation because soil is saturated and cold.'
+          : 'Tạm hoãn tưới nước vì đất đang giữ ẩm bão hòa, tưới thêm sẽ gây ngạt rễ.'
+      );
+      postponeActions.push(
+        isEn
+          ? 'Delay Urea/Nitrogen top-dressing to avoid leaching, N₂O emissions, and soft fungal-prone leaves.'
+          : 'Hoãn bón phân đạm (Urê) vì cây hấp thu kém khi lạnh ẩm, dễ rửa trôi thành khí N₂O và bùng phát bệnh nấm.'
+      );
     } else {
-      // Sandy or Loamy soil with Cold/Wet
-      analysis = `Đất ${getSoilLabel(field.soilType)} có độ thấm nước tương đối tốt (${getDrainageLabel(adjustedDrainage)}). Mặc dù thời tiết lạnh ẩm, nguy cơ đọng nước thấp hơn đất sét, nhưng cây ${field.crop.name} non vẫn nhạy cảm với sốc lạnh.`;
+      analysis = isEn
+        ? `${getSoilLabel(field.soilType, lang)} drains relatively well (${getDrainageLabel(adjustedDrainage, lang)}), reducing standing water risk, though cold night temperatures still stress young roots.`
+        : `${getSoilLabel(field.soilType, lang)} có độ thấm nước tương đối tốt (${getDrainageLabel(adjustedDrainage, lang)}), nguy cơ đọng nước thấp hơn đất sét nhưng cây ${field.crop.name} non vẫn nhạy cảm với sốc lạnh.`;
       topActions.push({
         id: 'act-check-sand-moist',
-        title: 'Kiểm tra độ ẩm thực tế tại tầng rễ',
+        title: isEn ? 'Verify moisture at 10cm root depth before watering' : 'Kiểm tra độ ẩm thực tế tại tầng rễ',
         priority: 'HIGH',
-        reason: 'Đất cát/thịt rút nước nhanh, không mặc định mưa phùn đã ngấm đủ sâu đến rễ',
-        dataBasis: `Độ ẩm vùng rễ: ${(weather.gwetroot * 100).toFixed(0)}%, Đất: ${getSoilLabel(field.soilType)}`,
+        reason: isEn ? 'Well-drained soil loses surface water quickly despite drizzle' : 'Đất rút nước nhanh, không mặc định mưa phùn đã ngấm đủ sâu đến rễ',
+        dataBasis: `GWETROOT ${(weather.gwetroot * 100).toFixed(0)}%`,
       });
       topActions.push({
         id: 'act-warm-mulch',
-        title: 'Cân nhắc tủ gốc bằng rơm rạ khô giữ ấm rễ',
+        title: isEn ? 'Apply dry straw mulch around plant bases' : 'Cân nhắc tủ gốc bằng rơm rạ khô giữ ấm rễ',
         priority: 'MEDIUM',
-        reason: 'Giữ nhiệt độ đất vùng rễ ổn định khi nhiệt độ ban đêm hạ sâu',
-        dataBasis: `Nhiệt độ thấp nhất ban đêm: ${weather.minTemp}°C`,
+        reason: isEn ? 'Insulates root zone during cold nights' : 'Giữ nhiệt độ đất vùng rễ ổn định khi nhiệt độ ban đêm hạ sâu',
+        dataBasis: `Min temp ${weather.minTemp}°C`,
       });
-      topActions.push({
-        id: 'act-inspect-cold',
-        title: 'Kiểm tra đầu ngọn lá có hiện tượng thâm tái do rét',
-        priority: 'MEDIUM',
-        reason: 'Đánh giá sức chống chịu lạnh của giống cây',
-        dataBasis: `Cây: ${field.crop.name} - Giống: ${field.crop.variety}`,
-      });
-      postponeActions.push('Tạm hoãn bón phân vô cơ tan nhanh trong những ngày mưa rét.');
+      postponeActions.push(
+        isEn
+          ? 'Avoid fast-release synthetic fertilizer during cold rain.'
+          : 'Tạm hoãn bón phân vô cơ tan nhanh trong những ngày mưa rét.'
+      );
     }
-  }
-  // --- HEATWAVE / DROUGHT SCENARIO ---
-  else if (isExtremeHeat || (isLowMoisture && weather.temp > 28)) {
-    riskLevel = 'WARNING';
-    headline = `CẢNH BÁO: Nguy cơ bốc thoát hơi nước cao & thiếu ẩm cục bộ`;
-    situation = `Nhiệt độ lên tới ${weather.maxTemp}°C, bức xạ mặt trời cao (${weather.solarRadiation} MJ/m²) và lượng mưa thấp.`;
+  } else if (isExtremeHeat || (isLowMoisture && weather.temp > 26)) {
+    riskLevel = isExtremeHeat && graceDepleting ? 'CRITICAL' : 'WARNING';
+    headline = isEn
+      ? `WARNING: High evapotranspiration & moisture deficit risk`
+      : `CẢNH BÁO: Nguy cơ bốc thoát hơi nước cao & thiếu ẩm cục bộ`;
+    situation = isEn
+      ? `Peak temperature ${weather.maxTemp}°C, solar radiation ${weather.solarRadiation} MJ/m²${graceDepleting ? `, GRACE groundwater ${earth?.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE (depleting)` : ''}.`
+      : `Nhiệt độ lên tới ${weather.maxTemp}°C, bức xạ mặt trời ${weather.solarRadiation} MJ/m²${graceDepleting ? `, nước ngầm GRACE ở mức ${earth?.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE (đang suy giảm)` : ''}.`;
 
     const isFastSoil =
       ['sand', 'sandy_loam', 'gravelly', 'gray_degraded'].includes(field.soilType) ||
       adjustedDrainage === 'fast';
-    if (isFastSoil) {
-      analysis = `${getSoilLabel(field.soilType)} thấm rút nhanh, kết hợp bức xạ cao khiến tầng mặt khô kiệt trong vòng 6-10 giờ. Cây ${field.crop.name} có nguy cơ héo rũ tạm thời.`;
-      topActions.push({
-        id: 'act-irrigate-early',
-        title: 'Tưới nước bổ sung vào sáng sớm (05:30 - 07:00)',
-        priority: 'HIGH',
-        reason: `${getSoilLabel(field.soilType)} thoát ẩm rất nhanh, tưới sớm giúp cây tích nước trước khi nắng gắt`,
-        dataBasis: `Bức xạ nắng: ${weather.solarRadiation} MJ/m², Độ ẩm tầng mặt: ${(weather.gwettop * 100).toFixed(0)}%`,
-      });
-      topActions.push({
-        id: 'act-mulch-sand',
-        title: 'Tủ ẩm gốc hoặc phủ màng giữ nước quanh luống',
-        priority: 'HIGH',
-        reason: 'Hạn chế bốc hơi nước mặt đất, tiết kiệm tới 40% nước tưới theo mục tiêu nông hộ',
-        dataBasis: `Mục tiêu ưu tiên: ${getGoalLabel(field.primaryGoal)}`,
-      });
-      topActions.push({
-        id: 'act-check-water-source',
-        title: 'Kiểm tra lưu lượng và độ ngọt của nguồn nước tưới',
-        priority: 'MEDIUM',
-        reason: field.waterSource.salinityRisk ? 'Cảnh báo nguy cơ xâm nhập mặn vào mùa nắng cạn' : 'Đảm bảo giếng/ao không bị cạn đáy',
-        dataBasis: `Nguồn nước: ${getWaterLabel(field.waterSource.type)}`,
-      });
-      postponeActions.push('Tạm hoãn tưới phun mưa vào buổi trưa nắng gắt (11:00 - 14:00) tránh luộc chín rễ và cháy chóp lá.');
-      postponeActions.push('Không phun thuốc trừ sâu hóa học lúc trời nắng nóng vì thuốc bay hơi nhanh và dễ làm cháy biểu bì lá.');
-    } else {
-      // Clay / Loam under heat
-      analysis = `Đất ${getSoilLabel(field.soilType)} giữ ẩm tốt hơn, độ ẩm vùng rễ vẫn đạt ${(weather.gwetroot * 100).toFixed(0)}%. Tuy nhiên bề mặt bắt đầu se nứt, cần kiểm tra trước khi tưới quá đà.`;
-      topActions.push({
-        id: 'act-probe-soil',
-        title: 'Dùng que thử kiểm tra độ ẩm ở độ sâu 10-15cm',
-        priority: 'HIGH',
-        reason: 'Đất sét bề mặt khô nứt nhưng tầng rễ có thể vẫn đủ ẩm, tránh tưới lãng phí',
-        dataBasis: `Độ ẩm vùng rễ: ${(weather.gwetroot * 100).toFixed(0)}% so với tầng mặt: ${(weather.gwettop * 100).toFixed(0)}%`,
-      });
-      topActions.push({
-        id: 'act-regulate-irrigation',
-        title: 'Tưới thấm rãnh nhẹ vào chiều muộn nếu tầng rễ thiếu ẩm',
-        priority: 'MEDIUM',
-        reason: 'Bổ sung nước êm dịu, không gây lèn chặt mặt đất sét',
-        dataBasis: `Phương pháp tưới: ${field.crop.irrigationMethod}`,
-      });
-      topActions.push({
-        id: 'act-foliar-stress',
-        title: 'Cân nhắc phun vi lượng / Kali chống sốc nhiệt cho cây',
-        priority: 'LOW',
-        reason: 'Tăng cường sức chịu hạn cho giai đoạn ' + field.crop.currentStage,
-        dataBasis: `Nhiệt độ cao nhất: ${weather.maxTemp}°C`,
-      });
-      postponeActions.push('Hoãn cày xới sâu đất lúc này vì sẽ làm đứt rễ non và tăng thoát hơi ẩm từ lòng đất.');
-    }
-  }
-  // --- FLOWERING / SENSITIVE STAGE CONDITIONS ---
-  else if (isFlowering) {
+    analysis = isEn
+      ? `${isFastSoil ? 'Fast-draining' : 'Moderate/slow'} ${getSoilLabel(field.soilType, lang)} faces rapid evaporation under high solar load. ${graceDepleting ? 'GRACE groundwater reserves are negative — avoid deep well over-pumping and use precision morning watering.' : 'Check 10–15cm root moisture before watering.'}`
+      : `${getSoilLabel(field.soilType, lang)} ${isFastSoil ? 'thấm rút nhanh khiến tầng mặt khô nhanh trong ngày nắng gắt.' : 'có thể nứt bề mặt nhưng tầng rễ giữ ẩm khá hơn; cần kiểm tra sâu 10–15cm.'} ${graceDepleting ? 'Dữ liệu GRACE cho thấy mực nước ngầm đang suy giảm, nên chuyển sang tưới nhỏ giọt / tiết kiệm buổi sáng sớm.' : ''}`;
+
+    topActions.push({
+      id: 'act-irrigate-early',
+      title: isEn ? 'Water lightly early morning (05:30–07:00)' : 'Tưới nước bổ sung vào sáng sớm (05:30 - 07:00)',
+      priority: 'HIGH',
+      reason: isEn
+        ? 'Minimizes evaporation loss and supports canopy cooling before midday heat'
+        : 'Giảm thất thoát bốc hơi, giúp cây tích nước trước khi nắng gắt',
+      dataBasis: `Solar ${weather.solarRadiation} MJ/m² · GWETTOP ${(weather.gwettop * 100).toFixed(0)}%`,
+    });
+    topActions.push({
+      id: 'act-mulch-sand',
+      title: isEn ? 'Apply organic straw mulch to cut evaporation' : 'Tủ ẩm gốc hoặc phủ rơm rạ giữ nước quanh luống',
+      priority: 'HIGH',
+      reason: isEn ? 'Reduces soil moisture evaporation up to 35–40%' : 'Hạn chế bốc hơi nước mặt đất, tiết kiệm nước tưới',
+      dataBasis: graceDepleting ? `GRACE ${earth?.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE` : getGoalLabel(field.primaryGoal, lang),
+    });
+    postponeActions.push(
+      isEn
+        ? 'Avoid overhead irrigation during peak midday heat (11:00–14:00).'
+        : 'Tạm hoãn tưới phun mưa vào buổi trưa nắng gắt (11:00 - 14:00) tránh sốc nhiệt và cháy lá.'
+    );
+  } else if (isFlowering) {
     riskLevel = 'CAUTION';
-    headline = `CHÚ Ý: Giai đoạn nhạy cảm ${field.crop.currentStage}`;
-    situation = `Cây đang trong thời kỳ thụ phấn / làm hạt. Cần đặc biệt chú trọng duy trì mực nước và vi khí hậu ruộng.`;
-    analysis = `Bất kỳ sự thiếu hụt ẩm hay mưa giông bất chợt nào trong giai đoạn này đều có thể giảm tỷ lệ đậu hạt/quả. Lịch sử khí hậu 21 năm cho thấy khu vực này cần duy trì độ ẩm rễ >50%.`;
+    headline = isEn
+      ? `CAUTION: Sensitive flowering/heading stage (${field.crop.currentStage})`
+      : `CHÚ Ý: Giai đoạn nhạy cảm ${field.crop.currentStage}`;
+    situation = isEn
+      ? 'Crop is in pollination/grain-filling phase; stable root moisture is essential.'
+      : 'Cây đang trong thời kỳ thụ phấn / làm hạt. Cần đặc biệt chú trọng duy trì mực nước và vi khí hậu ruộng.';
+    analysis = isEn
+      ? `Sudden water stress now sharply cuts pollination rate. Maintain root moisture at 55–70% (${(weather.gwetroot * 100).toFixed(0)}% currently).`
+      : `Bất kỳ sự thiếu hụt ẩm hay mưa giông bất chợt nào trong giai đoạn này đều có thể giảm tỷ lệ đậu hạt/quả. Độ ẩm rễ hiện tại ${(weather.gwetroot * 100).toFixed(0)}%.`;
 
     topActions.push({
       id: 'act-maintain-moist',
-      title: 'Duy trì độ ẩm đất ổn định 60 - 70%',
+      title: isEn ? 'Maintain steady 60–70% root-zone moisture' : 'Duy trì độ ẩm đất ổn định 60 - 70%',
       priority: 'HIGH',
-      reason: 'Giai đoạn trổ/hoa cực kỳ nhạy cảm với sốc nước (cả úng lẫn hạn)',
-      dataBasis: `Cây: ${field.crop.name} (${field.crop.currentStage})`,
+      reason: isEn ? 'Flowering is highly sensitive to both drought and waterlogging' : 'Giai đoạn trổ/hoa cực kỳ nhạy cảm với sốc nước (cả úng lẫn hạn)',
+      dataBasis: `${field.crop.name} (${field.crop.currentStage})`,
     });
     topActions.push({
       id: 'act-pest-scout',
-      title: 'Kiểm tra mật độ sâu/bọ trĩ/rầy phấn trắng',
+      title: isEn ? 'Scout for hoppers, thrips, and panicle pests' : 'Kiểm tra mật độ sâu/bọ trĩ/rầy phấn trắng',
       priority: 'MEDIUM',
-      reason: 'Độ ẩm ' + weather.humidity + '% và nhiệt độ ' + weather.temp + '°C là điều kiện thích nghi của rầy non',
-      dataBasis: `Độ ẩm không khí: ${weather.humidity}%, Nhiệt độ: ${weather.temp}°C`,
+      reason: isEn ? `RH ${weather.humidity}% and ${weather.temp}°C favor pest buildup` : `Độ ẩm ${weather.humidity}% và nhiệt độ ${weather.temp}°C dễ phát sinh sâu chích hút`,
+      dataBasis: `RH ${weather.humidity}% · Temp ${weather.temp}°C`,
     });
-    topActions.push({
-      id: 'act-nutrient-bloom',
-      title: 'Bổ sung Bo - Canxi hoặc Lân dễ tiêu nếu thời tiết tạnh ráo',
-      priority: 'MEDIUM',
-      reason: 'Tăng tỷ lệ thụ phấn thành công và chống rụng hoa/trái non',
-      dataBasis: 'Quy tắc sinh lý thụ phấn cây trồng',
-    });
-    postponeActions.push('Tuyệt đối tránh phun thuốc trừ sâu dạng nhũ dầu vào lúc hoa đang thụ phấn sáng sớm.');
-  }
-  // --- NORMAL / FAVORABLE CONDITIONS ---
-  else {
+    postponeActions.push(
+      isEn
+        ? 'Do not spray emulsifiable pesticides during early-morning pollination.'
+        : 'Tuyệt đối tránh phun thuốc trừ sâu vào lúc hoa đang thụ phấn sáng sớm.'
+    );
+  } else {
     topActions.push({
       id: 'act-field-walk',
-      title: `Thăm đồng định kỳ vào ${field.inspectTime === 'morning' ? 'buổi sáng' : 'buổi chiều'}`,
+      title: isEn
+        ? `Routine field inspection (${field.inspectTime === 'afternoon' ? 'afternoon' : 'morning'})`
+        : `Thăm đồng định kỳ vào ${field.inspectTime === 'morning' ? 'buổi sáng' : 'buổi chiều'}`,
       priority: 'MEDIUM',
-      reason: 'Theo dõi sinh trưởng cây con và nhổ cỏ dại cạnh tranh dinh dưỡng',
-      dataBasis: `Lịch người dùng: ${field.inspectTime === 'morning' ? 'Buổi sáng' : 'Buổi chiều'}`,
+      reason: isEn ? 'Monitor canopy growth, weeds, and basal moisture' : 'Theo dõi sinh trưởng cây và nhổ cỏ dại cạnh tranh dinh dưỡng',
+      dataBasis: isEn ? `Schedule: ${field.inspectTime}` : `Lịch người dùng: ${field.inspectTime === 'morning' ? 'Buổi sáng' : 'Buổi chiều'}`,
     });
     topActions.push({
       id: 'act-opt-irrigation',
-      title: 'Duy trì chế độ tưới tiết kiệm theo nhu cầu thực',
+      title: isEn ? 'Maintain precision water-saving schedule' : 'Duy trì chế độ tưới tiết kiệm theo nhu cầu thực',
       priority: 'MEDIUM',
-      reason: `Độ ẩm rễ đạt ${(weather.gwetroot * 100).toFixed(0)}%, chưa cần tưới ồ ạt, bám sát mục tiêu ${getGoalLabel(field.primaryGoal)}`,
-      dataBasis: `Độ ẩm vùng rễ: ${(weather.gwetroot * 100).toFixed(0)}%`,
-    });
-    topActions.push({
-      id: 'act-plan-fertilizer',
-      title: 'Chuẩn bị vật tư cho đợt bón thúc tiếp theo',
-      priority: 'LOW',
-      reason: 'Cây đang hấp thụ dinh dưỡng tốt trong điều kiện nắng ấm cân bằng',
-      dataBasis: `Nhiệt độ: ${weather.temp}°C, Bức xạ nắng: ${weather.solarRadiation} MJ/m²`,
+      reason: isEn
+        ? `Root moisture at ${(weather.gwetroot * 100).toFixed(0)}%; avoid over-irrigation`
+        : `Độ ẩm rễ đạt ${(weather.gwetroot * 100).toFixed(0)}%, chưa cần tưới ồ ạt`,
+      dataBasis: `GWETROOT ${(weather.gwetroot * 100).toFixed(0)}%`,
     });
   }
 
-  // Next inspection timing based on risk & farmer preference
-  let nextCheckTime = 'Sáng mai lúc 06:30';
-  if (riskLevel === 'WARNING' || (riskLevel as DailyAgronomicBrief['riskLevel']) === 'CRITICAL') {
-    nextCheckTime = field.inspectTime === 'afternoon' ? 'Chiều nay lúc 16:30' : 'Sáng sớm mai lúc 06:00';
+  // --- ENRICHMENT FROM OCO-2, GRACE & GHGx/EDGAR ---
+  if (earth) {
+    if (graceDepleting && !topActions.some((a) => a.id === 'act-grace-save')) {
+      if (riskLevel === 'LOW') riskLevel = 'CAUTION';
+      topActions.push({
+        id: 'act-grace-save',
+        title: isEn
+          ? 'GRACE Groundwater Alert: Switch to precision/AWD watering'
+          : 'Cảnh báo GRACE: Chuyển tưới tiết kiệm / ngập–khô xen kẽ',
+        priority: 'HIGH',
+        reason: isEn
+          ? `Satellite groundwater anomaly is ${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE (depleting trend). Avoid deep borewell pumping.`
+          : `Nước ngầm GRACE xuống mức ${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE (đang suy giảm). Hạn chế bơm giếng sâu và lên kế hoạch luân canh cây chịu hạn.`,
+        dataBasis: `GRACE-FO (${earth.groundwaterAnomalyGrace.observationDate})`,
+      });
+    } else if (graceRecharging) {
+      analysis += isEn
+        ? ` GRACE-FO groundwater anomaly is positive (+${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE), supporting natural root moisture without heavy pumping.`
+        : ` Chỉ số nước ngầm GRACE-FO phục hồi tốt (+${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE), thuận lợi giữ ẩm tự nhiên không cần bơm sâu.`;
+    }
+
+    if (oco2LowPhotosynthesis) {
+      topActions.push({
+        id: 'act-oco2-sif',
+        title: isEn
+          ? 'Check leaf chlorophyll & canopy vitality (Low OCO-2 SIF)'
+          : 'Kiểm tra diệp lục lá & sức khỏe tán (OCO-2 SIF thấp)',
+        priority: 'MEDIUM',
+        reason: isEn
+          ? `OCO-2 solar-induced fluorescence is low (${earth.carbonFluxOco2.sifWm2SrUm}), signaling cloud stress, N deficiency, or early root stress.`
+          : `Chỉ số huỳnh quang quang hợp OCO-2 SIF ở mức thấp (${earth.carbonFluxOco2.sifWm2SrUm}), có thể do thiếu nắng, thiếu vi lượng hoặc rễ hấp thu kém.`,
+        dataBasis: `NASA OCO-2/3 · Carbon ${earth.carbonFluxOco2.carbonUptakeTonHaYr} t/ha`,
+      });
+    } else if (earth.carbonFluxOco2.photosynthesisStatus === 'high') {
+      analysis += isEn
+        ? ` OCO-2 SIF (${earth.carbonFluxOco2.sifWm2SrUm}) shows strong carbon assimilation (${earth.carbonFluxOco2.carbonUptakeTonHaYr} t CO₂/ha).`
+        : ` Quang hợp OCO-2 SIF (${earth.carbonFluxOco2.sifWm2SrUm}) đang đạt mức tốt (${earth.carbonFluxOco2.carbonUptakeTonHaYr} tấn CO₂/ha).`;
+    }
+
+    if (ghgHigh) {
+      topActions.push({
+        id: 'act-ghg-awd',
+        title: isEn
+          ? 'Cut CH₄/N₂O emissions: Apply AWD drainage & split fertilizer'
+          : 'Giảm phát thải CH₄/N₂O: Áp dụng rút nước giữa vụ & chia nhỏ đạm',
+        priority: 'MEDIUM',
+        reason: isEn
+          ? `GHGx/EDGAR estimates ${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha (CH₄ ${earth.greenhouseGasEdgar.ch4KgHa} kg/ha). Brief aerobic drainage cuts methane up to 40%.`
+          : `GHGx/EDGAR ghi nhận ${earth.greenhouseGasEdgar.co2eqTonHa} tấn CO₂e/ha (CH₄ ${earth.greenhouseGasEdgar.ch4KgHa} kg/ha). Rút nước xen kẽ (AWD) giúp cắt giảm tới 40% Mê-tan.`,
+        dataBasis: `GHGx/EDGAR (${earth.greenhouseGasEdgar.observationDate})`,
+      });
+      postponeActions.push(
+        isEn
+          ? 'Avoid single heavy Urea application while continuously flooded (drives N₂O & CH₄ spikes).'
+          : 'Tránh bón dồn 1 lần lượng đạm lớn khi ruộng ngập sâu kéo dài (gây thất thoát N₂O và tăng CH₄).'
+      );
+    }
+  }
+
+  let nextCheckTime = isEn ? 'Tomorrow 06:30 AM' : 'Sáng mai lúc 06:30';
+  if (riskLevel === 'WARNING' || riskLevel === 'CRITICAL') {
+    nextCheckTime =
+      field.inspectTime === 'afternoon'
+        ? isEn
+          ? 'Today 04:30 PM'
+          : 'Chiều nay lúc 16:30'
+        : isEn
+        ? 'Tomorrow 06:00 AM'
+        : 'Sáng sớm mai lúc 06:00';
   } else if (field.inspectTime === 'afternoon') {
-    nextCheckTime = 'Chiều mai lúc 16:30';
+    nextCheckTime = isEn ? 'Tomorrow 04:30 PM' : 'Chiều mai lúc 16:30';
   }
 
-  const agronomicExplanation = `Khuyến nghị được xây dựng dựa trên sự tương tác giữa:
-1. Kết cấu đất: ${getSoilLabel(field.soilType)} (khả năng giữ nước: ${field.soilCharacteristics.holdsWater ? 'Cao' : 'Thấp'}, thoát nước: ${getDrainageLabel(adjustedDrainage)}).
-2. Sinh lý cây trồng: ${field.crop.name} (${field.crop.variety}) đang ở giai đoạn ${field.crop.currentStage}.
-3. Thời tiết hiện tại so với dữ liệu nền NASA POWER 21 năm (2005-2025): Nhiệt độ trung bình lịch sử tháng này là ${weather.historicalBaseline.avgTemp}°C so với hiện tại là ${weather.temp}°C.
-4. Trí nhớ thích ứng: Hệ thống đã ghi nhận ${feedbackHistory.length} phản hồi từ bạn để tinh chỉnh giả định thoát nước đất.`;
+  const agronomicExplanation = isEn
+    ? `Multi-source synthesis:
+1. Soil physics: ${getSoilLabel(field.soilType, lang)} (${getDrainageLabel(adjustedDrainage, lang)}).
+2. Crop phenology: ${field.crop.name} (${field.crop.variety}) at ${field.crop.currentStage}.
+3. NASA POWER 21-yr baseline: Historical avg ${weather.historicalBaseline.avgTemp}°C vs current ${weather.temp}°C.
+${earth ? `4. Earth satellites synced: OCO-2 (${earth.carbonFluxOco2.carbonUptakeTonHaYr} t CO₂/ha), GRACE (${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE), GHGx (${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha).` : '4. Ready for NASA OCO-2/GRACE/GHGx sync on Dashboard.'}
+5. Adaptive memory: ${feedbackHistory.length} field feedbacks recorded.`
+    : `Khuyến nghị được tổng hợp từ đa nguồn dữ liệu:
+1. Kết cấu đất: ${getSoilLabel(field.soilType, lang)} (${getDrainageLabel(adjustedDrainage, lang)}).
+2. Sinh lý cây trồng: ${field.crop.name} (${field.crop.variety}) — giai đoạn ${field.crop.currentStage}.
+3. Đối chiếu NASA POWER 21 năm (2005–2025): Nhiệt độ nền ${weather.historicalBaseline.avgTemp}°C so với hiện tại ${weather.temp}°C.
+${earth ? `4. Vệ tinh môi trường đồng bộ: OCO-2 (${earth.carbonFluxOco2.carbonUptakeTonHaYr} tấn CO₂/ha), GRACE (${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE), GHGx (${earth.greenhouseGasEdgar.co2eqTonHa} tấn CO₂e/ha).` : '4. Có thể bấm "Đồng bộ dữ liệu NASA" để bổ sung chỉ số OCO-2, GRACE và GHGx.'}
+5. Trí nhớ thích ứng: Đã ghi nhận ${feedbackHistory.length} phản hồi thực địa từ nông hộ.`;
 
-  const uncertainties = `Lưu ý minh bạch khoa học:
-- Vệ tinh NASA POWER đo đạc ở độ phân giải 0.5° (~55km), cung cấp xu thế bức xạ và khí hậu đáng tin cậy nhưng không thể thay thế việc kiểm tra ẩm độ thực tế tại lòng đất thửa ruộng.
-- Nếu bạn thấy đất thực tế khô hơn hoặc ẩm hơn phân tích, hãy nhấn nút phản hồi để AI học và cập nhật hồ sơ thửa ruộng.`;
+  const uncertainties = isEn
+    ? 'Scientific transparency: Satellite grids (POWER 0.5°, GRACE Mascon, OCO-2) reflect regional averages and cannot replace direct hand-checks of soil moisture or underside leaf scouting.'
+    : 'Lưu ý minh bạch khoa học: Vệ tinh NASA POWER, GRACE và OCO-2 phản ánh quy mô ô lưới vùng nên không thể thay thế việc kiểm tra ẩm độ tầng rễ bằng tay và soi mặt dưới lá trực tiếp tại ruộng.';
 
   return {
     id: `BRIEF_${field.id}_${Date.now()}`,
@@ -289,7 +405,7 @@ export function analyzeFieldAgronomy(
     riskLevel,
     situation,
     analysis,
-    topActions,
+    topActions: topActions.slice(0, 4),
     postponeActions,
     explanation: agronomicExplanation,
     uncertainties,
@@ -298,163 +414,162 @@ export function analyzeFieldAgronomy(
   };
 }
 
-/**
- * Generate Adaptive Tasks based on current brief and field
- */
 export function generateTasksFromBrief(brief: DailyAgronomicBrief, field: FieldProfile): FarmTask[] {
-  const tasks: FarmTask[] = [];
-
-  brief.topActions.forEach((act, idx) => {
-    tasks.push({
-      id: `TASK_${brief.id}_${idx}`,
-      fieldId: field.id,
-      title: act.title,
-      scheduledTime: brief.nextCheckTime,
-      priority: act.priority,
-      reason: act.reason,
-      triggerData: act.dataBasis,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    });
-  });
-
-  return tasks;
+  return brief.topActions.map((act, idx) => ({
+    id: `TASK_${brief.id}_${idx}`,
+    fieldId: field.id,
+    title: act.title,
+    scheduledTime: brief.nextCheckTime,
+    priority: act.priority,
+    reason: act.reason,
+    triggerData: act.dataBasis,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  }));
 }
 
-/**
- * 21-Year NASA POWER Planting Calendar Evaluator (2005-2025)
- * Analyzes risk of adverse weather across sensitive growth stages for each month
- */
 export function evaluatePlantingCalendar(
   cropName: string,
-  soilType: string,
-  gridLat: number
+  _soilType: string,
+  gridLat: number,
+  lang: AppLanguage = 'vi'
 ): PlantingRiskEvaluation[] {
+  const isEn = lang === 'en';
   const evaluations: PlantingRiskEvaluation[] = [];
   const isNorth = gridLat > 16.5;
 
   for (let month = 1; month <= 12; month++) {
-    let status: 'optimal' | 'caution' | 'risk' | 'insufficient' = 'optimal';
-    let adverseYears = 0;
-    let adverseDaysAvg = 0;
-    let thresholdCondition = '';
-    let explanation = '';
+    let status: PlantingRiskEvaluation['status'] = 'optimal';
+    let adverseYears = 2;
+    let adverseDaysAvg = 1.5;
+    let thresholdCondition = isEn ? 'Stable climate window' : 'Khí hậu tương đối ổn định';
+    let explanation = isEn
+      ? 'Average temperature and moisture conditions favor planting or harvest.'
+      : 'Điều kiện thời tiết trung bình thuận lợi cho gieo trồng hoặc thu hoạch.';
 
     if (cropName.toLowerCase().includes('lúa') || cropName.toLowerCase().includes('rice')) {
       if (isNorth) {
-        // North Vietnam rice calendar (Vụ Xuân & Vụ Mùa)
         if (month === 1) {
-          // January cold spells
           status = 'risk';
-          adverseYears = 14; // in 21 years
+          adverseYears = 14;
           adverseDaysAvg = 8.5;
-          thresholdCondition = 'Nhiệt độ ban đêm xuống dưới 12°C (Rét hại làm chết mạ)';
-          explanation = 'Trong 21 năm quan trắc, có 14 năm xuất hiện rét đậm/hại kéo dài trên 5 ngày, nguy cơ chết mạ nếu không che phủ nilon.';
+          thresholdCondition = isEn
+            ? 'Night temp < 12°C (Severe cold damages seedlings)'
+            : 'Nhiệt độ ban đêm xuống dưới 12°C (Rét hại làm chết mạ)';
+          explanation = isEn
+            ? '14 of 21 years recorded >5 days of severe cold; cover nursery beds with plastic film.'
+            : 'Trong 21 năm quan trắc, có 14 năm xuất hiện rét đậm/hại kéo dài trên 5 ngày, nguy cơ chết mạ nếu không che phủ nilon.';
         } else if (month === 2) {
           status = 'caution';
           adverseYears = 8;
           adverseDaysAvg = 4.2;
-          thresholdCondition = 'Nhiệt độ trung bình dưới 15°C kết hợp mưa phùn';
-          explanation = 'Gieo cấy vụ Xuân cần theo dõi các đợt không khí lạnh tăng cường; 8 trong 21 năm có đợt rét muộn ảnh hưởng đẻ nhánh.';
+          thresholdCondition = isEn
+            ? 'Mean temp < 15°C with drizzle'
+            : 'Nhiệt độ trung bình dưới 15°C kết hợp mưa phùn';
+          explanation = isEn
+            ? '8 of 21 years had late cold spells slowing rice tillering.'
+            : '8 trong 21 năm có đợt rét muộn ảnh hưởng đẻ nhánh.';
         } else if (month >= 3 && month <= 5) {
           status = 'optimal';
           adverseYears = 2;
           adverseDaysAvg = 1.0;
-          thresholdCondition = 'Nhiệt độ 22-29°C, ẩm độ và nắng tăng đều';
-          explanation = 'Giai đoạn ánh sáng và nhiệt độ tối ưu cho lúa sinh trưởng thân lá và làm đòng.';
+          thresholdCondition = isEn ? '22–29°C with balanced sunshine' : 'Nhiệt độ 22-29°C, ẩm độ và nắng tăng đều';
+          explanation = isEn
+            ? 'Optimal solar radiation and temperature for vegetative growth and panicle initiation.'
+            : 'Giai đoạn ánh sáng và nhiệt độ tối ưu cho lúa sinh trưởng thân lá và làm đòng.';
         } else if (month === 7 || month === 8) {
           status = 'caution';
           adverseYears = 9;
           adverseDaysAvg = 6.0;
-          thresholdCondition = 'Mưa lớn trên 50mm/ngày và nguy cơ ngập úng';
-          explanation = 'Giai đoạn mưa bão cao điểm mùa hè; đất trũng thoát nước chậm cần chuẩn bị máy bơm tiêu úng.';
-        } else {
-          status = 'optimal';
-          adverseYears = 3;
-          adverseDaysAvg = 2.0;
-          thresholdCondition = 'Khí hậu tương đối ổn định';
-          explanation = 'Điều kiện thời tiết trung bình thuận lợi cho gieo trồng hoặc thu hoạch.';
+          thresholdCondition = isEn ? 'Heavy storm rain > 50mm/day' : 'Mưa lớn trên 50mm/ngày và nguy cơ ngập úng';
+          explanation = isEn
+            ? 'Peak summer storm season; low fields need drainage pumps ready.'
+            : 'Giai đoạn mưa bão cao điểm mùa hè; đất trũng thoát nước chậm cần chuẩn bị máy bơm tiêu úng.';
         }
       } else {
-        // South Vietnam rice (3 vụ: Đông Xuân, Hè Thu, Thu Đông)
         if (month >= 2 && month <= 4) {
           status = 'caution';
           adverseYears = 11;
           adverseDaysAvg = 18.0;
-          thresholdCondition = 'Hạn hán & Xâm nhập mặn nguồn nước (độ ẩm vùng rễ xuống thấp)';
-          explanation = 'Mùa khô cao điểm ĐBSCL; 11 trong 21 năm có ranh mặn 4g/l lấn sâu vào sông rạch. Cần kiểm tra độ mặn trước khi bơm tưới.';
+          thresholdCondition = isEn
+            ? 'Dry-season water deficit & salinity intrusion'
+            : 'Hạn hán & Xâm nhập mặn nguồn nước';
+          explanation = isEn
+            ? '11 of 21 years recorded 4g/L salinity intrusion in Mekong canals; test water before pumping.'
+            : 'Mùa khô cao điểm ĐBSCL; 11 trong 21 năm có ranh mặn 4g/l lấn sâu vào sông rạch. Cần kiểm tra độ mặn trước khi bơm tưới.';
         } else if (month >= 9 && month <= 11) {
           status = 'caution';
           adverseYears = 7;
           adverseDaysAvg = 5.0;
-          thresholdCondition = 'Mưa dầm kết hợp triều cường';
-          explanation = 'Mùa lũ và triều cường cuối năm, cần chủ động đê bao khép kín.';
+          thresholdCondition = isEn ? 'Flood & high-tide rain' : 'Mưa dầm kết hợp triều cường';
+          explanation = isEn
+            ? 'High flood/tide risk; maintain closed dike drainage.'
+            : 'Mùa lũ và triều cường cuối năm, cần chủ động đê bao khép kín.';
         } else {
           status = 'optimal';
           adverseYears = 2;
           adverseDaysAvg = 1.2;
-          thresholdCondition = 'Nhiệt độ ấm áp 27-31°C quanh năm';
-          explanation = 'Điều kiện nhiệt ẩm rất tốt cho lúa vụ Đông Xuân năng suất cao.';
+          thresholdCondition = isEn ? 'Warm 27–31°C stable window' : 'Nhiệt độ ấm áp 27-31°C quanh năm';
+          explanation = isEn
+            ? 'Favorable temperature and solar window for high-yield Winter-Spring rice.'
+            : 'Điều kiện nhiệt ẩm rất tốt cho lúa vụ Đông Xuân năng suất cao.';
         }
       }
-    } else if (cropName.toLowerCase().includes('cải') || cropName.toLowerCase().includes('rau')) {
-      // Vegetables
+    } else if (cropName.toLowerCase().includes('cải') || cropName.toLowerCase().includes('rau') || cropName.toLowerCase().includes('veg')) {
       if (isNorth) {
         if (month >= 10 || month <= 2) {
           status = 'optimal';
           adverseYears = 1;
           adverseDaysAvg = 1.0;
-          thresholdCondition = 'Thời tiết mát mẻ 16-22°C rất thích hợp rau họ Cải';
-          explanation = 'Vụ Đông là mùa vàng của rau cải; năng suất và phẩm chất lá ngon ngọt nhất.';
+          thresholdCondition = isEn ? 'Cool 16–22°C ideal for brassicas' : 'Thời tiết mát mẻ 16-22°C rất thích hợp rau họ Cải';
+          explanation = isEn
+            ? 'Golden winter window for leafy vegetables.'
+            : 'Vụ Đông là mùa vàng của rau cải; năng suất và phẩm chất lá ngon ngọt nhất.';
         } else if (month >= 6 && month <= 8) {
           status = 'risk';
           adverseYears = 17;
           adverseDaysAvg = 12.0;
-          thresholdCondition = 'Nhiệt độ ban ngày vượt 36°C và mưa rào xối xả';
-          explanation = 'Nắng nóng gay gắt kết hợp mưa dập lá làm bùng phát thối nhũn vi khuẩn; 17 trong 21 năm có đợt sốc nhiệt.';
+          thresholdCondition = isEn ? 'Daytime > 36°C & heavy downpours' : 'Nhiệt độ ban ngày vượt 36°C và mưa rào xối xả';
+          explanation = isEn
+            ? '17 of 21 years had heat stress + soft rot risk.'
+            : 'Nắng nóng gay gắt kết hợp mưa dập lá làm bùng phát thối nhũn vi khuẩn; 17 trong 21 năm có đợt sốc nhiệt.';
         } else {
           status = 'caution';
           adverseYears = 5;
           adverseDaysAvg = 3.0;
-          thresholdCondition = 'Giao mùa ẩm độ cao';
-          explanation = 'Cần chú ý bệnh phấn trắng và bọ nhảy.';
+          thresholdCondition = isEn ? 'High transitional humidity' : 'Giao mùa ẩm độ cao';
+          explanation = isEn ? 'Watch for powdery mildew and flea beetles.' : 'Cần chú ý bệnh phấn trắng và bọ nhảy.';
         }
       } else {
-        // South vegetables
         if (month >= 5 && month <= 9) {
           status = 'caution';
           adverseYears = 10;
           adverseDaysAvg = 8.0;
-          thresholdCondition = 'Mưa giông nhiệt đới lượng mưa lớn';
-          explanation = 'Cần che lưới ngăn hạt mưa xé nát phiến lá và luống thoát nước cao.';
+          thresholdCondition = isEn ? 'Heavy tropical rainstorms' : 'Mưa giông nhiệt đới lượng mưa lớn';
+          explanation = isEn ? 'Use rain netting and raised beds.' : 'Cần che lưới ngăn hạt mưa xé nát phiến lá và luống thoát nước cao.';
         } else {
           status = 'optimal';
           adverseYears = 3;
           adverseDaysAvg = 2.0;
-          thresholdCondition = 'Nắng đều, ẩm độ vừa phải';
-          explanation = 'Thuận lợi cho luân canh rau màu.';
+          thresholdCondition = isEn ? 'Steady sun & moderate humidity' : 'Nắng đều, ẩm độ vừa phải';
+          explanation = isEn ? 'Favorable for vegetable rotation.' : 'Thuận lợi cho luân canh rau màu.';
         }
       }
     } else {
-      // Corn / Maize & other crops
       if (month >= 5 && month <= 7) {
         status = 'caution';
         adverseYears = 6;
         adverseDaysAvg = 4.0;
-        thresholdCondition = 'Nhiệt độ cao lúc trổ cờ phun râu';
-        explanation = 'Nếu gặp nhiệt độ >35°C lúc tung phấn sẽ làm khô hạt phấn, giảm tỷ lệ đậu bắp.';
-      } else {
-        status = 'optimal';
-        adverseYears = 2;
-        adverseDaysAvg = 1.5;
-        thresholdCondition = 'Cây ngô chống chịu tốt';
-        explanation = 'Phù hợp sinh trưởng.';
+        thresholdCondition = isEn ? 'Heat > 35°C during pollination' : 'Nhiệt độ cao lúc trổ cờ phun râu';
+        explanation = isEn
+          ? 'Temperatures >35°C during tasseling dry out pollen.'
+          : 'Nếu gặp nhiệt độ >35°C lúc tung phấn sẽ làm khô hạt phấn, giảm tỷ lệ đậu bắp.';
       }
     }
 
     evaluations.push({
       cropName,
-      variety: 'Khuyến nghị vùng',
+      variety: isEn ? 'Regional recommendation' : 'Khuyến nghị vùng',
       month,
       status,
       score: status === 'optimal' ? 90 : status === 'caution' ? 65 : 35,
@@ -469,7 +584,6 @@ export function evaluatePlantingCalendar(
   return evaluations;
 }
 
-// Helpers
 export interface SoilTypeMeta {
   type:
     | 'sand'
@@ -489,37 +603,48 @@ export interface SoilTypeMeta {
     | 'gravelly'
     | 'unknown';
   label: string;
+  labelEn: string;
   shortHint: string;
+  shortHintEn: string;
   defaultDrainage: 'fast' | 'moderate' | 'slow';
   defaultHoldsWater: boolean;
   defaultFlooding: boolean;
 }
 
 export const SOIL_TYPE_CATALOG: SoilTypeMeta[] = [
-  { type: 'alluvial', label: 'Đất phù sa', shortHint: 'Màu mỡ ven sông, giữ ẩm khá tốt', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
-  { type: 'loam', label: 'Đất thịt trung bình', shortHint: 'Tơi xốp cân bằng, dễ canh tác đa cây', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
-  { type: 'sandy_loam', label: 'Đất cát pha', shortHint: 'Nhẹ đất, thoát nhanh, hợp lạc/khoai/rau', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'sandy_clay_loam', label: 'Đất thịt nhẹ', shortHint: 'Dễ cày bừa, thoát nước vừa phải', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
-  { type: 'clay_loam', label: 'Đất thịt nặng / sét pha', shortHint: 'Giữ nước và phân tốt, hơi bí khi mưa', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
-  { type: 'clay', label: 'Đất sét', shortHint: 'Dẻo dính, giữ nước lâu, dễ ngập úng', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
-  { type: 'sand', label: 'Đất cát', shortHint: 'Rời rạc, rút nước rất nhanh, mau khô', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'basalt', label: 'Đất đỏ bazan', shortHint: 'Tầng dày, tơi xốp, giàu khoáng Tây Nguyên', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
-  { type: 'ferralsol', label: 'Đất đỏ vàng đồi núi', shortHint: 'Đất đồi Feralit, cần giữ mùn chống rửa trôi', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'gray_degraded', label: 'Đất xám bạc màu', shortHint: 'Nghèo mùn, dễ đóng váng mặt, hợp họ Đậu', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'acid_sulfate', label: 'Đất phèn', shortHint: 'pH thấp (chua), cần rửa phèn và lên luống', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
-  { type: 'saline', label: 'Đất mặn / nhiễm mặn', shortHint: 'Ven biển / cửa sông, cần theo dõi độ mặn', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: false },
-  { type: 'peat_muck', label: 'Đất than bùn / trũng mùn', shortHint: 'Giàu hữu cơ vùng trũng, ngập nước theo mùa', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
-  { type: 'limestone', label: 'Đất thung lũng đá vôi', shortHint: 'Độ pH trung tính–kiềm nhẹ, thoát khá nhanh', defaultDrainage: 'moderate', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'gravelly', label: 'Đất sỏi đá / tầng mỏng', shortHint: 'Đất dốc nhiều sỏi sạn, rất dễ khô hạn', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
-  { type: 'unknown', label: 'Chưa rõ loại đất', shortHint: 'Dùng hướng dẫn nắm đất để nhận diện nhanh', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'alluvial', label: 'Đất phù sa', labelEn: 'Alluvial Soil', shortHint: 'Màu mỡ ven sông, giữ ẩm khá tốt', shortHintEn: 'Fertile riverside soil, balanced moisture', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'loam', label: 'Đất thịt trung bình', labelEn: 'Loam Soil', shortHint: 'Tơi xốp cân bằng, dễ canh tác đa cây', shortHintEn: 'Balanced texture, versatile for most crops', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'sandy_loam', label: 'Đất cát pha', labelEn: 'Sandy Loam', shortHint: 'Nhẹ đất, thoát nhanh, hợp lạc/khoai/rau', shortHintEn: 'Light, fast-draining, good for peanut/tubers', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'sandy_clay_loam', label: 'Đất thịt nhẹ', labelEn: 'Sandy Clay Loam', shortHint: 'Dễ cày bừa, thoát nước vừa phải', shortHintEn: 'Easy tillage, moderate drainage', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'clay_loam', label: 'Đất thịt nặng / sét pha', labelEn: 'Clay Loam', shortHint: 'Giữ nước và phân tốt, hơi bí khi mưa', shortHintEn: 'Holds water/nutrients well, slow during heavy rain', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
+  { type: 'clay', label: 'Đất sét', labelEn: 'Clay Soil', shortHint: 'Dẻo dính, giữ nước lâu, dễ ngập úng', shortHintEn: 'Sticky, high water retention, flood-prone', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
+  { type: 'sand', label: 'Đất cát', labelEn: 'Sandy Soil', shortHint: 'Rời rạc, rút nước rất nhanh, mau khô', shortHintEn: 'Drains rapidly, dries out quickly', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'basalt', label: 'Đất đỏ bazan', labelEn: 'Red Basalt Soil', shortHint: 'Tầng dày, tơi xốp, giàu khoáng Tây Nguyên', shortHintEn: 'Deep porous volcanic soil, nutrient-rich', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'ferralsol', label: 'Đất đỏ vàng đồi núi', labelEn: 'Ferralsol', shortHint: 'Đất đồi Feralit, cần giữ mùn chống rửa trôi', shortHintEn: 'Upland soil, needs cover crop to prevent erosion', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'gray_degraded', label: 'Đất xám bạc màu', labelEn: 'Degraded Gray Soil', shortHint: 'Nghèo mùn, dễ đóng váng mặt, hợp họ Đậu', shortHintEn: 'Low organic matter, benefits from legumes', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'acid_sulfate', label: 'Đất phèn', labelEn: 'Acid Sulfate Soil', shortHint: 'pH thấp (chua), cần rửa phèn và lên luống', shortHintEn: 'Low pH, requires raised beds and flushing', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
+  { type: 'saline', label: 'Đất mặn / nhiễm mặn', labelEn: 'Saline Soil', shortHint: 'Ven biển / cửa sông, cần theo dõi độ mặn', shortHintEn: 'Coastal salinity risk, monitor EC', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: false },
+  { type: 'peat_muck', label: 'Đất than bùn / trũng mùn', labelEn: 'Peat / Muck Soil', shortHint: 'Giàu hữu cơ vùng trũng, ngập nước theo mùa', shortHintEn: 'Organic wetland, seasonal flooding', defaultDrainage: 'slow', defaultHoldsWater: true, defaultFlooding: true },
+  { type: 'limestone', label: 'Đất thung lũng đá vôi', labelEn: 'Limestone Valley Soil', shortHint: 'Độ pH trung tính–kiềm nhẹ, thoát khá nhanh', shortHintEn: 'Neutral-alkaline pH, good drainage', defaultDrainage: 'moderate', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'gravelly', label: 'Đất sỏi đá / tầng mỏng', labelEn: 'Gravelly Shallow Soil', shortHint: 'Đất dốc nhiều sỏi sạn, rất dễ khô hạn', shortHintEn: 'Sloped rocky soil, drought-prone', defaultDrainage: 'fast', defaultHoldsWater: false, defaultFlooding: false },
+  { type: 'unknown', label: 'Chưa rõ loại đất', labelEn: 'Unknown Soil Type', shortHint: 'Dùng hướng dẫn nắm đất để nhận diện nhanh', shortHintEn: 'Use feel test to identify texture', defaultDrainage: 'moderate', defaultHoldsWater: true, defaultFlooding: false },
 ];
 
-export function getSoilLabel(type: string): string {
+export function getSoilLabel(type: string, lang: AppLanguage = 'vi'): string {
   const found = SOIL_TYPE_CATALOG.find((s) => s.type === type);
-  return found ? found.label : type;
+  if (!found) return type;
+  return lang === 'en' ? found.labelEn : found.label;
 }
 
-export function getDrainageLabel(drainage: string): string {
+export function getDrainageLabel(drainage: string, lang: AppLanguage = 'vi'): string {
+  if (lang === 'en') {
+    const enMap: Record<string, string> = {
+      fast: 'Fast drainage',
+      moderate: 'Moderate drainage',
+      slow: 'Slow drainage (waterlog risk)',
+    };
+    return enMap[drainage] || drainage;
+  }
   const map: Record<string, string> = {
     fast: 'Thoát nước nhanh',
     moderate: 'Thoát nước trung bình',
@@ -528,7 +653,18 @@ export function getDrainageLabel(drainage: string): string {
   return map[drainage] || drainage;
 }
 
-export function getWaterLabel(type: string): string {
+export function getWaterLabel(type: string, lang: AppLanguage = 'vi'): string {
+  if (lang === 'en') {
+    const enMap: Record<string, string> = {
+      river: 'River water',
+      pond: 'Pond / lake',
+      well: 'Borewell',
+      tap: 'Tap water',
+      rain: 'Rainwater',
+      other: 'Other source',
+    };
+    return enMap[type] || type;
+  }
   const map: Record<string, string> = {
     river: 'Nước sông',
     pond: 'Nước ao/hồ',
@@ -540,7 +676,16 @@ export function getWaterLabel(type: string): string {
   return map[type] || type;
 }
 
-export function getGoalLabel(goal: string): string {
+export function getGoalLabel(goal: string, lang: AppLanguage = 'vi'): string {
+  if (lang === 'en') {
+    const enMap: Record<string, string> = {
+      save_water: 'Save irrigation water',
+      minimize_risk: 'Minimize weather risks',
+      stabilize_yield: 'Stabilize yield',
+      optimize_cost: 'Optimize fertilizer/input cost',
+    };
+    return enMap[goal] || goal;
+  }
   const map: Record<string, string> = {
     save_water: 'Tiết kiệm nước tưới',
     minimize_risk: 'Giảm thiểu rủi ro thời tiết',

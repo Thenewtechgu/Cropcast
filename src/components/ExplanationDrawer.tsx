@@ -1,6 +1,17 @@
 import React from 'react';
-import { X, HelpCircle, Satellite, Database, BrainCircuit, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+  X,
+  HelpCircle,
+  Satellite,
+  Database,
+  BrainCircuit,
+  AlertTriangle,
+  RefreshCw,
+  Clock,
+} from 'lucide-react';
 import { DailyAgronomicBrief, FieldProfile, WeatherObservation } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
+import { getSoilLabel, getDrainageLabel } from '../services/agronomyEngine';
 
 interface ExplanationDrawerProps {
   isOpen: boolean;
@@ -17,6 +28,7 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
   field,
   weather,
 }) => {
+  const { lang, t } = useLanguage();
   if (!isOpen) return null;
 
   const getBadgeStyle = (type: string) => {
@@ -37,16 +49,29 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
   const getProvenanceLabel = (type: string) => {
     switch (type) {
       case 'NASA_HISTORICAL':
-        return 'Khí hậu lịch sử 21 năm';
+        return t('Khí hậu lịch sử 21 năm', '21-yr Historical Climate');
       case 'NASA_CURRENT':
-        return 'Quan trắc thời tiết mới';
+        return t('Vệ tinh NASA / Môi trường', 'NASA / Satellite Observation');
       case 'USER_OBSERVATION':
-        return 'Thông tin nông hộ';
+        return t('Thông tin nông hộ', 'Farmer Observation');
       case 'AI_INFERENCE':
-        return 'Phân tích nông học';
+        return t('Phân tích nông học', 'Agronomy Inference');
       default:
-        return 'Tham khảo';
+        return t('Tham khảo', 'Reference');
     }
+  };
+
+  const formatLastUpdated = (val?: string) => {
+    if (!val) return null;
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) return val;
+    return d.toLocaleString(lang === 'en' ? 'en-US' : 'vi-VN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   return (
@@ -56,7 +81,9 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
         <div className="px-6 py-4 bg-emerald-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <HelpCircle className="w-5 h-5 text-emerald-300" />
-            <h3 className="text-base font-bold">Minh bạch Cơ chế Ra Quyết định</h3>
+            <h3 className="text-base font-bold">
+              {t('Minh bạch Cơ chế Ra Quyết định', 'Decision Evidence & Provenance')}
+            </h3>
           </div>
           <button
             onClick={onClose}
@@ -67,104 +94,186 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
         </div>
 
         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm text-stone-700">
-          {/* Question title */}
+          {/* Recommendation title */}
           <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl">
-            <div className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Khuyến nghị hiện tại</div>
+            <div className="text-xs font-bold text-emerald-800 uppercase tracking-wide">
+              {t('Khuyến nghị hiện tại', 'Current Recommendation')}
+            </div>
             <div className="text-stone-900 font-bold text-base mt-1">{brief.headline}</div>
             <p className="text-xs text-stone-600 mt-1">{brief.situation}</p>
           </div>
 
-          {/* 1. Dữ liệu khí hậu đã sử dụng */}
+          {/* 1. Climate & Soil moisture baseline */}
           <section className="space-y-3">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
               <Satellite className="w-4 h-4 text-emerald-600" />
-              <span>1. Dữ liệu Khí hậu &amp; Độ ẩm đất đối chiếu</span>
+              <span>
+                {t(
+                  '1. Dữ liệu Khí hậu & Độ ẩm đất đối chiếu',
+                  '1. Reference Climate & Soil Moisture Data'
+                )}
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
-                <div className="text-stone-500">Điểm khí hậu gần nhất:</div>
-                <div className="font-semibold text-stone-800">{field.nasaGrid.lat}°B, {field.nasaGrid.lon}°Đ</div>
-                <div className="text-[11px] text-stone-400">Cách thửa ruộng: {field.nasaGrid.distanceKm} km</div>
+                <div className="text-stone-500">
+                  {t('Điểm khí hậu gần nhất:', 'Nearest climate grid:')}
+                </div>
+                <div className="font-semibold text-stone-800">
+                  {field.nasaGrid.lat}°N, {field.nasaGrid.lon}°E
+                </div>
+                <div className="text-[11px] text-stone-400">
+                  {t(`Cách ruộng: ${field.nasaGrid.distanceKm} km`, `Distance: ${field.nasaGrid.distanceKm} km`)}
+                </div>
               </div>
               <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
-                <div className="text-stone-500">Chuỗi dữ liệu lịch sử:</div>
-                <div className="font-semibold text-stone-800">2005 – 2025 (21 năm)</div>
-                <div className="text-[11px] text-stone-400">Theo lưới khí hậu vùng</div>
+                <div className="text-stone-500">
+                  {t('Chuỗi dữ liệu lịch sử:', 'Historical series:')}
+                </div>
+                <div className="font-semibold text-stone-800">
+                  {t('2005 – 2025 (21 năm)', '2005 – 2025 (21 years)')}
+                </div>
+                <div className="text-[11px] text-stone-400">NASA POWER (community=ag)</div>
               </div>
               <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
-                <div className="text-stone-500">Độ ẩm đất tầng mặt:</div>
-                <div className="font-semibold text-stone-800">{(weather.gwettop * 100).toFixed(0)}%</div>
-                <div className="text-[11px] text-stone-400">Lớp đất 0–5 cm</div>
+                <div className="text-stone-500">
+                  {t('Độ ẩm đất tầng mặt:', 'Surface soil moisture:')}
+                </div>
+                <div className="font-semibold text-stone-800">
+                  {(weather.gwettop * 100).toFixed(0)}%
+                </div>
+                <div className="text-[11px] text-stone-400">
+                  {t('Lớp đất 0–5 cm', '0–5 cm topsoil')}
+                </div>
               </div>
               <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
-                <div className="text-stone-500">Độ ẩm đất vùng rễ:</div>
-                <div className="font-semibold text-stone-800">{(weather.gwetroot * 100).toFixed(0)}%</div>
-                <div className="text-[11px] text-stone-400">Lớp rễ 0–100 cm</div>
+                <div className="text-stone-500">
+                  {t('Độ ẩm đất vùng rễ:', 'Root zone moisture:')}
+                </div>
+                <div className="font-semibold text-stone-800">
+                  {(weather.gwetroot * 100).toFixed(0)}%
+                </div>
+                <div className="text-[11px] text-stone-400">
+                  {t('Lớp rễ 0–100 cm', '0–100 cm root zone')}
+                </div>
               </div>
             </div>
           </section>
 
-          {/* 2. Nhãn nguồn gốc dữ liệu */}
+          {/* 2. Data Provenance with Last Updated */}
           <section className="space-y-2">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
               <Database className="w-4 h-4 text-blue-600" />
-              <span>2. Nguồn gốc thông tin tham chiếu</span>
+              <span>
+                {t(
+                  '2. Nguồn gốc thông tin & Lần cuối cập nhật',
+                  '2. Data Sources & Last Updated'
+                )}
+              </span>
             </div>
             <div className="space-y-2">
-              {brief.provenances.map((prov, i) => (
-                <div key={i} className="p-2.5 rounded-lg border bg-stone-50/70 border-stone-200 flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs text-stone-900">{prov.label}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${getBadgeStyle(prov.type)}`}>
-                      {getProvenanceLabel(prov.type)}
-                    </span>
+              {brief.provenances.map((prov, i) => {
+                const updatedStr = formatLastUpdated(prov.lastUpdated);
+                return (
+                  <div
+                    key={i}
+                    className="p-2.5 rounded-lg border bg-stone-50/70 border-stone-200 flex flex-col gap-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-xs text-stone-900">{prov.label}</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded font-bold border shrink-0 ${getBadgeStyle(
+                          prov.type
+                        )}`}
+                      >
+                        {getProvenanceLabel(prov.type)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-600">{prov.description}</p>
+                    {updatedStr && (
+                      <div className="text-[11px] text-stone-400 flex items-center gap-1 font-mono">
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>
+                          {t('Lần cuối cập nhật:', 'Last updated:')} {updatedStr}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-xs text-stone-600">{prov.description}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
-          {/* 3. Cơ sở nông học áp dụng */}
+          {/* 3. Agronomy rules */}
           <section className="space-y-2">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
               <BrainCircuit className="w-4 h-4 text-purple-600" />
-              <span>3. Quy tắc & Cơ sở Nông học Áp dụng</span>
+              <span>
+                {t('3. Quy tắc & Cơ sở Nông học Áp dụng', '3. Applied Agronomic Rules')}
+              </span>
             </div>
             <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-xl space-y-2 text-xs leading-relaxed text-stone-700">
               <p>
-                • <strong>Sinh vật học rễ:</strong> Trong điều kiện nhiệt độ dưới 20°C kết hợp đất ẩm cao, hoạt tính hút nước và khoáng của rễ cây con giảm 40-60%. Tưới thêm nước lúc này làm giảm lượng oxy hòa tan trong đất, dẫn đến ngạt rễ.
+                • <strong>{t('Sinh vật học rễ:', 'Root physiology:')}</strong>{' '}
+                {t(
+                  'Dưới 20°C kết hợp đất ẩm cao, rễ hấp thu khoáng chậm 40–60%. Tưới thêm lúc này làm giảm oxy hòa tan và dễ gây ngạt rễ.',
+                  'Below 20°C in wet soils, root nutrient uptake drops 40–60%. Extra irrigation reduces dissolved oxygen and risks root hypoxia.'
+                )}
               </p>
               <p>
-                • <strong>Vật lý đất {field.soilType}:</strong> Đất có kết cấu thoát nước {field.soilCharacteristics.drainage === 'slow' ? 'chậm' : 'nhanh'}, do đó các vệt nước mưa tích lũy không rút ngay mà đọng lại ở tầng mặt 0-10cm.
+                • <strong>{t(`Vật lý đất (${getSoilLabel(field.soilType, lang)}):`, `Soil physics (${getSoilLabel(field.soilType, lang)}):`)}</strong>{' '}
+                {t(
+                  `Mức thoát nước ${getDrainageLabel(field.soilCharacteristics.drainage, lang)} quyết định tốc độ rút ẩm tầng mặt 0–10 cm sau mưa.`,
+                  `Drainage (${getDrainageLabel(field.soilCharacteristics.drainage, lang)}) governs how fast surface water clears after rain.`
+                )}
               </p>
               <p>
-                • <strong>Nhu cầu dinh dưỡng:</strong> Đạm vô cơ (Urê) khi bón vào đất lạnh dễ bị bay hơi hoặc rửa trôi, đồng thời làm tế bào lá mỏng mềm, tạo cửa ngõ cho nấm bệnh xâm nhập khi độ ẩm không khí vượt 80%.
+                • <strong>{t('Tích hợp OCO-2, GRACE & GHGx:', 'OCO-2, GRACE & GHGx integration:')}</strong>{' '}
+                {t(
+                  'Khi đồng bộ dữ liệu môi trường, hệ thống kết hợp SIF quang hợp, mực nước ngầm và phát thải CH₄/N₂O để cân chỉnh tưới, đạm và luân canh.',
+                  'When synced, SIF photosynthesis, GRACE groundwater trends, and CH₄/N₂O fluxes refine irrigation, nitrogen timing, and rotation choices.'
+                )}
               </p>
             </div>
           </section>
 
-          {/* 4. Yếu tố còn chưa chắc chắn */}
+          {/* 4. Uncertainties */}
           <section className="space-y-2">
             <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
               <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <span>4. Những yếu tố còn chưa chắc chắn (Cần kiểm tra thực tế)</span>
+              <span>
+                {t(
+                  '4. Những yếu tố cần kiểm tra thực tế',
+                  '4. Uncertainties & Field Verification'
+                )}
+              </span>
             </div>
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
               {brief.uncertainties}
             </div>
           </section>
 
-          {/* 5. Điều kiện thay đổi khuyến nghị */}
+          {/* 5. Update Triggers */}
           <section className="space-y-2">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
               <RefreshCw className="w-4 h-4 text-emerald-600" />
-              <span>5. Khi nào AI sẽ thay đổi khuyến nghị?</span>
+              <span>
+                {t('5. Khi nào hệ thống sẽ cập nhật khuyến nghị?', '5. When Recommendations Update')}
+              </span>
             </div>
             <ul className="list-disc pl-5 text-xs space-y-1 text-stone-600">
-              <li>Nếu bạn nhấn <strong>"Đất thực tế vẫn khô"</strong>, AI sẽ điều chỉnh giả định thoát nước và đề xuất chế độ tưới bù.</li>
-              <li>Nếu nhiệt độ tăng trở lại trên 25°C và trời hửng nắng, hệ thống sẽ mở lại khuyến nghị bón thúc dinh dưỡng.</li>
-              <li>Nếu bạn đổi sang giống cây khác hoặc cây bước sang giai đoạn sinh trưởng mới.</li>
+              <li>
+                {t(
+                  'Khi bạn nhấn "Đất vẫn khô" hoặc "Đất quá ẩm", mô hình điều chỉnh độ nhạy tưới ngay lập tức.',
+                  'When you tap "Soil is dry" or "Soil too wet", irrigation sensitivity adjusts immediately.'
+                )}
+              </li>
+              <li>
+                {t(
+                  'Khi bạn bấm "Đồng bộ dữ liệu NASA", OCO-2/GRACE/GHGx/SMAP mới được đưa thẳng vào chẩn đoán.',
+                  'Clicking "Sync NASA Data" feeds fresh OCO-2, GRACE, GHGx, and SMAP telemetry straight into diagnostics.'
+                )}
+              </li>
             </ul>
           </section>
         </div>
@@ -174,7 +283,7 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
             onClick={onClose}
             className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-medium rounded-lg text-xs transition cursor-pointer"
           >
-            Đã hiểu cơ sở phân tích
+            {t('Đã hiểu cơ sở phân tích', 'Got it')}
           </button>
         </div>
       </div>

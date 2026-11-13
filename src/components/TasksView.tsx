@@ -10,6 +10,7 @@ import {
   Circle,
 } from 'lucide-react';
 import { FarmTask, FieldProfile } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TasksViewProps {
   tasks: FarmTask[];
@@ -26,21 +27,23 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onUpdateTaskStatus,
   onNavigateTab,
 }) => {
+  const { lang, t } = useLanguage();
   const [filterFieldId, setFilterFieldId] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [postponeTaskId, setPostponeTaskId] = useState<string | null>(null);
   const [postponeReason, setPostponeReason] = useState<string>('');
 
-  const filteredTasks = tasks.filter((t) => {
-    if (filterFieldId !== 'ALL' && t.fieldId !== filterFieldId) return false;
-    if (filterStatus === 'PENDING' && t.status !== 'pending' && t.status !== 'skipped') return false;
-    if (filterStatus === 'COMPLETED' && t.status !== 'completed') return false;
-    if (filterStatus === 'POSTPONED' && t.status !== 'postponed') return false;
+  const filteredTasks = tasks.filter((item) => {
+    if (filterFieldId !== 'ALL' && item.fieldId !== filterFieldId) return false;
+    if (filterStatus === 'PENDING' && item.status !== 'pending' && item.status !== 'skipped')
+      return false;
+    if (filterStatus === 'COMPLETED' && item.status !== 'completed') return false;
+    if (filterStatus === 'POSTPONED' && item.status !== 'postponed') return false;
     return true;
   });
 
   const getFieldName = (fieldId: string) => {
-    return fields.find((f) => f.id === fieldId)?.name || 'Thửa ruộng';
+    return fields.find((f) => f.id === fieldId)?.name || t('Thửa ruộng', 'Field');
   };
 
   const handlePostponeSubmit = (taskId: string) => {
@@ -48,12 +51,30 @@ export const TasksView: React.FC<TasksViewProps> = ({
       taskId,
       'postponed',
       postponeReason.trim()
-        ? `Tạm hoãn: ${postponeReason.trim()}`
-        : 'Nông dân chọn tạm hoãn để chờ điều kiện phù hợp'
+        ? `${t('Tạm hoãn:', 'Postponed:')} ${postponeReason.trim()}`
+        : t(
+            'Nông dân chọn tạm hoãn để chờ điều kiện phù hợp',
+            'Farmer postponed to wait for better field conditions'
+          )
     );
     setPostponeTaskId(null);
     setPostponeReason('');
   };
+
+  const quickPostponeReasons =
+    lang === 'en'
+      ? [
+          'Soil is still moist enough',
+          'Heavy rain prevents field entry',
+          'Waiting for labor or equipment tomorrow',
+          'Checking canal water level first',
+        ]
+      : [
+          'Đất thực tế vẫn đủ ẩm',
+          'Trời đang mưa to không ra đồng được',
+          'Chờ nhân công / máy móc ngày mai',
+          'Đợi kiểm tra lại mực nước kênh',
+        ];
 
   return (
     <div className="space-y-6">
@@ -62,13 +83,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
         <div>
           <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-4 h-4 text-emerald-600" />
-            Lịch công việc tự động thích ứng
+            {t('Lịch công việc tự động thích ứng', 'Adaptive Field Task Planner')}
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
-            Kế hoạch hành động theo điều kiện thực tế
+            {t('Kế hoạch hành động theo điều kiện thực tế', 'Weather & Soil Action Checklist')}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-            Không theo lịch cố định máy móc. Hệ thống tự điều chỉnh công việc khi có mưa lớn, khô hạn hoặc khi bạn cập nhật tình trạng đất.
+            {t(
+              'Hệ thống tự điều chỉnh công việc khi có mưa lớn, khô hạn hoặc khi bạn cập nhật tình trạng đất.',
+              'Tasks adapt automatically when heavy rain, dry spells, or your field feedback arrive.'
+            )}
           </p>
         </div>
 
@@ -77,7 +101,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             onClick={() => onNavigateTab('feedback')}
             className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold transition cursor-pointer"
           >
-            Cập nhật tình trạng ruộng
+            {t('Cập nhật tình trạng ruộng', 'Report Field Status')}
           </button>
         </div>
       </div>
@@ -86,14 +110,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
       <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-stone-400 font-semibold flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5" /> Lọc theo ruộng:
+            <Filter className="w-3.5 h-3.5" /> {t('Lọc theo ruộng:', 'Field:')}
           </span>
           <select
             value={filterFieldId}
             onChange={(e) => setFilterFieldId(e.target.value)}
             className="px-2.5 py-1.5 border border-stone-300 rounded-lg bg-stone-50 text-stone-800 font-medium"
           >
-            <option value="ALL">Tất cả thửa ruộng ({fields.length})</option>
+            <option value="ALL">
+              {t(`Tất cả thửa ruộng (${fields.length})`, `All fields (${fields.length})`)}
+            </option>
             {fields.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -101,13 +127,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
             ))}
           </select>
 
-          <span className="text-stone-400 font-semibold ml-2">Trạng thái:</span>
+          <span className="text-stone-400 font-semibold ml-2">{t('Trạng thái:', 'Status:')}</span>
           <div className="flex flex-wrap items-center gap-1">
             {[
-              { id: 'ALL', label: 'Tất cả' },
-              { id: 'PENDING', label: 'Chưa hoàn thành' },
-              { id: 'COMPLETED', label: 'Đã hoàn thành' },
-              { id: 'POSTPONED', label: 'Tạm hoãn' },
+              { id: 'ALL', label: t('Tất cả', 'All') },
+              { id: 'PENDING', label: t('Chưa hoàn thành', 'Pending') },
+              { id: 'COMPLETED', label: t('Đã hoàn thành', 'Completed') },
+              { id: 'POSTPONED', label: t('Tạm hoãn', 'Postponed') },
             ].map((st) => (
               <button
                 key={st.id}
@@ -125,7 +151,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
         </div>
 
         <div className="text-stone-500 font-medium text-xs">
-          Tổng cộng: <strong>{filteredTasks.length}</strong> nhiệm vụ
+          {t('Tổng cộng:', 'Total:')} <strong>{filteredTasks.length}</strong>{' '}
+          {t('nhiệm vụ', 'tasks')}
         </div>
       </div>
 
@@ -135,10 +162,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <div className="p-12 text-center bg-white rounded-2xl border border-stone-200 text-stone-500 space-y-2">
             <CalendarCheck className="w-10 h-10 mx-auto text-emerald-600 opacity-60" />
             <div className="font-bold text-stone-800 text-base">
-              Hiện không có công việc nào theo bộ lọc
+              {t('Hiện không có công việc nào theo bộ lọc', 'No tasks match your filter')}
             </div>
             <p className="text-xs text-stone-400">
-              Các nhiệm vụ sẽ tự động kích hoạt khi có thay đổi về thời tiết hoặc độ ẩm đất vùng rễ.
+              {t(
+                'Các nhiệm vụ sẽ tự động kích hoạt khi có thay đổi về thời tiết hoặc độ ẩm đất vùng rễ.',
+                'New tasks trigger automatically as weather or root-zone moisture changes.'
+              )}
             </p>
           </div>
         ) : (
@@ -174,12 +204,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
-                        Ưu tiên:{' '}
+                        {t('Ưu tiên:', 'Priority:')}{' '}
                         {task.priority === 'HIGH'
-                          ? 'Cao'
+                          ? t('Cao', 'High')
                           : task.priority === 'MEDIUM'
-                          ? 'Trung bình'
-                          : 'Thường'}
+                          ? t('Trung bình', 'Medium')
+                          : t('Thường', 'Low')}
                       </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -191,13 +221,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         }`}
                       >
                         {isCompleted
-                          ? 'Đã hoàn thành'
+                          ? t('Đã hoàn thành', 'Completed')
                           : isPostponed
-                          ? 'Đang tạm hoãn'
-                          : 'Chưa hoàn thành'}
+                          ? t('Đang tạm hoãn', 'Postponed')
+                          : t('Chưa hoàn thành', 'Pending')}
                       </span>
                       <span className="text-xs text-stone-400 flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Dự kiến: <strong>{task.scheduledTime}</strong>
+                        <Clock className="w-3 h-3" /> {t('Dự kiến:', 'Schedule:')}{' '}
+                        <strong>{task.scheduledTime}</strong>
                       </span>
                     </div>
 
@@ -215,17 +246,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
                     <div className="flex flex-wrap items-center gap-3 text-[11px] text-stone-400 font-mono pt-1">
                       <span>
-                        Dữ liệu kích hoạt: <strong>{task.triggerData}</strong>
+                        {t('Dữ liệu kích hoạt:', 'Trigger:')} <strong>{task.triggerData}</strong>
                       </span>
                       {task.farmerNote && (
                         <span className="text-amber-800 font-sans font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                          Ghi chú: {task.farmerNote}
+                          {t('Ghi chú:', 'Note:')} {task.farmerNote}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Action Buttons: Đã hoàn thành / Chưa hoàn thành / Tạm hoãn */}
+                  {/* Action Buttons */}
                   <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-stone-100">
                     <button
                       type="button"
@@ -236,7 +267,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           : 'bg-emerald-700 hover:bg-emerald-800 text-white'
                       }`}
                     >
-                      <CheckCircle2 className="w-4 h-4" /> Đã hoàn thành
+                      <CheckCircle2 className="w-4 h-4" /> {t('Đã hoàn thành', 'Done')}
                     </button>
 
                     <button
@@ -253,7 +284,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       ) : (
                         <RotateCcw className="w-3.5 h-3.5" />
                       )}
-                      Chưa hoàn thành
+                      {t('Chưa hoàn thành', 'Pending')}
                     </button>
 
                     <button
@@ -272,7 +303,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       }`}
                     >
                       <PauseCircle className="w-3.5 h-3.5" />
-                      {isPostponed ? 'Đang tạm hoãn' : 'Tạm hoãn'}
+                      {isPostponed ? t('Đang tạm hoãn', 'Postponed') : t('Tạm hoãn', 'Postpone')}
                     </button>
                   </div>
                 </div>
@@ -281,15 +312,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 {postponeTaskId === task.id && (
                   <div className="w-full p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs space-y-2">
                     <div className="font-bold text-stone-800">
-                      Chọn hoặc nhập lý do tạm hoãn công việc này (hệ thống sẽ ghi nhận theo thực tế ruộng):
+                      {t(
+                        'Chọn hoặc nhập lý do tạm hoãn công việc này:',
+                        'Select or enter a reason for postponing:'
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {[
-                        'Đất thực tế vẫn đủ ẩm',
-                        'Trời đang mưa to không ra đồng được',
-                        'Chờ nhân công / máy móc ngày mai',
-                        'Đợi kiểm tra lại mực nước kênh',
-                      ].map((r) => (
+                      {quickPostponeReasons.map((r) => (
                         <button
                           key={r}
                           type="button"
@@ -307,7 +336,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     <div className="flex items-center gap-2 pt-1">
                       <input
                         type="text"
-                        placeholder="Lý do tạm hoãn khác (tùy chọn)..."
+                        placeholder={t('Lý do tạm hoãn khác (tùy chọn)...', 'Other reason (optional)...')}
                         value={postponeReason}
                         onChange={(e) => setPostponeReason(e.target.value)}
                         className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-lg bg-white text-stone-900"
@@ -317,7 +346,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         onClick={() => handlePostponeSubmit(task.id)}
                         className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold cursor-pointer"
                       >
-                        Xác nhận tạm hoãn
+                        {t('Xác nhận tạm hoãn', 'Confirm')}
                       </button>
                       <button
                         type="button"
@@ -327,7 +356,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         }}
                         className="px-2.5 py-1.5 text-stone-500 hover:underline cursor-pointer"
                       >
-                        Hủy
+                        {t('Hủy', 'Cancel')}
                       </button>
                     </div>
                   </div>

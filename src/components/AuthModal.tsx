@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Sprout,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onUsernameSignIn,
   onUsernameSignUp,
 }) => {
+  const { t } = useLanguage();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -42,15 +44,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     const cleanUser = username.trim();
     if (cleanUser.length < 3) {
-      setError('Tên đăng nhập cần có ít nhất 3 ký tự (chữ cái, số, dấu chấm hoặc gạch dưới).');
+      setError(
+        t(
+          'Tên đăng nhập cần có ít nhất 3 ký tự (chữ cái, số, dấu chấm hoặc gạch dưới).',
+          'Username must be at least 3 characters (letters, numbers, dot, or underscore).'
+        )
+      );
       return;
     }
     if (password.length < 6) {
-      setError('Mật khẩu cần có ít nhất 6 ký tự.');
+      setError(t('Mật khẩu cần có ít nhất 6 ký tự.', 'Password must be at least 6 characters.'));
       return;
     }
     if (mode === 'signup' && password !== confirmPassword) {
-      setError('Mật khẩu nhập lại chưa khớp.');
+      setError(t('Mật khẩu nhập lại chưa khớp.', 'Passwords do not match.'));
       return;
     }
 
@@ -66,7 +73,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setConfirmPassword('');
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Không thể xác thực tài khoản. Vui lòng thử lại.');
+      setError(
+        err?.message ||
+          t('Không thể xác thực tài khoản. Vui lòng thử lại.', 'Authentication failed. Please try again.')
+      );
     } finally {
       setLoading(false);
     }
@@ -79,7 +89,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       await onGoogleSignIn();
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Không thể đăng nhập bằng Google lúc này.');
+      setError(
+        err?.message ||
+          t('Không thể đăng nhập bằng Google lúc này.', 'Unable to sign in with Google right now.')
+      );
     } finally {
       setGoogleLoading(false);
     }
@@ -96,10 +109,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold">
-                {mode === 'signin' ? 'Đăng nhập CropCast' : 'Tạo tài khoản CropCast'}
+                {mode === 'signin'
+                  ? t('Đăng nhập CropCast', 'Sign in to CropCast')
+                  : t('Tạo tài khoản CropCast', 'Create CropCast Account')}
               </h2>
               <p className="text-[11px] text-emerald-200">
-                Mỗi tài khoản lưu trữ riêng tư các thửa ruộng của bạn
+                {t(
+                  'Mỗi tài khoản lưu trữ riêng tư các thửa ruộng của bạn',
+                  'Each account privately stores your field profiles'
+                )}
               </p>
             </div>
           </div>
@@ -127,7 +145,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              <LogIn className="w-3.5 h-3.5" /> Đăng nhập
+              <LogIn className="w-3.5 h-3.5" /> {t('Đăng nhập', 'Sign In')}
             </button>
             <button
               type="button"
@@ -141,7 +159,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              <UserPlus className="w-3.5 h-3.5" /> Đăng ký mới
+              <UserPlus className="w-3.5 h-3.5" /> {t('Đăng ký mới', 'Sign Up')}
             </button>
           </div>
 
@@ -154,18 +172,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* Username + Password Form (No Email Required) */}
+          {/* Username + Password Form */}
           <form onSubmit={handleSubmit} className="space-y-3.5 text-xs sm:text-sm">
             <div>
               <label className="font-bold text-stone-800 block mb-1 text-xs">
-                Tên đăng nhập
+                {t('Tên đăng nhập', 'Username')}
               </label>
               <div className="relative">
                 <User className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   autoComplete="username"
-                  placeholder="VD: nongdan_hanoi hoặc an_thai_binh"
+                  placeholder={t('VD: nongdan_hanoi', 'e.g. farmer_hanoi')}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
@@ -175,13 +193,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="font-bold text-stone-800 block mb-1 text-xs">Mật khẩu</label>
+              <label className="font-bold text-stone-800 block mb-1 text-xs">
+                {t('Mật khẩu', 'Password')}
+              </label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="password"
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                  placeholder="Tối thiểu 6 ký tự"
+                  placeholder={t('Tối thiểu 6 ký tự', 'Minimum 6 characters')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
@@ -193,14 +213,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {mode === 'signup' && (
               <div>
                 <label className="font-bold text-stone-800 block mb-1 text-xs">
-                  Nhập lại mật khẩu
+                  {t('Nhập lại mật khẩu', 'Confirm password')}
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="password"
                     autoComplete="new-password"
-                    placeholder="Nhập lại mật khẩu"
+                    placeholder={t('Nhập lại mật khẩu', 'Re-enter password')}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2.5 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-sm"
@@ -216,14 +236,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-60 text-white font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {mode === 'signin' ? 'Đăng nhập bằng Tên đăng nhập' : 'Đăng ký ngay'}
+              {mode === 'signin'
+                ? t('Đăng nhập bằng Tên đăng nhập', 'Sign in with Username')
+                : t('Đăng ký ngay', 'Register Now')}
             </button>
           </form>
 
           <div className="relative flex items-center py-1">
             <div className="flex-grow border-t border-stone-200" />
             <span className="shrink mx-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">
-              hoặc
+              {t('hoặc', 'or')}
             </span>
             <div className="flex-grow border-t border-stone-200" />
           </div>
@@ -242,13 +264,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 G
               </span>
             )}
-            Tiếp tục với tài khoản Google
+            {t('Tiếp tục với tài khoản Google', 'Continue with Google')}
           </button>
 
           <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-[11px] text-stone-600 flex items-start gap-2 leading-relaxed">
             <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
             <p>
-              Dữ liệu thửa ruộng của mỗi tài khoản được bảo vệ riêng tư — chỉ người tạo ruộng hoặc người được bạn chia sẻ (bằng đường dẫn hoặc email) mới xem được.
+              {t(
+                'Dữ liệu thửa ruộng của mỗi tài khoản được bảo vệ riêng tư — chỉ người tạo ruộng hoặc người được bạn chia sẻ mới xem được.',
+                'Each field profile is private — only the creator or users you explicitly share with can access it.'
+              )}
             </p>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { parseJsonSafely } from './httpClient';
 import {
   arrayRemove,
   arrayUnion,
@@ -100,7 +101,7 @@ async function localApiFetch(path: string, options: RequestInit = {}) {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
+  const data = await parseJsonSafely<any>(res).catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || `Lỗi máy chủ (${res.status})`);
   }

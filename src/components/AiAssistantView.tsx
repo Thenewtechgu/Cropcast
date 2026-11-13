@@ -1,17 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Bot,
-  Send,
-  User,
-  Sparkles,
-  HelpCircle,
-  Loader2,
-  RefreshCw,
-  Info,
-} from 'lucide-react';
+import { Bot, Send, User, Loader2, RefreshCw } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
 import { GeminiService } from '../services/geminiService';
 import { getSoilLabel } from '../services/agronomyEngine';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface AiAssistantViewProps {
   activeField: FieldProfile;
@@ -27,11 +19,16 @@ interface ChatMessage {
 }
 
 export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, weather }) => {
+  const { lang, t } = useLanguage();
+
   const buildGreeting = (field: FieldProfile): ChatMessage => ({
-    id: `msg-0-${field.id}`,
+    id: `msg-0-${field.id}-${lang}`,
     sender: 'ai',
-    text: `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province}. Hôm nay ruộng đang có nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tôi giải đáp hoặc tính toán điều gì cho ruộng hôm nay?`,
-    timestamp: '07:00',
+    text: t(
+      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu NASA POWER, OCO-2, GRACE và GHGx. Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
+      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${field.crop.name}, ${field.crop.variety}) in ${field.province} using NASA POWER, OCO-2, GRACE-FO, and GHGx data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+    ),
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
 
   const [messages, setMessages] = useState<ChatMessage[]>([buildGreeting(activeField)]);
@@ -43,14 +40,22 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
   useEffect(() => {
     setMessages([buildGreeting(activeField)]);
     setLastFailedPrompt(null);
-  }, [activeField.id]);
+  }, [activeField.id, lang]);
 
-  const quickPrompts = [
-    `Đất ruộng của tôi là ${getSoilLabel(activeField.soilType)}, hôm nay có nên tưới thêm không?`,
-    `Với nhiệt độ ${weather.temp}°C và ẩm ${weather.humidity}%, có nguy cơ nấm bệnh gì?`,
-    `Khi nào là thời điểm thích hợp nhất để bón phân đợt tới?`,
-    `Dữ liệu khí hậu 21 năm tại đây có hay gặp đợt rét/hạn vào thời điểm này không?`,
-  ];
+  const quickPrompts =
+    lang === 'en'
+      ? [
+          `My soil is ${getSoilLabel(activeField.soilType, 'en')}; should I irrigate today?`,
+          `With ${weather.temp}°C and ${weather.humidity}% humidity, what disease risks exist?`,
+          `How do my OCO-2, GRACE, and GHGx readings guide my next crop rotation?`,
+          `Does the 21-year climate history show cold or drought risk right now?`,
+        ]
+      : [
+          `Đất ruộng của tôi là ${getSoilLabel(activeField.soilType, 'vi')}, hôm nay có nên tưới thêm không?`,
+          `Với nhiệt độ ${weather.temp}°C và ẩm ${weather.humidity}%, có nguy cơ nấm bệnh gì?`,
+          `Chỉ số OCO-2, GRACE và GHGx của ruộng gợi ý điều chỉnh phân bón và luân canh thế nào?`,
+          `Dữ liệu khí hậu 21 năm tại đây có hay gặp đợt rét/hạn vào thời điểm này không?`,
+        ];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,7 +91,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         textToSend,
         activeField,
         currentHistory,
-        weather
+        weather,
+        lang
       );
 
       if (isError) {
@@ -117,18 +123,27 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         <div>
           <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
             <Bot className="w-4 h-4 text-emerald-600" />
-            Hội thoại Trực tiếp với Gemini AI Chuyên gia Nông học
+            {t(
+              'Hội thoại Trực tiếp với Gemini AI Chuyên gia Nông học',
+              'Direct Chat with CropCast Agronomy AI'
+            )}
           </div>
           <h1 className="text-xl font-bold text-stone-900 mt-1">
-            Trợ lý Canh tác Riêng cho Thửa ruộng: {activeField.name}
+            {t(
+              `Trợ lý Canh tác Riêng cho Thửa ruộng: ${activeField.name}`,
+              `Field Assistant: ${activeField.name}`
+            )}
           </h1>
           <p className="text-xs text-stone-500">
-            AI ghi nhớ lịch sử đất, giống cây và đối chiếu dữ liệu viễn thám NASA POWER để tư vấn sát thực tế nhất.
+            {t(
+              'AI kết hợp hồ sơ đất, giống cây với dữ liệu vệ tinh NASA POWER, OCO-2, GRACE, GHGx & SMAP.',
+              'Combines your soil & crop profile with NASA POWER, OCO-2, GRACE-FO, GHGx, and SMAP telemetry.'
+            )}
           </p>
         </div>
 
         <div className="text-xs bg-emerald-50 text-emerald-900 font-semibold px-3 py-1.5 rounded-xl border border-emerald-200 self-start sm:self-auto">
-          Cây: {activeField.crop.name} • {activeField.crop.currentStage}
+          {t('Cây:', 'Crop:')} {activeField.crop.name} • {activeField.crop.currentStage}
         </div>
       </div>
 
@@ -136,7 +151,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
       <div className="bg-white rounded-2xl border border-stone-200 shadow-xs flex flex-col h-[520px] overflow-hidden">
         {/* Messages Scroll Area */}
         <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4 text-xs sm:text-sm">
-          {messages.map(msg => {
+          {messages.map((msg) => {
             const isAi = msg.sender === 'ai';
             return (
               <div
@@ -178,7 +193,12 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           {isLoading && (
             <div className="flex items-center gap-2 text-stone-500 text-xs italic pl-11">
               <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-              <span>AI đang phân tích dữ liệu đất & thời tiết NASA...</span>
+              <span>
+                {t(
+                  'AI đang phân tích dữ liệu đất & vệ tinh NASA...',
+                  'Analyzing soil & NASA satellite telemetry...'
+                )}
+              </span>
             </div>
           )}
 
@@ -189,7 +209,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
                 onClick={() => handleSendMessage(lastFailedPrompt)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold cursor-pointer transition"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Thử gửi lại câu hỏi vừa rồi
+                <RefreshCw className="w-3.5 h-3.5" />{' '}
+                {t('Thử gửi lại câu hỏi vừa rồi', 'Retry last question')}
               </button>
             </div>
           )}
@@ -197,9 +218,11 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Suggestion Chips (Wrapped cleanly so all 4 sample questions are visible & clickable) */}
+        {/* Quick Suggestion Chips */}
         <div className="px-4 py-2.5 bg-stone-50 border-t border-stone-100 space-y-1.5 text-[11px]">
-          <div className="text-stone-500 font-semibold">Câu hỏi gợi ý nhanh (nhấn để hỏi ngay):</div>
+          <div className="text-stone-500 font-semibold">
+            {t('Câu hỏi gợi ý nhanh (nhấn để hỏi ngay):', 'Quick prompts (tap to ask):')}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {quickPrompts.map((p, idx) => (
               <button
@@ -219,10 +242,13 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         <div className="p-3 bg-white border-t border-stone-200 flex items-center gap-2">
           <input
             type="text"
-            placeholder="Hỏi trợ lý AI về đất, nước, bón phân hay thời tiết hôm nay..."
+            placeholder={t(
+              'Hỏi trợ lý AI về đất, nước, OCO-2/GRACE/GHGx, bón phân hay thời tiết...',
+              'Ask AI about soil, irrigation, OCO-2/GRACE/GHGx, fertilizer, or weather...'
+            )}
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
             className="flex-1 px-4 py-2.5 border border-stone-300 rounded-xl text-stone-900 text-xs sm:text-sm focus:outline-emerald-600"
           />
           <button
@@ -230,7 +256,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
             disabled={!inputText.trim() || isLoading}
             className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
           >
-            <Send className="w-4 h-4" /> Gửi
+            <Send className="w-4 h-4" /> {t('Gửi', 'Send')}
           </button>
         </div>
       </div>

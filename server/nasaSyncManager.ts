@@ -220,7 +220,9 @@ export async function executeNasaPowerSync(cellIds?: string[]): Promise<SyncLogR
         let dataPoints: Array<{ date: string; indicator: string; value: number }> = [];
 
         if (resp && resp.ok) {
-          const json = await resp.json();
+          const rawText = await resp.text();
+          const trimmed = rawText.trim();
+          const json = trimmed && !trimmed.startsWith('<') ? JSON.parse(trimmed) : null;
           const params = json?.properties?.parameter || {};
           for (const ind of indicators) {
             const indValues = params[ind] || {};

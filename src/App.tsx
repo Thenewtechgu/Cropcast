@@ -26,8 +26,10 @@ import {
   FarmTask,
   FeedbackRecord,
   FeedbackType,
+  EarthEnvironmentSnapshot,
 } from './types';
 import { Sprout, ShieldCheck, Plus, MapPin, LogIn, CheckCircle2, Layers, CalendarCheck, History, RefreshCw, CalendarDays, BarChart3 } from 'lucide-react';
+import { useLanguage } from './contexts/LanguageContext';
 
 const TAB_TO_PATH: Record<string, string> = {
   home: '/',
@@ -64,6 +66,7 @@ function resolveTabFromPathname(pathname: string): string {
 const ACTIVE_FIELD_STORAGE_KEY = 'cropcast_active_field_id';
 
 export default function App() {
+  const { lang, t } = useLanguage();
   const [activeTab, setActiveTabState] = useState<string>(() => {
     try {
       return resolveTabFromPathname(window.location.pathname);
@@ -326,7 +329,7 @@ export default function App() {
   const activeField = fields.find((f) => f.id === activeFieldId) || fields[0];
 
   const ruleBrief: DailyAgronomicBrief | null = activeField
-    ? analyzeFieldAgronomy(activeField, weather, feedbackHistory)
+    ? analyzeFieldAgronomy(activeField, weather, feedbackHistory, lang)
     : null;
 
   const handleGoogleSignIn = async () => {
@@ -545,6 +548,23 @@ export default function App() {
     await FirestoreService.updateField(updated);
   };
 
+  const handleSaveEarthMetrics = async (snapshot: EarthEnvironmentSnapshot) => {
+    if (!activeField || !authUser || activeField.isSharedWithMe) return;
+    const updated: FieldProfile = {
+      ...activeField,
+      adaptiveMemory: {
+        ...activeField.adaptiveMemory,
+        earthMetrics: snapshot,
+      },
+    };
+    if (authUser.authMode === 'local_server') {
+      await LocalServerStorage.updateField(updated);
+      await refreshLocalServerState();
+      return;
+    }
+    await FirestoreService.updateField(updated);
+  };
+
   const renderMissingFieldPrompt = () => (
     <div className="bg-white rounded-2xl border border-stone-200 p-8 text-center space-y-4 shadow-xs max-w-2xl mx-auto">
       <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
@@ -552,13 +572,19 @@ export default function App() {
       </div>
       <h2 className="text-lg font-bold text-stone-900">
         {authUser
-          ? 'Bạn chưa lưu thửa ruộng nào trong tài khoản'
-          : 'Đăng nhập để xem & tạo thửa ruộng riêng của bạn'}
+          ? t('Bạn chưa lưu thửa ruộng nào trong tài khoản', 'No fields saved in your account yet')
+          : t('Đăng nhập để xem & tạo thửa ruộng riêng của bạn', 'Sign in to view & create your private fields')}
       </h2>
       <p className="text-xs sm:text-sm text-stone-500">
         {authUser
-          ? 'Hãy tạo hồ sơ thửa ruộng đầu tiên kèm vị trí GPS / bản đồ vệ tinh và họ hạt giống để xem phân tích thời tiết, lịch gieo trồng và phương án luân canh.'
-          : 'Mỗi thửa ruộng thuộc quyền riêng tư của người tạo — CropCast không hiển thị thửa ruộng công khai hay dữ liệu mẫu khi chưa đăng nhập.'}
+          ? t(
+              'Hãy tạo hồ sơ thửa ruộng đầu tiên kèm vị trí GPS / bản đồ vệ tinh và họ hạt giống để xem phân tích thời tiết, lịch gieo trồng và phương án luân canh.',
+              'Create your first field profile with GPS / satellite location and seed family to unlock weather diagnostics, planting calendar, and rotation plans.'
+            )
+          : t(
+              'Mỗi thửa ruộng thuộc quyền riêng tư của người tạo — CropCast không hiển thị thửa ruộng công khai hay dữ liệu mẫu khi chưa đăng nhập.',
+              'Each field is private to its creator — CropCast does not expose public or sample farms before login.'
+            )}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3">
         {authUser ? (
@@ -569,14 +595,14 @@ export default function App() {
             }}
             className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
           >
-            <Plus className="w-4 h-4" /> Tạo thửa ruộng mới ngay
+            <Plus className="w-4 h-4" /> {t('Tạo thửa ruộng mới ngay', 'Create new field now')}
           </button>
         ) : (
           <button
             onClick={() => setAuthModalOpen(true)}
             className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
           >
-            <LogIn className="w-4 h-4" /> Đăng nhập / Tạo tài khoản ngay
+            <LogIn className="w-4 h-4" /> {t('Đăng nhập / Tạo tài khoản ngay', 'Sign In / Sign Up')}
           </button>
         )}
       </div>
@@ -588,7 +614,7 @@ export default function App() {
       <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
         <div className="text-center space-y-2">
           <Sprout className="w-10 h-10 text-emerald-600 animate-spin mx-auto" />
-          <div className="font-bold text-stone-800">Đang khởi tạo CropCast...</div>
+          <div className="font-bold text-stone-800">{t('Đang khởi tạo CropCast...', 'Initializing CropCast...')}</div>
         </div>
       </div>
     );
@@ -657,9 +683,16 @@ export default function App() {
         {!authUser?.isAdmin && ['dashboard', 'tasks', 'feedback'].includes(activeTab) && (
           <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex flex-wrap items-center gap-1.5">
             {[
-              { id: 'dashboard', label: 'Hôm nay & Quyết định', icon: Layers },
-              { id: 'tasks', label: `Việc cần làm (${tasks.filter(t => t.status === 'pending' || t.status === 'skipped').length})`, icon: CalendarCheck },
-              { id: 'feedback', label: 'Phản hồi thực địa', icon: History },
+              { id: 'dashboard', label: t('Hôm nay & Quyết định', 'Today & Decisions'), icon: Layers },
+              {
+                id: 'tasks',
+                label: t(
+                  `Việc cần làm (${tasks.filter(tk => tk.status === 'pending' || tk.status === 'skipped').length})`,
+                  `Tasks (${tasks.filter(tk => tk.status === 'pending' || tk.status === 'skipped').length})`
+                ),
+                icon: CalendarCheck,
+              },
+              { id: 'feedback', label: t('Phản hồi thực địa', 'Field Feedback'), icon: History },
             ].map((sub) => {
               const Icon = sub.icon;
               const isSubActive = activeTab === sub.id;
@@ -686,9 +719,9 @@ export default function App() {
         {!authUser?.isAdmin && ['rotation', 'calendar', 'analytics'].includes(activeTab) && (
           <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex flex-wrap items-center gap-1.5">
             {[
-              { id: 'rotation', label: 'Luân canh tối ưu', icon: RefreshCw },
-              { id: 'calendar', label: 'Lịch gieo trồng 12 tháng', icon: CalendarDays },
-              { id: 'analytics', label: 'Bản đồ & Biểu đồ khí hậu', icon: BarChart3 },
+              { id: 'rotation', label: t('Luân canh tối ưu', 'Optimal Rotation'), icon: RefreshCw },
+              { id: 'calendar', label: t('Lịch gieo trồng 12 tháng', '12-Month Calendar'), icon: CalendarDays },
+              { id: 'analytics', label: t('Bản đồ & Biểu đồ khí hậu', 'Climate Map & Charts'), icon: BarChart3 },
             ].map((sub) => {
               const Icon = sub.icon;
               const isSubActive = activeTab === sub.id;
@@ -743,6 +776,7 @@ export default function App() {
               onNavigateTab={navigateToTab}
               onSendFeedback={handleInstantFeedback}
               onTaskCompleted={() => {}}
+              onSaveEarthMetrics={handleSaveEarthMetrics}
             />
           ) : (
             renderMissingFieldPrompt()
@@ -872,22 +906,16 @@ export default function App() {
         onUsernameSignUp={handleUsernameSignUp}
       />
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-stone-200 py-6 px-4 text-xs text-stone-500 mt-12">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-emerald-700 text-white flex items-center justify-center font-bold text-xs">
-              <Sprout className="w-3.5 h-3.5" />
-            </div>
-            <span className="font-bold text-stone-800">CropCast</span>
-            <span>— Công cụ hỗ trợ quyết định luân canh &amp; chăm sóc cây trồng</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4 text-stone-600">
-            <span className="flex items-center gap-1 text-emerald-800 font-semibold">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Dữ liệu ruộng bảo mật riêng tư · Hỗ trợ tham khảo thực địa
-            </span>
-          </div>
+      {/* Minimal Footer */}
+      <footer className="bg-white border-t border-stone-200 py-5 px-4 text-xs text-stone-500 mt-10">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span className="font-semibold text-stone-700">CropCast</span>
+          <span>
+            {t(
+              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu vệ tinh NASA',
+              'Sustainable farming & crop rotation powered by NASA Earth data'
+            )}
+          </span>
         </div>
       </footer>
     </div>

@@ -138,12 +138,15 @@ const chatResponseCache = new Map<string, { reply: string; expiresAt: number }>(
 function buildLocalAgronomyReply(
   userMessage: string,
   field: any,
-  weather: any
+  weather: any,
+  earthMetrics?: any,
+  language: 'vi' | 'en' = 'vi'
 ): string {
   const q = userMessage.toLowerCase();
-  const fieldName = field?.name || 'thửa ruộng của bạn';
-  const cropName = field?.crop?.name || 'cây trồng hiện tại';
-  const stageName = field?.crop?.currentStage || 'đang sinh trưởng';
+  const isEn = language === 'en';
+  const fieldName = field?.name || (isEn ? 'your field' : 'thửa ruộng của bạn');
+  const cropName = field?.crop?.name || (isEn ? 'current crop' : 'cây trồng hiện tại');
+  const stageName = field?.crop?.currentStage || (isEn ? 'growing stage' : 'đang sinh trưởng');
   const soilLabel = String(field?.soilType || 'loam');
   const drainage = field?.soilCharacteristics?.drainage || 'moderate';
   const temp = Number(weather?.temp ?? 26);
@@ -154,22 +157,55 @@ function buildLocalAgronomyReply(
   const histAvgTemp = Number(weather?.historicalBaseline?.avgTemp ?? 26);
   const histAvgRain = Number(weather?.historicalBaseline?.avgRain ?? 120);
 
-  if (q.includes('tưới') || q.includes('đất') || q.includes('ẩm') || q.includes('nước')) {
+  const grace = earthMetrics?.groundwaterAnomalyGrace;
+  const oco2 = earthMetrics?.carbonFluxOco2;
+  const ghg = earthMetrics?.greenhouseGasEdgar;
+
+  const graceNoteVi = grace
+    ? `• Nước ngầm (GRACE): **${grace.lweThicknessCm >= 0 ? '+' : ''}${grace.lweThicknessCm} cm LWE** (${grace.groundwaterStatus === 'depleting' ? 'đang suy giảm, cần tiết kiệm nước' : grace.groundwaterStatus === 'recharging' ? 'đang phục hồi tốt' : 'ổn định'}).`
+    : '';
+  const graceNoteEn = grace
+    ? `• Groundwater (GRACE): **${grace.lweThicknessCm >= 0 ? '+' : ''}${grace.lweThicknessCm} cm LWE** (${grace.groundwaterStatus}).`
+    : '';
+
+  if (q.includes('tưới') || q.includes('đất') || q.includes('ẩm') || q.includes('nước') || q.includes('irrigat') || q.includes('water') || q.includes('soil')) {
     const shouldWater = rootPct < 45 && rain < 3;
     const tooWet = rootPct > 78 || rain >= 10;
+    if (isEn) {
+      return [
+        `• **Irrigation assessment for "${fieldName}" (${cropName} — ${stageName}):**`,
+        `• Root-zone moisture: **${rootPct}%** (surface **${topPct}%**), rainfall **${rain} mm**.`,
+        graceNoteEn,
+        tooWet
+          ? `• **Recommendation: POSTPONE IRRIGATION** and clear drainage furrows because root zone is already saturated (${rootPct}%).`
+          : shouldWater
+          ? `• **Recommendation: APPLY LIGHT IRRIGATION** early morning or late afternoon (${soilLabel}, ${drainage} drainage).`
+          : `• **Recommendation: HOLD IRRIGATION**, monitor top 0–5 cm soil tomorrow morning.`,
+      ].filter(Boolean).join('\n');
+    }
     return [
       `• **Đánh giá tưới cho "${fieldName}" (${cropName} — ${stageName}):**`,
       `• Độ ẩm vùng rễ hiện khoảng **${rootPct}%** (tầng mặt **${topPct}%**), lượng mưa ghi nhận **${rain} mm**.`,
+      graceNoteVi,
       tooWet
         ? `• **Khuyến nghị: TẠM HOÃN TƯỚI** và ưu tiên khơi thông rãnh thoát nước, vì vùng rễ đã đủ/dư ẩm (${rootPct}%), nhất là khi đất thoát nước ${drainage === 'slow' ? 'chậm (dễ bí rễ)' : 'vừa'}.`
         : shouldWater
         ? `• **Khuyến nghị: NÊN TƯỚI BỔ SUNG NHẸ** vào sáng sớm hoặc chiều mát (đất ${soilLabel} thoát ${drainage === 'fast' ? 'nhanh, chia 2 lần tưới ngắn' : 'vừa phải'}).`
         : `• **Khuyến nghị: CHƯA CẦN TƯỚI THÊM**, giữ ẩm hiện tại và kiểm tra lại đất tầng 0–5 cm vào sáng mai.`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
-  if (q.includes('nấm') || q.includes('bệnh') || q.includes('sâu') || q.includes('nhiệt độ')) {
+  if (q.includes('nấm') || q.includes('bệnh') || q.includes('sâu') || q.includes('nhiệt độ') || q.includes('pest') || q.includes('fung') || q.includes('disease')) {
     const highFungalRisk = humidity >= 83 || (temp <= 22 && humidity >= 80);
+    if (isEn) {
+      return [
+        `• **Pest & disease risk at "${fieldName}" (${cropName}):**`,
+        `• Temperature **${temp}°C**, air humidity **${humidity}%**, rain **${rain} mm**.`,
+        highFungalRisk
+          ? `• **Alert: Moderate–High risk** — Humidity >83% favors leaf wetness and fungal pressure. Inspect lower leaves early morning and avoid excess nitrogen.`
+          : `• **Risk level: Low–Moderate** — Air circulation is favorable (${humidity}%). Scout fields every 2–3 days.`,
+      ].join('\n');
+    }
     return [
       `• **Đánh giá nguy cơ sâu bệnh tại "${fieldName}" (${cropName}):**`,
       `• Hiện tại nhiệt độ **${temp}°C**, độ ẩm không khí **${humidity}%**, mưa **${rain} mm**.`,
@@ -179,36 +215,76 @@ function buildLocalAgronomyReply(
     ].join('\n');
   }
 
-  if (q.includes('bón') || q.includes('phân') || q.includes('đạm') || q.includes('kali')) {
+  if (q.includes('bón') || q.includes('phân') || q.includes('đạm') || q.includes('kali') || q.includes('fertiliz') || q.includes('carbon') || q.includes('phát thải') || q.includes('emission')) {
     const badForFert = rain > 12 || topPct > 85 || temp >= 35;
+    if (isEn) {
+      return [
+        `• **Nutrient & emissions guidance for "${fieldName}" (${cropName} — ${stageName}):**`,
+        ghg
+          ? `• **GHGx/EDGAR:** Estimated **${ghg.co2eqTonHa} t CO₂e/ha** (CH₄ ${ghg.ch4KgHa} kg/ha, N₂O ${ghg.n2oKgHa} kg/ha). Split nitrogen applications or rotate legumes to reduce N₂O leaching.`
+          : '',
+        oco2
+          ? `• **OCO-2 SIF:** Photosynthesis index **${oco2.sifWm2SrUm}** (${oco2.carbonUptakeTonHaYr} t CO₂/ha uptake).`
+          : '',
+        badForFert
+          ? `• **Postpone fertilizer today** due to rain (${rain} mm) or saturated surface soil (${topPct}%).`
+          : `• **Safe window:** Apply split top-dressing early morning (06:00–08:30) or late afternoon while root moisture is **${rootPct}%**.`,
+      ].filter(Boolean).join('\n');
+    }
     return [
-      `• **Thời điểm bón phân cho "${fieldName}" (${cropName} — giai đoạn ${stageName}):**`,
+      `• **Thời điểm bón phân & cân bằng phát thải cho "${fieldName}" (${cropName} — giai đoạn ${stageName}):**`,
+      ghg
+        ? `• **GHGx/EDGAR:** Phát thải ước tính **${ghg.co2eqTonHa} tấn CO₂e/ha** (CH₄ ${ghg.ch4KgHa} kg/ha, N₂O ${ghg.n2oKgHa} kg/ha). Tránh bón dư đạm vô cơ để giảm thất thoát N₂O.`
+        : '',
+      oco2
+        ? `• **NASA OCO-2:** Chỉ số quang hợp SIF **${oco2.sifWm2SrUm}** (hấp thụ **${oco2.carbonUptakeTonHaYr} tấn CO₂/ha**).`
+        : '',
       badForFert
-        ? `• **Chưa nên bón ngay hôm nay** vì mưa (${rain} mm) hoặc đất tầng mặt quá bão hòa (${topPct}%) dễ rửa trôi phân bón.`
-        : `• **Có thể bón thúc nhẹ vào sáng sớm (06:00–08:30) hoặc chiều mát (sau 16:00)** khi trời không mưa to, độ ẩm rễ đang ở mức **${rootPct}%** giúp rễ hấp thu ổn định.`,
-      `• Chia nhỏ lượng phân (đặc biệt với đất thoát nhanh), ưu tiên kết hợp phân hữu cơ hoai mục hoặc lân/kali theo đúng giai đoạn sinh trưởng.`,
-    ].join('\n');
+        ? `• **Chưa nên bón ngay hôm nay** vì mưa (${rain} mm) hoặc đất tầng mặt quá bão hòa (${topPct}%) dễ rửa trôi phân bón và tăng phát thải N₂O.`
+        : `• **Có thể bón thúc nhẹ vào sáng sớm (06:00–08:30) hoặc chiều mát (sau 16:00)** khi trời không mưa to, độ ẩm rễ đang ở mức **${rootPct}%**.`,
+      `• Chia nhỏ lượng phân (đặc biệt với đất thoát nhanh), ưu tiên kết hợp phân hữu cơ hoai mục hoặc luân canh họ Đậu.`,
+    ].filter(Boolean).join('\n');
   }
 
-  if (q.includes('21 năm') || q.includes('rét') || q.includes('hạn') || q.includes('lịch sử') || q.includes('khí hậu')) {
+  if (q.includes('21 năm') || q.includes('rét') || q.includes('hạn') || q.includes('lịch sử') || q.includes('khí hậu') || q.includes('climate') || q.includes('21-year') || q.includes('drought')) {
     const diff = (temp - histAvgTemp).toFixed(1);
+    if (isEn) {
+      return [
+        `• **21-year NASA POWER baseline (2005–2025) for "${fieldName}":**`,
+        `• Historical avg temp: **${histAvgTemp}°C**, current: **${temp}°C** (${Number(diff) >= 0 ? `+${diff}` : diff}°C anomaly); baseline rainfall **${histAvgRain} mm/month**.`,
+        graceNoteEn,
+      ].filter(Boolean).join('\n');
+    }
     return [
       `• **Đối chiếu chuỗi khí hậu NASA 21 năm (2005–2025) tại khu vực "${fieldName}":**`,
       `• Nhiệt độ trung bình lịch sử cùng kỳ là **${histAvgTemp}°C**, hiện tại **${temp}°C** (${Number(diff) >= 0 ? `+${diff}` : diff}°C so với nền 21 năm); lượng mưa nền khoảng **${histAvgRain} mm/tháng**.`,
+      graceNoteVi,
       temp < 19
-        ? `• Vùng này có nguy cơ gặp **đợt rét đậm/lạnh ẩm**, bà con cần giữ mực nước nông (với lúa) hoặc tủ gốc/che phủ hữu cơ cho rau màu.`
+        ? `• Vùng này có nguy cơ gặp **đợt rét đậm/lạnh ẩm**, cần giữ mực nước nông (với lúa) hoặc tủ gốc hữu cơ cho rau màu.`
         : rootPct < 45
-        ? `• Giai đoạn này dễ hụt ẩm nhẹ nếu mưa xuống muộn; nên áp dụng che phủ rơm rạ/tưới tiết kiệm và cân nhắc luân canh cây họ Đậu sau vụ này để giữ ẩm đất.`
-        : `• Nhiệt độ và độ ẩm đang nằm gần ngưỡng trung bình nhiều năm; tiếp tục theo dõi mưa/nắng theo từng tuần để điều chỉnh lịch tưới và luân canh phù hợp.`,
-    ].join('\n');
+        ? `• Giai đoạn này dễ hụt ẩm nhẹ nếu mưa xuống muộn; nên áp dụng che phủ rơm rạ/tưới tiết kiệm và cân nhắc luân canh cây họ Đậu sau vụ này.`
+        : `• Nhiệt độ và độ ẩm đang nằm gần ngưỡng trung bình nhiều năm; tiếp tục theo dõi mưa/nắng theo từng tuần.`,
+    ].filter(Boolean).join('\n');
+  }
+
+  if (isEn) {
+    return [
+      `• **Field summary for "${fieldName}" (${cropName} — ${stageName}):**`,
+      `• Conditions: Temp **${temp}°C**, Rain **${rain} mm**, Humidity **${humidity}%**, Root moisture **${rootPct}%**.`,
+      graceNoteEn,
+      oco2 ? `• OCO-2 Carbon uptake: **${oco2.carbonUptakeTonHaYr} t CO₂/ha** (SIF ${oco2.sifWm2SrUm}).` : '',
+      ghg ? `• GHGx/EDGAR Emissions: **${ghg.co2eqTonHa} t CO₂e/ha**.` : '',
+    ].filter(Boolean).join('\n');
   }
 
   return [
     `• **Tư vấn nhanh cho "${fieldName}" (${cropName} — ${stageName}):**`,
     `• Thông số hiện tại: Nhiệt độ **${temp}°C**, mưa **${rain} mm**, ẩm không khí **${humidity}%**, ẩm vùng rễ **${rootPct}%**.`,
+    graceNoteVi,
+    oco2 ? `• OCO-2 hấp thụ Carbon: **${oco2.carbonUptakeTonHaYr} tấn CO₂/ha** (SIF ${oco2.sifWm2SrUm}).` : '',
+    ghg ? `• GHGx/EDGAR phát thải: **${ghg.co2eqTonHa} tấn CO₂e/ha**.` : '',
     `• ${rootPct > 78 ? 'Đất đang khá ẩm, ưu tiên thoát nước đầu bờ và tạm hoãn tưới.' : rootPct < 42 ? 'Đất hơi khô, kiểm tra độ ẩm 0–5 cm để tưới bổ sung vào chiều mát.' : 'Độ ẩm đất tương đối cân bằng, duy trì chăm sóc và theo dõi mặt dưới lá.'}`,
-    `• Bác có thể mở thêm mục **Lịch gieo trồng** hoặc **Luân canh tối ưu** để xem bảng chi tiết 12 tháng cho thửa ruộng này.`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function extractGeminiText(response: any): string {
@@ -254,77 +330,68 @@ app.get('/api/nasa/indicators', (_req: Request, res: Response) => {
 // Gemini AI Advisor endpoint
 app.post('/api/gemini/advisor', async (req: Request, res: Response) => {
   try {
-    const { field, weather, ruleAnalysis, feedbackHistory } = req.body;
+    const { field, weather, ruleAnalysis, feedbackHistory, earthMetrics, language } = req.body;
+    const isEn = language === 'en';
+    const earth = earthMetrics || field?.adaptiveMemory?.earthMetrics;
 
     const ai = getGeminiClient();
     if (!ai) {
       return res.status(200).json({
         success: false,
         fallback: true,
-        message: 'Khóa API Gemini chưa được cấu hình. Hệ thống sử dụng Bộ quy tắc nông học chuyên gia để phân tích cục bộ.',
+        message: isEn
+          ? 'Gemini API key not configured. Using local agronomic engine.'
+          : 'Khóa API Gemini chưa được cấu hình. Hệ thống sử dụng Bộ quy tắc nông học chuyên gia để phân tích cục bộ.',
         advice: null,
       });
     }
 
-    const cropName = field?.crop?.name || field?.cropName || 'Cây trồng';
-    const variety = field?.crop?.variety || field?.variety || 'Chuẩn';
-    const stageName = field?.crop?.currentStage || field?.stageName || 'Sinh trưởng';
-    const waterSrc = typeof field?.waterSource === 'string' ? field.waterSource : field?.waterSource?.type || 'Nước kênh/ao';
-    const waterNotes = field?.waterSource?.notes || field?.waterNotes || 'Bình thường';
+    const cropName = field?.crop?.name || field?.cropName || 'Crop';
+    const variety = field?.crop?.variety || field?.variety || 'Standard';
+    const stageName = field?.crop?.currentStage || field?.stageName || 'Growing';
+    const waterSrc = typeof field?.waterSource === 'string' ? field.waterSource : field?.waterSource?.type || 'River/pond';
+    const waterNotes = field?.waterSource?.notes || field?.waterNotes || 'Normal';
+
+    const earthSection = earth
+      ? `
+Dữ liệu vệ tinh môi trường đa nguồn vừa đồng bộ (NASA OCO-2, GRACE-FO, GHGx/EDGAR, SMAP/MODIS):
+- OCO-2/3 SIF quang hợp: ${earth.carbonFluxOco2?.sifWm2SrUm} W/m²/sr/μm, hấp thụ Carbon: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} tấn CO₂/ha, XCO₂: ${earth.carbonFluxOco2?.xco2Ppm} ppm (cập nhật: ${earth.carbonFluxOco2?.observationDate})
+- GRACE/GRACE-FO Nước ngầm: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE (${earth.groundwaterAnomalyGrace?.groundwaterStatus}), cân bằng ẩm rễ: ${earth.groundwaterAnomalyGrace?.soilWaterBalancePct}% (cập nhật: ${earth.groundwaterAnomalyGrace?.observationDate})
+- GHGx/EDGAR Phát thải nông nghiệp: ${earth.greenhouseGasEdgar?.co2eqTonHa} tấn CO₂e/ha (CH₄: ${earth.greenhouseGasEdgar?.ch4KgHa} kg/ha, N₂O: ${earth.greenhouseGasEdgar?.n2oKgHa} kg/ha, mức: ${earth.greenhouseGasEdgar?.emissionLevel})
+${earth.smapModis ? `- SMAP/MODIS/GPM: Ẩm tầng mặt SMAP ${earth.smapModis.smapSoilMoisturePct}%, NDVI MODIS ${earth.smapModis.modisNdvi}, Mưa 7 ngày GPM ${earth.smapModis.gpmPrecipitation7dMm} mm` : ''}`
+      : '';
 
     const prompt = `
-Bạn là Trợ lý AI Canh tác Nông nghiệp Chuyên gia CropCast, phân tích dữ liệu cho nông dân Việt Nam.
+Bạn là Trợ lý AI Canh tác Nông nghiệp Chuyên gia CropCast. Hãy phân tích bằng ngôn ngữ: ${isEn ? 'ENGLISH' : 'TIẾNG VIỆT'}.
 Thông tin thửa ruộng:
-- Tên ruộng: ${field?.name || 'Ruộng đang chọn'}
-- Địa điểm: ${field?.province}, ${field?.district} (Tọa độ: ${field?.lat}°N, ${field?.lon}°E)
-- Ô lưới NASA POWER gần nhất: ${field?.nasaGrid?.lat}°N, ${field?.nasaGrid?.lon}°E (Cách ruộng: ${field?.nasaGrid?.distanceKm} km)
-- Cây trồng: ${cropName} (Giống: ${variety}, Giai đoạn: ${stageName})
-- Loại đất: ${field?.soilType} (Đặc tính: ${field?.soilCharacteristics?.drainage || field?.drainage || 'trung bình'})
+- Tên ruộng: ${field?.name || 'Active field'}
+- Địa điểm: ${field?.province}, ${field?.district} (${field?.lat}°N, ${field?.lon}°E)
+- Ô lưới NASA POWER: ${field?.nasaGrid?.lat}°N, ${field?.nasaGrid?.lon}°E (${field?.nasaGrid?.distanceKm} km)
+- Cây trồng: ${cropName} (${variety}, Giai đoạn: ${stageName})
+- Loại đất: ${field?.soilType} (${field?.soilCharacteristics?.drainage || 'moderate'})
 - Nguồn nước: ${waterSrc} (${waterNotes})
-- Mục tiêu canh tác ưu tiên: ${field?.primaryGoal}
+- Mục tiêu: ${field?.primaryGoal}
 
-Dữ liệu quan trắc / thời tiết hiện tại:
-- Nhiệt độ hiện tại: ${weather?.temp}°C (Thấp nhất: ${weather?.minTemp}°C, Cao nhất: ${weather?.maxTemp}°C)
-- Lượng mưa: ${weather?.rain} mm
-- Độ ẩm không khí: ${weather?.humidity}%
-- Độ ẩm đất vùng rễ (GWETROOT): ${((weather?.gwetroot || 0.5) * 100).toFixed(0)}%
-- Độ ẩm tầng mặt (GWETTOP): ${((weather?.gwettop || 0.5) * 100).toFixed(0)}%
-- Bức xạ mặt trời: ${weather?.solarRadiation} MJ/m²/ngày
+Thời tiết & NASA POWER 21 năm:
+- Nhiệt độ: ${weather?.temp}°C (Min ${weather?.minTemp}°C, Max ${weather?.maxTemp}°C), Nền 21 năm: ${weather?.historicalBaseline?.avgTemp}°C
+- Mưa: ${weather?.rain} mm, Ẩm KK: ${weather?.humidity}%, Ẩm rễ: ${((weather?.gwetroot || 0.5) * 100).toFixed(0)}%, Tầng mặt: ${((weather?.gwettop || 0.5) * 100).toFixed(0)}%, Bức xạ: ${weather?.solarRadiation} MJ/m²/ngày
+${earthSection}
+Phân tích sơ bộ: ${ruleAnalysis?.riskLevel || 'LOW'} — ${ruleAnalysis?.primaryAlert || ''}
+Phản hồi gần nhất: ${feedbackHistory?.length ? JSON.stringify(feedbackHistory.slice(-3)) : 'None'}
 
-Dữ liệu NASA POWER lịch sử 21 năm (2005-2025) cùng kỳ:
-- Nhiệt độ trung bình lịch sử: ${weather?.historicalBaseline?.avgTemp}°C
-- Lượng mưa trung bình lịch sử: ${weather?.historicalBaseline?.avgRain} mm
-- Khác biệt so với lịch sử: ${(weather?.temp || 26) - (weather?.historicalBaseline?.avgTemp || 26) > 0 ? '+' : ''}${((weather?.temp || 26) - (weather?.historicalBaseline?.avgTemp || 26)).toFixed(1)}°C
-
-Phân tích từ Bộ máy Nông học:
-- Tình trạng rủi ro: ${ruleAnalysis?.riskLevel || 'Bình thường'}
-- Cảnh báo chính: ${ruleAnalysis?.primaryAlert || 'Theo dõi định kỳ'}
-- Hành động đề xuất sơ bộ: ${JSON.stringify(ruleAnalysis?.preliminaryActions || [])}
-
-Lịch sử phản hồi của nông dân đối với thửa ruộng này:
-${feedbackHistory?.length ? JSON.stringify(feedbackHistory.slice(-3)) : 'Chưa có phản hồi trước đó'}
-
-Yêu cầu xuất ra định dạng JSON chính xác:
+Trả về JSON chuẩn (toàn bộ nội dung viết bằng ${isEn ? 'English' : 'Tiếng Việt'}):
 {
-  "headline": "Tiêu đề ngắn gọn tình trạng ruộng hôm nay (VD: CẢNH BÁO: Điều kiện lạnh ẩm cần chú ý hoặc THUẬN LỢI: Đẩy mạnh sinh trưởng)",
-  "situationSummary": "Mô tả tình trạng 2 câu bằng tiếng Việt dễ hiểu",
+  "headline": "...",
+  "situationSummary": "2 concise sentences",
   "topActions": [
-    {
-      "title": "Hành động 1",
-      "priority": "HIGH" | "MEDIUM" | "LOW",
-      "reason": "Lý do dựa trên đất, cây và thời tiết",
-      "dataBasis": "Dữ liệu nguồn kích hoạt"
-    },
-    { "title": "Hành động 2", "priority": "HIGH" | "MEDIUM" | "LOW", "reason": "...", "dataBasis": "..." },
-    { "title": "Hành động 3", "priority": "HIGH" | "MEDIUM" | "LOW", "reason": "...", "dataBasis": "..." }
+    { "title": "...", "priority": "HIGH" | "MEDIUM" | "LOW", "reason": "...", "dataBasis": "..." },
+    { "title": "...", "priority": "HIGH" | "MEDIUM" | "LOW", "reason": "...", "dataBasis": "..." },
+    { "title": "...", "priority": "HIGH" | "MEDIUM" | "LOW", "reason": "...", "dataBasis": "..." }
   ],
-  "postponeActions": [
-    "Hành động nên tạm hoãn 1 và lý do",
-    "Hành động nên tạm hoãn 2 và lý do"
-  ],
-  "agronomicExplanation": "Giải thích chi tiết vì sao AI đưa ra các khuyến nghị này dựa trên sinh lý cây trồng, ẩm độ đất và dữ liệu NASA",
-  "uncertainties": "Những thông tin người nông dân cần tự kiểm tra thực tế bằng mắt (vì vệ tinh/mô hình không thể đo trực tiếp tại gốc)",
-  "nextCheckTime": "Gợi ý thời điểm kiểm tra ruộng tiếp theo (VD: Sáng sớm mai lúc 06:30)"
+  "postponeActions": ["...", "..."],
+  "agronomicExplanation": "...",
+  "uncertainties": "...",
+  "nextCheckTime": "..."
 }
 `;
 
@@ -334,8 +401,7 @@ Yêu cầu xuất ra định dạng JSON chính xác:
           model: 'gemini-4-hydrogen',
           contents: prompt,
           config: {
-            systemInstruction:
-              'Bạn là chuyên gia nông học Việt Nam thuộc hệ thống CropCast. Trả lời thuần định dạng JSON chuẩn. Không dùng markdown code fences.',
+            systemInstruction: `You are CropCast agronomic expert. Respond strictly in valid JSON written in ${isEn ? 'English' : 'Vietnamese'} without markdown fences.`,
             responseMimeType: 'application/json',
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
@@ -382,12 +448,16 @@ app.post('/api/gemini/rotation-rethink', async (req: Request, res: Response) => 
     const {
       field,
       weather,
+      earthMetrics,
       rejectedStrategy,
       rejectionReason,
       previouslyRejectedTitles,
       priorities,
       constraints,
+      language,
     } = req.body;
+    const isEn = language === 'en';
+    const earth = earthMetrics || field?.adaptiveMemory?.earthMetrics;
 
     const ai = getGeminiClient();
     if (!ai) {
@@ -398,47 +468,45 @@ app.post('/api/gemini/rotation-rethink', async (req: Request, res: Response) => 
       });
     }
 
+    const earthLine = earth
+      ? `- OCO-2 Carbon uptake: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} t CO2/ha (SIF ${earth.carbonFluxOco2?.sifWm2SrUm}); GRACE Groundwater: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE (${earth.groundwaterAnomalyGrace?.groundwaterStatus}); GHGx/EDGAR Emissions: ${earth.greenhouseGasEdgar?.co2eqTonHa} t CO2e/ha (CH4 ${earth.greenhouseGasEdgar?.ch4KgHa}, N2O ${earth.greenhouseGasEdgar?.n2oKgHa})`
+      : '';
+
     const prompt = `
-Bạn là chuyên gia nông học Việt Nam của hệ thống CropCast.
-Nông dân đang xem xét chiến lược luân canh tối ưu cho thửa ruộng của họ, nhưng họ ĐÃ TỪ CHỐI phương án vừa đề xuất vì lý do thực tế dưới đây. Hãy đề xuất MỘT (1) chiến lược luân canh thay thế TỐT HƠN, giải quyết triệt để lý do từ chối của nông dân.
+You are CropCast agricultural rotation specialist. Output language MUST be: ${isEn ? 'ENGLISH' : 'VIETNAMESE'}.
+Farmer rejected the previous strategy for the reason below. Propose ONE better crop rotation strategy solving their constraint.
 
-Thông tin thửa ruộng:
-- Tên ruộng: ${field?.name}
-- Địa phương: ${field?.province}, ${field?.district} (${field?.lat}°B, ${field?.lon}°Đ)
-- Loại đất: ${field?.soilType}, Thoát nước: ${field?.soilCharacteristics?.drainage}
-- Cây hiện tại: ${field?.crop?.name} (Họ: ${field?.crop?.seedFamily || 'chưa rõ'}, Giống: ${field?.crop?.variety})
-- Nguồn nước: ${field?.waterSource?.type} (${constraints?.waterAvailability || 'seasonal_limited'})
-- Thiết bị/lao động: ${constraints?.equipmentAccess || 'basic_manual'}
-- Đầu ra mong muốn: ${constraints?.marketPreference || 'mixed_family'}
-- Ưu tiên nông dân: ${JSON.stringify(priorities || [])}
-- Khí hậu hiện tại: Nhiệt độ ${weather?.temp}°C, Ẩm rễ ${Math.round((weather?.gwetroot || 0.5) * 100)}%, Độ ẩm KK ${weather?.humidity}%
+Field:
+- Name: ${field?.name} (${field?.province}, ${field?.district}, ${field?.lat}, ${field?.lon})
+- Soil: ${field?.soilType}, drainage: ${field?.soilCharacteristics?.drainage}
+- Current crop: ${field?.crop?.name} (${field?.crop?.seedFamily || 'unknown'}, ${field?.crop?.variety})
+- Water: ${field?.waterSource?.type} (${constraints?.waterAvailability || 'seasonal_limited'}), Equipment: ${constraints?.equipmentAccess || 'basic_manual'}, Market: ${constraints?.marketPreference || 'mixed_family'}
+- Priorities: ${JSON.stringify(priorities || [])}
+- Weather: ${weather?.temp}°C, Root moisture ${Math.round((weather?.gwetroot || 0.5) * 100)}%, Humidity ${weather?.humidity}%
+${earthLine}
 
-Chiến lược vừa bị từ chối:
-- Tên phương án: ${rejectedStrategy?.title}
-- Cây đề xuất trước đó: ${rejectedStrategy?.nextCropName}
-- Các phương án đã bị bỏ qua trước đó (KHÔNG lặp lại): ${JSON.stringify(previouslyRejectedTitles || [])}
+Rejected strategy: ${rejectedStrategy?.title} (${rejectedStrategy?.nextCropName})
+Excluded titles: ${JSON.stringify(previouslyRejectedTitles || [])}
+Farmer rejection reason: "${rejectionReason}"
 
-LÝ DO NÔNG DÂN KHÔNG ÁP DỤNG ĐƯỢC PHƯƠNG ÁN TRƯỚC:
-"${rejectionReason}"
-
-Hãy trả về ĐÚNG 1 JSON Object theo cấu trúc sau (bằng tiếng Việt dễ hiểu cho nông dân, không dùng mã kỹ thuật khó hiểu):
+Return EXACTLY ONE valid JSON Object written in ${isEn ? 'English' : 'Vietnamese'}:
 {
-  "title": "Tên chiến lược luân canh mới tốt hơn (ngắn gọn, rõ cây trồng mới)",
-  "sequenceSummary": "Chuỗi vụ: Cây hiện tại → Cây luân canh mới → Vụ kế tiếp",
+  "title": "...",
+  "sequenceSummary": "...",
   "nextCropFamily": "poaceae" | "fabaceae" | "brassicaceae" | "solanaceae" | "cucurbitaceae" | "other_perennial",
-  "nextCropName": "Tên loại cây trồng cụ thể phù hợp lý do của nông dân",
-  "suitabilityScore": số nguyên từ 78 đến 98,
-  "whySuggested": "Giải thích 2-3 câu vì sao phương án mới này giải quyết đúng lý do nông dân nêu ra và hợp với đất/thời tiết",
-  "supportingEvidence": ["Bằng chứng 1 từ đất/khí hậu", "Bằng chứng 2", "Bằng chứng 3"],
+  "nextCropName": "...",
+  "suitabilityScore": 78,
+  "whySuggested": "...",
+  "supportingEvidence": ["...", "...", "..."],
   "benefits": {
-    "nutrientCycling": "Tác động dinh dưỡng đất",
-    "waterDemand": "Nhu cầu nước tưới",
-    "erosionAndOrganicMatter": "Chống xói mòn và mùn đất",
-    "pestCycleDisruption": "Khả năng ngắt sâu bệnh",
-    "forageAndIncome": "Đầu ra thị trường / chăn nuôi / thu nhập"
+    "nutrientCycling": "...",
+    "waterDemand": "...",
+    "erosionAndOrganicMatter": "...",
+    "pestCycleDisruption": "...",
+    "forageAndIncome": "..."
   },
-  "informationGaps": ["Khoảng trống thông tin cần lưu ý 1", "Khoảng trống 2"],
-  "localReviewRisks": ["Rủi ro cần kiểm tra ngoài ruộng / hỏi khuyến nông 1", "Rủi ro 2"]
+  "informationGaps": ["...", "..."],
+  "localReviewRisks": ["...", "..."]
 }
 `;
 
@@ -448,8 +516,7 @@ Hãy trả về ĐÚNG 1 JSON Object theo cấu trúc sau (bằng tiếng Việt
           model: 'gemini-4-hydrogen',
           contents: prompt,
           config: {
-            systemInstruction:
-              'Bạn là chuyên gia quy hoạch luân canh nông nghiệp CropCast. Trả về đúng JSON hợp lệ, không markdown.',
+            systemInstruction: `You are CropCast agricultural rotation planner. Respond strictly in valid JSON written in ${isEn ? 'English' : 'Vietnamese'}, without markdown.`,
             responseMimeType: 'application/json',
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
@@ -459,8 +526,7 @@ Hãy trả về ĐÚNG 1 JSON Object theo cấu trúc sau (bằng tiếng Việt
           model: 'gemini-3.1-flash-lite',
           contents: prompt,
           config: {
-            systemInstruction:
-              'Bạn là chuyên gia quy hoạch luân canh nông nghiệp CropCast. Trả về đúng JSON hợp lệ, không markdown.',
+            systemInstruction: `You are CropCast agricultural rotation planner. Respond strictly in valid JSON written in ${isEn ? 'English' : 'Vietnamese'}, without markdown.`,
             responseMimeType: 'application/json',
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           },
@@ -518,12 +584,19 @@ Hãy trả về ĐÚNG 1 JSON Object theo cấu trúc sau (bằng tiếng Việt
 
 // Gemini Q&A Chat endpoint
 app.post('/api/gemini/chat', async (req: Request, res: Response) => {
-  const { message, field, weather, conversationHistory } = req.body;
+  const { message, field, weather, earthMetrics, conversationHistory, language } = req.body;
+  const lang: 'vi' | 'en' = language === 'en' ? 'en' : 'vi';
+  const isEn = lang === 'en';
+  const earth = earthMetrics || field?.adaptiveMemory?.earthMetrics;
   const userMessage = typeof message === 'string' ? message.trim() : '';
-  const promptText = userMessage || 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?';
+  const promptText =
+    userMessage ||
+    (isEn
+      ? 'Hello, what should I check on my field today?'
+      : 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?');
 
   try {
-    const cacheKey = `${field?.id || 'anon'}::${field?.soilType || ''}::${field?.crop?.name || ''}::${promptText.toLowerCase()}`;
+    const cacheKey = `${lang}::${field?.id || 'anon'}::${field?.soilType || ''}::${field?.crop?.name || ''}::${promptText.toLowerCase()}`;
     const isShortTurn = !Array.isArray(conversationHistory) || conversationHistory.length <= 2;
     if (isShortTurn) {
       const cached = chatResponseCache.get(cacheKey);
@@ -537,37 +610,41 @@ app.post('/api/gemini/chat', async (req: Request, res: Response) => {
       return res.status(200).json({
         success: true,
         fromFallback: true,
-        reply: buildLocalAgronomyReply(promptText, field, weather),
+        reply: buildLocalAgronomyReply(promptText, field, weather, earth, lang),
       });
     }
 
-    const cropName = field?.crop?.name || field?.cropName || 'Cây trồng';
-    const variety = field?.crop?.variety || field?.variety || 'Thông dụng';
-    const stageName = field?.crop?.currentStage || field?.stageName || 'Đang sinh trưởng';
+    const cropName = field?.crop?.name || field?.cropName || 'Crop';
+    const variety = field?.crop?.variety || field?.variety || 'Standard';
+    const stageName = field?.crop?.currentStage || field?.stageName || 'Growing';
     const waterSrc =
       typeof field?.waterSource === 'string'
         ? field.waterSource
-        : field?.waterSource?.type || 'Nước kênh/ao';
+        : field?.waterSource?.type || 'River/pond';
 
     const weatherSummary = weather
-      ? `Nhiệt độ ${weather.temp}°C (thấp nhất ${weather.minTemp}°C, cao nhất ${weather.maxTemp}°C), lượng mưa ${weather.rain} mm, ẩm không khí ${weather.humidity}%, ẩm đất vùng rễ ${Math.round((weather.gwetroot || 0.5) * 100)}%, bức xạ ${weather.solarRadiation} MJ/m²/ngày.`
-      : 'Chưa có số liệu thời tiết tức thời.';
+      ? `Temp ${weather.temp}°C (min ${weather.minTemp}°C, max ${weather.maxTemp}°C), Rain ${weather.rain} mm, Humidity ${weather.humidity}%, Root moisture ${Math.round((weather.gwetroot || 0.5) * 100)}%, Solar ${weather.solarRadiation} MJ/m²/day.`
+      : 'No live weather reading.';
+
+    const earthSummary = earth
+      ? `\n- OCO-2 Carbon/SIF: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} t CO₂/ha (SIF ${earth.carbonFluxOco2?.sifWm2SrUm})\n- GRACE Groundwater: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE (${earth.groundwaterAnomalyGrace?.groundwaterStatus})\n- GHGx/EDGAR Emissions: ${earth.greenhouseGasEdgar?.co2eqTonHa} t CO₂e/ha (CH₄ ${earth.greenhouseGasEdgar?.ch4KgHa}, N₂O ${earth.greenhouseGasEdgar?.n2oKgHa})`
+      : '';
 
     const systemPrompt = `
-Bạn là CropCast - Trợ lý nông nghiệp thông minh cá nhân hóa của người nông dân Việt Nam.
-Thông tin thửa ruộng hiện tại:
-- Tên ruộng: ${field?.name || 'Thửa ruộng của bạn'}
-- Vị trí: ${field?.province || 'Việt Nam'}, ${field?.district || ''} (Điểm khí hậu: ${field?.nasaGrid?.lat ?? field?.lat}°N, ${field?.nasaGrid?.lon ?? field?.lon}°E)
-- Cây trồng: ${cropName} (Giống: ${variety}, Giai đoạn: ${stageName})
-- Loại đất: ${field?.soilType || 'Đất thịt'} (Thoát nước: ${field?.soilCharacteristics?.drainage || 'trung bình'})
-- Nguồn nước: ${waterSrc}
-- Thời tiết hiện tại: ${weatherSummary}
+You are CropCast - an expert personalized agronomy assistant. Respond strictly in ${isEn ? 'ENGLISH' : 'VIETNAMESE'}.
+Field context:
+- Field: ${field?.name || 'Active field'} (${field?.province || ''}, ${field?.district || ''})
+- Coordinates / NASA Grid: ${field?.nasaGrid?.lat ?? field?.lat}°N, ${field?.nasaGrid?.lon ?? field?.lon}°E
+- Crop: ${cropName} (${variety}, Stage: ${stageName})
+- Soil: ${field?.soilType || 'loam'} (Drainage: ${field?.soilCharacteristics?.drainage || 'moderate'})
+- Water source: ${waterSrc}
+- Current Weather: ${weatherSummary}${earthSummary}
 
-Nguyên tắc trả lời:
-1. Luôn nói tiếng Việt thuần, gần gũi, thực tế, dễ hiểu cho người làm nông (tránh dùng từ tiếng Anh chuyên ngành khó hiểu).
-2. Dựa trên thông tin giống cây, loại đất, nguồn nước và thời tiết cụ thể của thửa ruộng, không đưa lời khuyên chung chung.
-3. Không tự sáng tác liều lượng thuốc bảo vệ thực vật độc hại nếu thiếu kiểm nghiệm cụ thể; khuyên nông dân kiểm tra thực địa trước khi phun tưới.
-4. Trình bày rõ ràng, dùng gạch đầu dòng ngắn gọn, súc tích.
+Guidelines:
+1. Respond in clear, practical ${isEn ? 'English' : 'Vietnamese'} suitable for farmers.
+2. Reference specific field soil, crop stage, NASA POWER weather, OCO-2, GRACE groundwater, and GHGx emissions data.
+3. Recommend inspecting field conditions before spraying or heavy fertilization.
+4. Keep formatting concise with clear bullet points.
 `;
 
     // Format valid alternating history starting from the first user turn
@@ -637,8 +714,10 @@ Nguyên tắc trả lời:
     });
   } catch (error: any) {
     console.warn('Gemini Chat fallback triggered:', error?.status || error?.code, error?.message || error);
-    const localReply = buildLocalAgronomyReply(promptText, field, weather);
-    const note = isRateLimitError(error)
+    const localReply = buildLocalAgronomyReply(promptText, field, weather, earth, lang);
+    const note = isEn
+      ? '\n\n*(Synthesized from CropCast agronomy rules & synced NASA data)*'
+      : isRateLimitError(error)
       ? '\n\n*(Đang tổng hợp trực tiếp từ Bộ quy tắc nông học & dữ liệu NASA do Gemini AI tạm giới hạn lượt hỏi theo phút)*'
       : '\n\n*(Đang tổng hợp trực tiếp từ Bộ quy tắc nông học & dữ liệu thửa ruộng)*';
 
@@ -689,6 +768,62 @@ import {
   removeSharedTargetForUser,
   redeemShareLinkForUser,
 } from './server/localAuthStore.ts';
+import {
+  syncFieldEarthEnvironment,
+  getFieldEarthEnvironment,
+} from './server/envEarthService.ts';
+
+// ==============================================================================
+// Environmental Sustainability Sync API (NASA OCO-2/3, GRACE/GRACE-FO, GHGx/EDGAR)
+// ==============================================================================
+
+app.get('/api/nasa/environment', async (req: Request, res: Response) => {
+  try {
+    const fieldId = String(req.query.fieldId || 'default');
+    const lat = Number(req.query.lat ?? 21.03);
+    const lon = Number(req.query.lon ?? 105.85);
+    const cropName = String(req.query.cropName || 'Lúa');
+    const cropCategory = String(req.query.cropCategory || 'rice');
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ error: 'Tọa độ lat/lon không hợp lệ.' });
+    }
+    const snapshot = await getFieldEarthEnvironment({
+      fieldId,
+      lat,
+      lon,
+      cropName,
+      cropCategory,
+    });
+    return res.json(snapshot);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Không thể tải dữ liệu môi trường NASA.' });
+  }
+});
+
+app.post('/api/nasa/sync-environment', async (req: Request, res: Response) => {
+  try {
+    const { fieldId, lat, lon, cropName, cropCategory, rotationId } = req.body || {};
+    const numLat = Number(lat);
+    const numLon = Number(lon);
+    if (!fieldId || !Number.isFinite(numLat) || !Number.isFinite(numLon)) {
+      return res.status(400).json({ error: 'Thiếu mã thửa ruộng hoặc tọa độ lat/lon hợp lệ.' });
+    }
+    const snapshot = await syncFieldEarthEnvironment({
+      fieldId: String(fieldId),
+      lat: numLat,
+      lon: numLon,
+      cropName: String(cropName || 'Cây trồng'),
+      cropCategory: String(cropCategory || 'vegetable'),
+      rotationId: rotationId ? String(rotationId) : undefined,
+    });
+    return res.json({ success: true, ...snapshot });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err?.message || 'Đồng bộ dữ liệu NASA OCO-2 / GRACE / GHGx thất bại.',
+    });
+  }
+});
 
 // ==============================================================================
 // Username-Only Auth & Farm Persistence (No Email Required)
@@ -992,6 +1127,20 @@ app.post('/api/admin/rollback', (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Lỗi khi khôi phục phiên bản' });
   }
+});
+
+// Prevent any unmatched /api/* path from falling through to Vite HTML (avoids JSON.parse '<' errors)
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(err?.status || 500).json({
+      error: err?.message || 'Internal server error',
+    });
+  }
+  return next(err);
 });
 
 // Serve frontend in dev via Vite middlewares, or static dist in production

@@ -9,11 +9,13 @@ import {
   Compass,
   Satellite,
   AlertTriangle,
+  Clock,
 } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
 import { getCellMonthlyProfile, findNearestNasaGrid } from '../data/nasaVietnamGrid';
 import { SatelliteMap } from './SatelliteMap';
 import { computeHarmonizedIndicators } from '../services/rotationEngine';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface NasaAnalyticsViewProps {
   field: FieldProfile;
@@ -28,6 +30,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   weather,
   onOpenMap,
 }) => {
+  const { lang, t } = useLanguage();
   const [selectedIndicator, setSelectedIndicator] = useState<
     'T2M' | 'PRECTOTCORR' | 'GWETROOT' | 'ALLSKY_SFC_SW_DWN' | 'RH2M'
   >('T2M');
@@ -35,49 +38,65 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthlyData = getCellMonthlyProfile(cell);
-  const harmonized = computeHarmonizedIndicators(field, weather, {
-    rainDeltaPct: 0,
-    tempDeltaC: 0,
-  });
+  const harmonized = computeHarmonizedIndicators(
+    field,
+    weather,
+    { rainDeltaPct: 0, tempDeltaC: 0 },
+    lang
+  );
+
+  const earth = field.adaptiveMemory?.earthMetrics;
+  const formatTimestamp = (iso?: string) => {
+    if (!iso) return t('Chưa đồng bộ (nhấn Đồng bộ ở Tổng quan)', 'Not synced yet');
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString(lang === 'en' ? 'en-US' : 'vi-VN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   const indicatorsMeta = [
     {
       code: 'T2M',
-      shortLabel: 'Nhiệt độ',
-      name: 'Nhiệt độ không khí (TB, Thấp, Cao)',
+      shortLabel: t('Nhiệt độ', 'Temp'),
+      name: t('Nhiệt độ không khí (TB, Thấp, Cao)', 'Air Temperature (Avg, Min, Max)'),
       unit: '°C',
       icon: Thermometer,
       color: 'text-red-600',
     },
     {
       code: 'PRECTOTCORR',
-      shortLabel: 'Lượng mưa',
-      name: 'Lượng mưa trung bình tháng',
-      unit: 'mm/tháng',
+      shortLabel: t('Lượng mưa', 'Rainfall'),
+      name: t('Lượng mưa trung bình tháng', 'Monthly Average Rainfall'),
+      unit: t('mm/tháng', 'mm/mo'),
       icon: Droplets,
       color: 'text-blue-600',
     },
     {
       code: 'GWETROOT',
-      shortLabel: 'Ẩm vùng rễ',
-      name: 'Độ ẩm đất vùng rễ (0–100 cm)',
-      unit: '% độ ẩm',
+      shortLabel: t('Ẩm vùng rễ', 'Root Moisture'),
+      name: t('Độ ẩm đất vùng rễ (0–100 cm)', 'Root Zone Soil Moisture (0–100 cm)'),
+      unit: t('% độ ẩm', '% moisture'),
       icon: Layers,
       color: 'text-emerald-600',
     },
     {
       code: 'RH2M',
-      shortLabel: 'Ẩm không khí',
-      name: 'Độ ẩm không khí',
+      shortLabel: t('Ẩm không khí', 'Humidity'),
+      name: t('Độ ẩm không khí', 'Relative Humidity'),
       unit: '%',
       icon: Wind,
       color: 'text-purple-600',
     },
     {
       code: 'ALLSKY_SFC_SW_DWN',
-      shortLabel: 'Nắng & Bức xạ',
-      name: 'Nắng & Bức xạ mặt trời',
-      unit: 'MJ/m²/ngày',
+      shortLabel: t('Nắng & Bức xạ', 'Solar'),
+      name: t('Nắng & Bức xạ mặt trời', 'Solar Radiation'),
+      unit: t('MJ/m²/ngày', 'MJ/m²/day'),
       icon: Sun,
       color: 'text-amber-500',
     },
@@ -99,35 +118,68 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
     { title: string; badge: string; detail: string; riskNote: string }
   > = {
     moisture: {
-      title: 'Lớp Độ ẩm đất vùng rễ & Khả năng giữ nước',
-      badge: `Ước tính vùng rễ: ${harmonized.rootMoisturePct}%`,
-      detail: `Độ ẩm tầng mặt đạt ${harmonized.surfaceMoisturePct}%. Đất ${field.soilType === 'sand' ? 'cát rút nước rất nhanh' : field.soilType === 'clay' ? 'sét giữ ẩm lâu nhưng dễ úng' : 'cân bằng ẩm tương đối ổn định'}.`,
+      title: t('Lớp Độ ẩm đất vùng rễ & Khả năng giữ nước', 'Root Zone Moisture & Retention'),
+      badge: `${t('Ước tính vùng rễ:', 'Root moisture:')} ${harmonized.rootMoisturePct}%`,
+      detail: t(
+        `Độ ẩm tầng mặt đạt ${harmonized.surfaceMoisturePct}%. Đất ${
+          field.soilType === 'sand'
+            ? 'cát rút nước rất nhanh'
+            : field.soilType === 'clay'
+            ? 'sét giữ ẩm lâu nhưng dễ úng'
+            : 'cân bằng ẩm tương đối ổn định'
+        }.`,
+        `Surface moisture is ${harmonized.surfaceMoisturePct}%. ${
+          field.soilType === 'sand'
+            ? 'Sandy soil drains very quickly.'
+            : field.soilType === 'clay'
+            ? 'Clay holds moisture well but risks waterlogging.'
+            : 'Balanced loam moisture retention.'
+        }`
+      ),
       riskNote:
         harmonized.droughtRiskMonths.length > 0
-          ? `Các tháng dễ hụt ẩm: Tháng ${harmonized.droughtRiskMonths.join(', ')}.`
-          : 'Độ ẩm duy trì khá đều quanh năm.',
+          ? t(
+              `Các tháng dễ hụt ẩm: Tháng ${harmonized.droughtRiskMonths.join(', ')}.`,
+              `Dry deficit months: Month ${harmonized.droughtRiskMonths.join(', ')}.`
+            )
+          : t('Độ ẩm duy trì khá đều quanh năm.', 'Moisture remains fairly steady year-round.'),
     },
     heat: {
-      title: 'Lớp Nắng nóng bề mặt & Tốc độ bốc thoát hơi nước',
-      badge: `Áp lực nắng nóng: ${harmonized.heatStressIndex}`,
-      detail: `Tốc độ bốc thoát hơi nước hiện khoảng ${harmonized.evapotranspirationMmDay} mm/ngày. Nhiệt độ cao làm mất ẩm mặt ruộng trống rất nhanh.`,
+      title: t('Lớp Nắng nóng bề mặt & Tốc độ bốc thoát hơi nước', 'Surface Heat & Evapotranspiration'),
+      badge: `${t('Áp lực nắng nóng:', 'Heat stress:')} ${harmonized.heatStressIndex}`,
+      detail: t(
+        `Tốc độ bốc thoát hơi nước hiện khoảng ${harmonized.evapotranspirationMmDay} mm/ngày. Nhiệt độ cao làm mất ẩm mặt ruộng trống rất nhanh.`,
+        `Current ET₀ is ~${harmonized.evapotranspirationMmDay} mm/day. High heat rapidly dries exposed topsoil.`
+      ),
       riskNote:
         harmonized.frostRiskMonths.length > 0
-          ? `Tháng cần đề phòng rét hại ban đêm: Tháng ${harmonized.frostRiskMonths.join(', ')}.`
-          : 'Ít nguy cơ sương muối nhưng cần tủ gốc vào cao điểm nắng nóng.',
+          ? t(
+              `Tháng cần đề phòng rét hại ban đêm: Tháng ${harmonized.frostRiskMonths.join(', ')}.`,
+              `Cold night risk months: Month ${harmonized.frostRiskMonths.join(', ')}.`
+            )
+          : t(
+              'Ít nguy cơ sương muối nhưng cần tủ gốc vào cao điểm nắng nóng.',
+              'Low frost risk; mulch recommended during peak heat.'
+            ),
     },
     erosion: {
-      title: 'Lớp Nguy cơ xói mòn & Ngập úng cục bộ',
-      badge: `Nguy cơ xói mòn: ${harmonized.erosionRisk}`,
-      detail: `Tổng mưa trung bình năm ~${Math.round(cell.climatology21Yr.annualRainfallMm)} mm. Ruộng bỏ trống vào tháng mưa lớn rất dễ bị rửa trôi lớp đất màu.`,
+      title: t('Lớp Nguy cơ xói mòn & Ngập úng cục bộ', 'Erosion & Local Flooding Risk'),
+      badge: `${t('Nguy cơ xói mòn:', 'Erosion risk:')} ${harmonized.erosionRisk}`,
+      detail: t(
+        `Tổng mưa trung bình năm ~${Math.round(cell.climatology21Yr.annualRainfallMm)} mm. Ruộng bỏ trống vào tháng mưa lớn rất dễ bị rửa trôi lớp đất màu.`,
+        `Mean annual rain ~${Math.round(cell.climatology21Yr.annualRainfallMm)} mm. Bare soil during heavy rain months risks topsoil runoff.`
+      ),
       riskNote:
         harmonized.floodRiskMonths.length > 0
-          ? `Tháng mưa tập trung lớn: Tháng ${harmonized.floodRiskMonths.join(', ')}.`
-          : 'Chưa ghi nhận mùa mưa cực đoan kéo dài.',
+          ? t(
+              `Tháng mưa tập trung lớn: Tháng ${harmonized.floodRiskMonths.join(', ')}.`,
+              `Peak flood months: Month ${harmonized.floodRiskMonths.join(', ')}.`
+            )
+          : t('Chưa ghi nhận mùa mưa cực đoan kéo dài.', 'No prolonged extreme rainfall months flagged.'),
     },
     water_trend: {
-      title: 'Lớp Xu hướng nguồn nước dài hạn',
-      badge: 'Chu kỳ đối chiếu 21 năm',
+      title: t('Lớp Xu hướng nguồn nước dài hạn', 'Long-Term Water & GRACE Trend'),
+      badge: t('Chu kỳ đối chiếu 21 năm + GRACE', '21-yr Baseline + GRACE'),
       detail: harmonized.longTermWaterTrend,
       riskNote: harmonized.vegetationStressNote,
     },
@@ -143,47 +195,47 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   > = {
     T2M: {
       barClass: 'bg-gradient-to-t from-amber-300 via-orange-500 to-red-600',
-      legendTitle: 'Thang màu Nhiệt độ không khí (°C):',
+      legendTitle: t('Thang màu Nhiệt độ không khí (°C):', 'Air Temperature Legend (°C):'),
       swatches: [
-        { colorClass: 'bg-amber-300', label: 'Mát / Lạnh (< 22°C)' },
-        { colorClass: 'bg-orange-500', label: 'Ấm vừa (22 – 29°C)' },
-        { colorClass: 'bg-red-600', label: 'Nắng nóng cao (> 30°C)' },
+        { colorClass: 'bg-amber-300', label: t('Mát / Lạnh (< 22°C)', 'Cool (< 22°C)') },
+        { colorClass: 'bg-orange-500', label: t('Ấm vừa (22 – 29°C)', 'Warm (22 – 29°C)') },
+        { colorClass: 'bg-red-600', label: t('Nắng nóng cao (> 30°C)', 'Hot (> 30°C)') },
       ],
     },
     PRECTOTCORR: {
       barClass: 'bg-gradient-to-t from-sky-300 via-blue-500 to-blue-800',
-      legendTitle: 'Thang màu Lượng mưa (mm/tháng):',
+      legendTitle: t('Thang màu Lượng mưa (mm/tháng):', 'Rainfall Legend (mm/month):'),
       swatches: [
-        { colorClass: 'bg-sky-300', label: 'Mùa khô / Mưa ít (< 60 mm)' },
-        { colorClass: 'bg-blue-500', label: 'Mưa vừa (60 – 200 mm)' },
-        { colorClass: 'bg-blue-800', label: 'Mưa lớn / Mùa bão (> 200 mm)' },
+        { colorClass: 'bg-sky-300', label: t('Mùa khô / Mưa ít (< 60 mm)', 'Dry (< 60 mm)') },
+        { colorClass: 'bg-blue-500', label: t('Mưa vừa (60 – 200 mm)', 'Moderate (60 – 200 mm)') },
+        { colorClass: 'bg-blue-800', label: t('Mưa lớn / Mùa bão (> 200 mm)', 'Heavy (> 200 mm)') },
       ],
     },
     GWETROOT: {
       barClass: 'bg-gradient-to-t from-lime-400 via-emerald-500 to-teal-700',
-      legendTitle: 'Thang màu Độ ẩm đất vùng rễ (%):',
+      legendTitle: t('Thang màu Độ ẩm đất vùng rễ (%):', 'Root Zone Moisture Legend (%):'),
       swatches: [
-        { colorClass: 'bg-lime-400', label: 'Đất khô (< 40%)' },
-        { colorClass: 'bg-emerald-500', label: 'Đủ ẩm tối ưu (40 – 75%)' },
-        { colorClass: 'bg-teal-700', label: 'Rất ẩm / Dễ bão hòa (> 75%)' },
+        { colorClass: 'bg-lime-400', label: t('Đất khô (< 40%)', 'Dry (< 40%)') },
+        { colorClass: 'bg-emerald-500', label: t('Đủ ẩm tối ưu (40 – 75%)', 'Optimal (40 – 75%)') },
+        { colorClass: 'bg-teal-700', label: t('Rất ẩm / Dễ bão hòa (> 75%)', 'Wet / Saturated (> 75%)') },
       ],
     },
     RH2M: {
       barClass: 'bg-gradient-to-t from-fuchsia-300 via-purple-500 to-indigo-700',
-      legendTitle: 'Thang màu Độ ẩm không khí (%):',
+      legendTitle: t('Thang màu Độ ẩm không khí (%):', 'Relative Humidity Legend (%):'),
       swatches: [
-        { colorClass: 'bg-fuchsia-300', label: 'Hanh khô (< 70%)' },
-        { colorClass: 'bg-purple-500', label: 'Dễ chịu (70 – 84%)' },
-        { colorClass: 'bg-indigo-700', label: 'Ẩm cao / Lưu ý nấm bệnh (≥ 85%)' },
+        { colorClass: 'bg-fuchsia-300', label: t('Hanh khô (< 70%)', 'Dry (< 70%)') },
+        { colorClass: 'bg-purple-500', label: t('Dễ chịu (70 – 84%)', 'Moderate (70 – 84%)') },
+        { colorClass: 'bg-indigo-700', label: t('Ẩm cao / Lưu ý nấm bệnh (≥ 85%)', 'Humid / Fungal risk (≥ 85%)') },
       ],
     },
     ALLSKY_SFC_SW_DWN: {
       barClass: 'bg-gradient-to-t from-yellow-200 via-yellow-400 to-amber-600',
-      legendTitle: 'Thang màu Nắng & Bức xạ mặt trời (MJ/m²/ngày):',
+      legendTitle: t('Thang màu Nắng & Bức xạ (MJ/m²/ngày):', 'Solar Radiation Legend (MJ/m²/day):'),
       swatches: [
-        { colorClass: 'bg-yellow-200 border border-amber-300', label: 'Nhiều mây / Nắng dịu (< 14)' },
-        { colorClass: 'bg-yellow-400', label: 'Nắng tốt quang hợp (14 – 19)' },
-        { colorClass: 'bg-amber-600', label: 'Bức xạ gắt / Bốc hơi mạnh (> 19)' },
+        { colorClass: 'bg-yellow-200 border border-amber-300', label: t('Nhiều mây (< 14)', 'Cloudy (< 14)') },
+        { colorClass: 'bg-yellow-400', label: t('Nắng tốt quang hợp (14 – 19)', 'Optimal (14 – 19)') },
+        { colorClass: 'bg-amber-600', label: t('Bức xạ gắt (> 19)', 'Intense (> 19)') },
       ],
     },
   };
@@ -198,15 +250,21 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-0.5 rounded-full">
-              Chuỗi khí hậu 21 năm (2005–2025)
+              {t('Chuỗi khí hậu 21 năm (2005–2025)', '21-Year Climatology (2005–2025)')}
             </span>
-            <span className="text-xs text-stone-500">Vùng {cell.region}</span>
+            <span className="text-xs text-stone-500">
+              {t('Vùng', 'Region')} {cell.region}
+            </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
-            Phân tích Khí hậu &amp; Bản đồ Không gian Thửa ruộng
+            {t(
+              'Phân tích Khí hậu & Bản đồ Không gian Thửa ruộng',
+              'Climate Analytics & Geospatial Field Map'
+            )}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-            Điểm khí hậu gần nhất: <strong>{field.nasaGrid.cellId}</strong> ({cell.lat}°B, {cell.lon}°Đ · cách ruộng{' '}
+            {t('Điểm khí hậu gần nhất:', 'Nearest NASA grid:')} <strong>{field.nasaGrid.cellId}</strong> (
+            {cell.lat}°N, {cell.lon}°E · {t('cách ruộng', 'distance')}{' '}
             <strong>{field.nasaGrid.distanceKm} km</strong>)
           </p>
         </div>
@@ -215,7 +273,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           onClick={onOpenMap}
           className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0 self-start md:self-auto"
         >
-          <Compass className="w-4 h-4" /> Chỉnh vị trí ruộng trên bản đồ
+          <Compass className="w-4 h-4" />{' '}
+          {t('Chỉnh vị trí ruộng trên bản đồ', 'Adjust Field on Map')}
         </button>
       </div>
 
@@ -224,7 +283,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div className="lg:col-span-6 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
-              <Satellite className="w-4 h-4 text-emerald-700" /> Ảnh vệ tinh khu vực ruộng {field.name}
+              <Satellite className="w-4 h-4 text-emerald-700" />{' '}
+              {t(`Ảnh vệ tinh khu vực ruộng ${field.name}`, `Satellite view: ${field.name}`)}
             </span>
             <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
               {activeOverlay.badge}
@@ -244,26 +304,26 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div className="lg:col-span-6 flex flex-col justify-between space-y-4">
           <div className="space-y-3">
             <div className="text-xs font-bold text-stone-800 uppercase tracking-wider">
-              Chọn lớp thông tin theo dõi theo thời gian
+              {t('Chọn lớp thông tin theo dõi theo thời gian', 'Select Thematic Layer')}
             </div>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { id: 'moisture', label: 'Độ ẩm đất vùng rễ' },
-                { id: 'heat', label: 'Nắng nóng & Bốc hơi' },
-                { id: 'erosion', label: 'Rủi ro xói mòn & Úng' },
-                { id: 'water_trend', label: 'Xu hướng nước dài hạn' },
-              ].map((t) => (
+                { id: 'moisture', label: t('Độ ẩm đất vùng rễ', 'Root Soil Moisture') },
+                { id: 'heat', label: t('Nắng nóng & Bốc hơi', 'Heat & Evapotranspiration') },
+                { id: 'erosion', label: t('Rủi ro xói mòn & Úng', 'Erosion & Flood Risk') },
+                { id: 'water_trend', label: t('Xu hướng nước dài hạn', 'Water & GRACE Trend') },
+              ].map((item) => (
                 <button
-                  key={t.id}
+                  key={item.id}
                   type="button"
-                  onClick={() => setOverlayTheme(t.id as OverlayTheme)}
+                  onClick={() => setOverlayTheme(item.id as OverlayTheme)}
                   className={`p-2.5 rounded-xl border text-xs font-bold text-left transition cursor-pointer ${
-                    overlayTheme === t.id
+                    overlayTheme === item.id
                       ? 'bg-emerald-800 text-white border-emerald-800'
                       : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
                   }`}
                 >
-                  {t.label}
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -278,12 +338,90 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           </div>
 
           <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-600 leading-relaxed">
-            <strong>Tổng hợp đồng bộ dữ liệu:</strong> {harmonized.dataFusionSummary}
+            <strong>{t('Tổng hợp đồng bộ dữ liệu:', 'Data fusion summary:')}</strong>{' '}
+            {harmonized.dataFusionSummary}
           </div>
         </div>
       </div>
 
-      {/* 5 Clean Plain-Language Indicator Tabs with Distinct Color Coding */}
+      {/* Data Source Last Updated Column Table */}
+      <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">
+        <div className="px-5 py-3 border-b border-stone-100 flex items-center justify-between">
+          <h2 className="text-xs sm:text-sm font-bold text-stone-900 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-emerald-700" />
+            {t('Nguồn dữ liệu NASA & Lần cuối cập nhật', 'NASA Data Sources & Last Updated')}
+          </h2>
+          <span className="text-[11px] text-stone-500">NASA Space Apps 2026</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-stone-50 text-[11px] text-stone-500 border-b border-stone-200">
+              <tr>
+                <th className="py-2.5 px-4 font-semibold">{t('Nguồn dữ liệu', 'Data Source')}</th>
+                <th className="py-2.5 px-4 font-semibold">{t('Phạm vi chỉ số', 'Coverage')}</th>
+                <th className="py-2.5 px-4 font-semibold">{t('Lần cuối cập nhật', 'Last updated')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              <tr>
+                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA POWER (Ag)</td>
+                <td className="py-2.5 px-4 text-stone-600">
+                  {t('Nhiệt độ, Mưa, Ẩm đất, Bức xạ (21 năm)', 'Temp, Rain, Root/Surface Moisture, Solar')}
+                </td>
+                <td className="py-2.5 px-4 font-mono text-stone-700">
+                  {formatTimestamp(earth?.nasaPowerLastUpdated || weather.observationDate)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA OCO-2 / OCO-3</td>
+                <td className="py-2.5 px-4 text-stone-600">
+                  {earth
+                    ? `SIF ${earth.carbonFluxOco2.sifWm2SrUm} · ${earth.carbonFluxOco2.carbonUptakeTonHaYr} ${t('tấn CO₂/ha', 't CO₂/ha')}`
+                    : t('Quang hợp SIF & Hấp thụ Carbon', 'SIF Photosynthesis & Carbon Uptake')}
+                </td>
+                <td className="py-2.5 px-4 font-mono text-stone-700">
+                  {formatTimestamp(earth?.carbonFluxOco2.lastUpdated)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA GRACE / GRACE-FO</td>
+                <td className="py-2.5 px-4 text-stone-600">
+                  {earth
+                    ? `${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE`
+                    : t('Biến động trữ lượng nước ngầm', 'Groundwater Storage Anomaly')}
+                </td>
+                <td className="py-2.5 px-4 font-mono text-stone-700">
+                  {formatTimestamp(earth?.groundwaterAnomalyGrace.lastUpdated)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-4 font-semibold text-stone-800">GHGx / EDGAR</td>
+                <td className="py-2.5 px-4 text-stone-600">
+                  {earth
+                    ? `${earth.greenhouseGasEdgar.co2eqTonHa} ${t('tấn CO₂e/ha', 't CO₂e/ha')}`
+                    : t('Phát thải CH₄ & N₂O nông nghiệp', 'Agricultural CH₄ & N₂O Flux')}
+                </td>
+                <td className="py-2.5 px-4 font-mono text-stone-700">
+                  {formatTimestamp(earth?.greenhouseGasEdgar.lastUpdated)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA SMAP · MODIS · GPM</td>
+                <td className="py-2.5 px-4 text-stone-600">
+                  {earth?.smapModis
+                    ? `${t('Ẩm mặt', 'SMAP')} ${earth.smapModis.smapSoilMoisturePct}% · NDVI ${earth.smapModis.modisNdvi} · GPM ${earth.smapModis.gpmPrecipitation7dMm}mm`
+                    : t('Độ ẩm lớp mặt, NDVI tán lá & Mưa 7 ngày', 'Surface Moisture, Canopy NDVI & 7-day GPM Rain')}
+                </td>
+                <td className="py-2.5 px-4 font-mono text-stone-700">
+                  {formatTimestamp(earth?.smapModis?.lastUpdated)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 5 Indicator Tabs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         {indicatorsMeta.map((meta) => {
           const Icon = meta.icon;
@@ -315,7 +453,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
                   isSelected ? 'text-white/85' : 'text-stone-400'
                 }`}
               >
-                Đơn vị: {meta.unit}
+                {t('Đơn vị:', 'Unit:')} {meta.unit}
               </div>
             </button>
           );
@@ -328,14 +466,16 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           <div>
             <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-700" />
-              Biến động 12 tháng: {currentMeta.name}
+              {t('Biến động 12 tháng:', '12-Month Climatology:')} {currentMeta.name}
             </h2>
             <p className="text-xs text-stone-500">
-              Số liệu khí hậu trung bình 21 năm (2005–2025) tại điểm lưới gần thửa ruộng nhất
+              {t(
+                'Số liệu khí hậu trung bình 21 năm (2005–2025) tại điểm lưới gần thửa ruộng nhất',
+                '21-year mean climate series (2005–2025) at the nearest NASA grid point'
+              )}
             </p>
           </div>
 
-          {/* Color Legend Explaining What Each Color Means */}
           <div className="bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2.5 text-xs space-y-1.5">
             <div className="font-bold text-stone-800">{activeColorTheme.legendTitle}</div>
             <div className="flex flex-wrap items-center gap-3">
@@ -347,26 +487,6 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Cross-Indicator Color Guide */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-stone-50/70 rounded-xl border border-stone-200/70 text-[11px] text-stone-600">
-          <span className="font-bold text-stone-800">Phân biệt màu giữa các chỉ số:</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" /> Đỏ cam: Nhiệt độ
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" /> Xanh dương: Lượng mưa
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" /> Xanh lá: Ẩm đất vùng rễ
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block" /> Tím: Ẩm không khí
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 border border-amber-400 inline-block" /> Vàng nắng: Nắng &amp; Bức xạ
-          </span>
         </div>
 
         <div className="pt-2">
@@ -391,7 +511,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
                     {d.month}: <strong>{val}</strong> {currentMeta.unit}
                     {selectedIndicator === 'T2M' && (
                       <div className="text-[9px] text-stone-300">
-                        Thấp nhất: {d.T2M_MIN.toFixed(1)}°C | Cao nhất: {d.T2M_MAX.toFixed(1)}°C
+                        {t('Thấp nhất:', 'Min:')} {d.T2M_MIN.toFixed(1)}°C | {t('Cao nhất:', 'Max:')}{' '}
+                        {d.T2M_MAX.toFixed(1)}°C
                       </div>
                     )}
                   </div>
@@ -418,41 +539,45 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
           <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
             <span className="text-stone-400 text-[10px] uppercase font-bold block">
-              Đặc trưng nhiệt độ
+              {t('Đặc trưng nhiệt độ', 'Temperature Profile')}
             </span>
             <div className="text-stone-900 font-bold text-sm">
-              TB: {cell.climatology21Yr.avgTemp}°C (Biên độ: {cell.climatology21Yr.minTempAnnual}°C –{' '}
+              {t('TB:', 'Avg:')} {cell.climatology21Yr.avgTemp}°C ({cell.climatology21Yr.minTempAnnual}°C –{' '}
               {cell.climatology21Yr.maxTempAnnual}°C)
             </div>
             <p className="text-[11px] text-stone-500">
-              Tháng có nguy cơ rét hại:{' '}
+              {t('Tháng có nguy cơ rét hại:', 'Cold risk months:')}{' '}
               {cell.climatology21Yr.riskMonthsCold.length
-                ? `Tháng ${cell.climatology21Yr.riskMonthsCold.join(', ')}`
-                : 'Không có'}
+                ? `${t('Tháng', 'M')} ${cell.climatology21Yr.riskMonthsCold.join(', ')}`
+                : t('Không có', 'None')}
             </p>
           </div>
 
           <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
             <span className="text-stone-400 text-[10px] uppercase font-bold block">
-              Tổng lượng mưa năm
+              {t('Tổng lượng mưa năm', 'Annual Precipitation')}
             </span>
             <div className="text-stone-900 font-bold text-sm">
-              {cell.climatology21Yr.annualRainfallMm} mm / năm
+              {cell.climatology21Yr.annualRainfallMm} {t('mm / năm', 'mm / yr')}
             </div>
             <p className="text-[11px] text-stone-500">
-              Tháng mưa bão lớn: Tháng {cell.climatology21Yr.riskMonthsFlood.join(', ')}
+              {t('Tháng mưa bão lớn:', 'Peak rain months:')}{' '}
+              {t('Tháng', 'M')} {cell.climatology21Yr.riskMonthsFlood.join(', ')}
             </p>
           </div>
 
           <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
             <span className="text-stone-400 text-[10px] uppercase font-bold block">
-              Tháng khô hạn cao điểm
+              {t('Tháng khô hạn cao điểm', 'Peak Dry Months')}
             </span>
             <div className="text-stone-900 font-bold text-sm">
-              Tháng {cell.climatology21Yr.riskMonthsDrought.join(', ')}
+              {t('Tháng', 'Month')} {cell.climatology21Yr.riskMonthsDrought.join(', ')}
             </div>
             <p className="text-[11px] text-stone-500">
-              Độ ẩm vùng rễ trung bình mùa cạn hạ xuống dưới 35%
+              {t(
+                'Độ ẩm vùng rễ trung bình mùa cạn hạ xuống dưới 35%',
+                'Dry-season root zone moisture drops below 35%'
+              )}
             </p>
           </div>
         </div>

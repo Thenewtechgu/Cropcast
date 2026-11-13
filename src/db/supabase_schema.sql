@@ -170,6 +170,86 @@ CREATE POLICY "Users can view recommendations for their farms"
   );
 
 -- ==============================================================================
+-- 8. Earth Sustainability Metrics (OCO-2/3, GRACE/GRACE-FO, GHGx/EDGAR)
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS public.carbon_flux_oco2 (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  farm_id TEXT NOT NULL,
+  crop_rotation_id TEXT,
+  lat NUMERIC(8, 4) NOT NULL,
+  lon NUMERIC(8, 4) NOT NULL,
+  observation_date DATE NOT NULL,
+  sif_value NUMERIC(8, 3) NOT NULL,
+  xco2_ppm NUMERIC(8, 2),
+  carbon_uptake_t_ha NUMERIC(8, 2) NOT NULL,
+  photosynthesis_status VARCHAR(20) NOT NULL DEFAULT 'moderate',
+  data_source TEXT NOT NULL DEFAULT 'NASA OCO-2/3',
+  raw_metadata JSONB DEFAULT '{}'::jsonb,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_oco2_farm_date UNIQUE (farm_id, observation_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oco2_farm_date ON public.carbon_flux_oco2 (farm_id, observation_date DESC);
+
+CREATE TABLE IF NOT EXISTS public.groundwater_anomaly_grace (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  farm_id TEXT NOT NULL,
+  crop_rotation_id TEXT,
+  lat NUMERIC(8, 4) NOT NULL,
+  lon NUMERIC(8, 4) NOT NULL,
+  observation_date DATE NOT NULL,
+  lwe_thickness_cm NUMERIC(8, 2) NOT NULL,
+  groundwater_status VARCHAR(20) NOT NULL DEFAULT 'stable',
+  soil_water_balance_pct INT DEFAULT 60,
+  data_source TEXT NOT NULL DEFAULT 'NASA GRACE-FO',
+  raw_metadata JSONB DEFAULT '{}'::jsonb,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_grace_farm_date UNIQUE (farm_id, observation_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_grace_farm_date ON public.groundwater_anomaly_grace (farm_id, observation_date DESC);
+
+CREATE TABLE IF NOT EXISTS public.greenhouse_gas_edgar (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  farm_id TEXT NOT NULL,
+  crop_rotation_id TEXT,
+  lat NUMERIC(8, 4) NOT NULL,
+  lon NUMERIC(8, 4) NOT NULL,
+  observation_date DATE NOT NULL,
+  ch4_kg_ha NUMERIC(8, 2) NOT NULL,
+  n2o_kg_ha NUMERIC(8, 2) NOT NULL,
+  co2eq_t_ha NUMERIC(8, 2) NOT NULL,
+  emission_level VARCHAR(20) NOT NULL DEFAULT 'moderate',
+  crop_context TEXT,
+  data_source TEXT NOT NULL DEFAULT 'GHGx / EDGAR',
+  raw_metadata JSONB DEFAULT '{}'::jsonb,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_edgar_farm_date UNIQUE (farm_id, observation_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_edgar_farm_date ON public.greenhouse_gas_edgar (farm_id, observation_date DESC);
+
+ALTER TABLE public.carbon_flux_oco2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.groundwater_anomaly_grace ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.greenhouse_gas_edgar ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read for carbon_flux_oco2"
+  ON public.carbon_flux_oco2 FOR SELECT USING (true);
+CREATE POLICY "Service write for carbon_flux_oco2"
+  ON public.carbon_flux_oco2 FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Public read for groundwater_anomaly_grace"
+  ON public.groundwater_anomaly_grace FOR SELECT USING (true);
+CREATE POLICY "Service write for groundwater_anomaly_grace"
+  ON public.groundwater_anomaly_grace FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Public read for greenhouse_gas_edgar"
+  ON public.greenhouse_gas_edgar FOR SELECT USING (true);
+CREATE POLICY "Service write for greenhouse_gas_edgar"
+  ON public.greenhouse_gas_edgar FOR ALL USING (auth.role() = 'service_role');
+
+-- ==============================================================================
 -- Supabase Storage Bucket Setup Script (Run in Supabase Dashboard)
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('nasa-data-files', 'nasa-data-files', false);
 -- ==============================================================================

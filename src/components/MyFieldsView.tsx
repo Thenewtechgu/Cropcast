@@ -41,6 +41,7 @@ import {
 import { SEED_FAMILIES, getSeedFamilyById, inferSeedFamilyFromCrop } from '../data/cropTaxonomy';
 import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
 import { SatelliteMap } from './SatelliteMap';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface MyFieldsViewProps {
   fields: FieldProfile[];
@@ -91,6 +92,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   wizardOpen,
   setWizardOpen,
 }) => {
+  const { lang, t } = useLanguage();
   const [editingField, setEditingField] = useState<FieldProfile | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -377,12 +379,18 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl border border-stone-200 shadow-xs">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900">
-            Bản đồ &amp; Hồ sơ Thửa ruộng của bạn
+            {t('Bản đồ & Hồ sơ Thửa ruộng của bạn', 'Your Fields & Satellite Profiles')}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500">
             {isAuthenticated
-              ? 'Mỗi thửa ruộng thuộc quyền riêng tư của tài khoản tạo ra. Bạn có thể chia sẻ quyền xem qua đường dẫn hoặc email cho nông dân khác.'
-              : 'Vui lòng đăng nhập tài khoản riêng của bạn để tạo, lưu trữ riêng tư và chia sẻ các thửa ruộng của mình.'}
+              ? t(
+                  'Mỗi thửa ruộng thuộc quyền riêng tư của tài khoản tạo ra. Bạn có thể chia sẻ quyền xem qua đường dẫn hoặc email cho nông dân khác.',
+                  'Each field belongs privately to the account that created it. You can share view access via link or username/email.'
+                )
+              : t(
+                  'Vui lòng đăng nhập tài khoản riêng của bạn để tạo, lưu trữ riêng tư và chia sẻ các thửa ruộng của mình.',
+                  'Sign in to create, store privately, and share your field profiles.'
+                )}
           </p>
         </div>
         {isAuthenticated ? (
@@ -393,14 +401,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
             }}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs self-start sm:self-auto"
           >
-            <Plus className="w-4 h-4" /> Tạo hồ sơ thửa ruộng mới
+            <Plus className="w-4 h-4" /> {t('Tạo hồ sơ thửa ruộng mới', 'Add New Field')}
           </button>
         ) : (
           <button
             onClick={() => onOpenAuthModal?.()}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-xs self-start sm:self-auto"
           >
-            <LogIn className="w-4 h-4" /> Đăng nhập / Đăng ký
+            <LogIn className="w-4 h-4" /> {t('Đăng nhập / Đăng ký', 'Sign In / Sign Up')}
           </button>
         )}
       </div>
@@ -414,13 +422,19 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
           <div className="max-w-md mx-auto space-y-1.5">
             <h2 className="text-lg font-bold text-stone-900">
               {isAuthenticated
-                ? 'Chưa có thửa ruộng nào trong tài khoản'
-                : 'Hồ sơ ruộng được bảo mật theo từng nông dân'}
+                ? t('Chưa có thửa ruộng nào trong tài khoản', 'No fields saved yet')
+                : t('Hồ sơ ruộng được bảo mật theo từng nông dân', 'Field profiles are private to each farmer')}
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed">
               {isAuthenticated
-                ? 'Hãy thêm vị trí thửa ruộng thực tế của bạn bằng GPS hoặc chạm trên ảnh vệ tinh để xem điểm khí hậu gần nhất và gợi ý luân canh.'
-                : 'CropCast không hiển thị công khai dữ liệu ruộng của người khác. Hãy đăng nhập hoặc tạo tài khoản để bắt đầu tạo thửa ruộng riêng của bạn.'}
+                ? t(
+                    'Hãy thêm vị trí thửa ruộng thực tế của bạn bằng GPS hoặc chạm trên ảnh vệ tinh để xem điểm khí hậu gần nhất và gợi ý luân canh.',
+                    'Add your field using GPS or by tapping the satellite map to link climate grids and rotation advice.'
+                  )
+                : t(
+                    'CropCast không hiển thị công khai dữ liệu ruộng của người khác. Hãy đăng nhập hoặc tạo tài khoản để bắt đầu tạo thửa ruộng riêng của bạn.',
+                    'CropCast does not show other farmers’ fields publicly. Sign in or sign up to create your own field.'
+                  )}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -432,14 +446,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                 }}
                 className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
               >
-                <Plus className="w-4 h-4" /> Thêm thửa ruộng đầu tiên
+                <Plus className="w-4 h-4" /> {t('Thêm thửa ruộng đầu tiên', 'Add Your First Field')}
               </button>
             ) : (
               <button
                 onClick={() => onOpenAuthModal?.()}
                 className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
               >
-                <LogIn className="w-4 h-4" /> Đăng nhập / Tạo tài khoản ngay
+                <LogIn className="w-4 h-4" /> {t('Đăng nhập / Tạo tài khoản ngay', 'Sign In / Sign Up')}
               </button>
             )}
           </div>
@@ -481,7 +495,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     }}
                     className="absolute top-2.5 right-2.5 z-20 bg-white/95 hover:bg-white text-stone-800 px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm border border-stone-200 flex items-center gap-1 cursor-pointer"
                   >
-                    <Satellite className="w-3.5 h-3.5 text-emerald-700" /> Phóng to bản đồ
+                    <Satellite className="w-3.5 h-3.5 text-emerald-700" /> {t('Phóng to bản đồ', 'Expand Map')}
                   </button>
                 </div>
 
@@ -493,32 +507,35 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       </span>
                       {isActive ? (
                         <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1 shrink-0">
-                          <CheckCircle2 className="w-3 h-3" /> Đang xem
+                          <CheckCircle2 className="w-3 h-3" /> {t('Đang xem', 'Active')}
                         </span>
                       ) : (
                         <button
                           onClick={() => onSelectField(f.id)}
                           className="text-xs text-stone-500 hover:text-emerald-700 font-semibold cursor-pointer underline shrink-0"
                         >
-                          Chọn ruộng này
+                          {t('Chọn ruộng này', 'Select field')}
                         </button>
                       )}
                     </div>
 
                     <h3 className="font-bold text-base text-stone-900">{f.name}</h3>
                     <p className="text-xs text-stone-500">
-                      {f.province}, {f.district} • Diện tích: {f.areaHa} ha
+                      {f.province}, {f.district} • {t('Diện tích:', 'Area:')} {f.areaHa} ha
                     </p>
                     {f.isSharedWithMe ? (
                       <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-900">
                         <Users className="w-3.5 h-3.5 text-blue-700" />
-                        Được chia sẻ bởi {f.ownerName || 'Nông dân khác'} (Chỉ xem)
+                        {t(
+                          `Được chia sẻ bởi ${f.ownerName || 'Nông dân khác'} (Chỉ xem)`,
+                          `Shared by ${f.ownerName || 'Farmer'} (View only)`
+                        )}
                       </div>
                     ) : (
                       (f.activeShareToken || (f.sharedWithEmails && f.sharedWithEmails.length > 0)) && (
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 border border-stone-200 text-[11px] font-semibold text-stone-700">
                           <Share2 className="w-3 h-3 text-emerald-700" />
-                          Đang chia sẻ ({(f.sharedWithEmails?.length || 0) + (f.activeShareToken ? 1 : 0)})
+                          {t('Đang chia sẻ', 'Shared')} ({(f.sharedWithEmails?.length || 0) + (f.activeShareToken ? 1 : 0)})
                         </div>
                       )
                     )}
@@ -527,37 +544,47 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   {/* Detailed summary tags */}
                   <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-stone-100">
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
-                      <span className="text-stone-400 text-[10px] block">Chất đất:</span>
-                      <span className="font-semibold text-stone-800">{getSoilLabel(f.soilType)}</span>
+                      <span className="text-stone-400 text-[10px] block">{t('Chất đất:', 'Soil:')}</span>
+                      <span className="font-semibold text-stone-800">{getSoilLabel(f.soilType, lang)}</span>
                       <span className="text-[11px] text-stone-500 block">
-                        ({getDrainageLabel(f.soilCharacteristics.drainage)})
+                        ({getDrainageLabel(f.soilCharacteristics.drainage, lang)})
                       </span>
                     </div>
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
-                      <span className="text-stone-400 text-[10px] block">Giai đoạn:</span>
+                      <span className="text-stone-400 text-[10px] block">{t('Giai đoạn:', 'Stage:')}</span>
                       <span className="font-semibold text-stone-800">{f.crop.currentStage}</span>
-                      <span className="text-[11px] text-stone-500 block">Giống: {f.crop.variety}</span>
+                      <span className="text-[11px] text-stone-500 block">{t('Giống:', 'Variety:')} {f.crop.variety}</span>
                     </div>
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
-                      <span className="text-stone-400 text-[10px] block">Nguồn nước:</span>
-                      <span className="font-semibold text-stone-800">{getWaterLabel(f.waterSource.type)}</span>
+                      <span className="text-stone-400 text-[10px] block">{t('Nguồn nước:', 'Water:')}</span>
+                      <span className="font-semibold text-stone-800">{getWaterLabel(f.waterSource.type, lang)}</span>
                       <span className="text-[11px] text-stone-500 block">
                         {getWaterObsLabel(f.waterSource.observation)}
                       </span>
                     </div>
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
-                      <span className="text-stone-400 text-[10px] block">Điểm khí hậu gần nhất:</span>
+                      <span className="text-stone-400 text-[10px] block">{t('Điểm khí hậu:', 'NASA grid:')}</span>
                       <span className="font-semibold text-stone-800 font-mono">{f.nasaGrid.cellId}</span>
                       <span className="text-[11px] text-emerald-700 font-medium block">
-                        Cách {f.nasaGrid.distanceKm} km
+                        {t(`Cách ${f.nasaGrid.distanceKm} km`, `${f.nasaGrid.distanceKm} km away`)}
                       </span>
                     </div>
                   </div>
 
+                  {f.adaptiveMemory?.earthMetrics?.syncedAt && (
+                    <div className="text-[11px] text-stone-500 font-mono">
+                      {t('Lần cuối cập nhật NASA:', 'NASA last updated:')}{' '}
+                      {new Date(f.adaptiveMemory.earthMetrics.syncedAt).toLocaleString(
+                        lang === 'en' ? 'en-US' : 'vi-VN',
+                        { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
+                      )}
+                    </div>
+                  )}
+
                   {f.adaptiveMemory?.soilAdjustment && (
                     <div className="p-2 bg-purple-50 border border-purple-200 rounded-lg text-[11px] text-purple-900 flex items-start gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
-                      <span>Đã ghi nhận thực địa: {f.adaptiveMemory.soilAdjustment}</span>
+                      <span>{t('Đã ghi nhận thực địa:', 'Field note:')} {f.adaptiveMemory.soilAdjustment}</span>
                     </div>
                   )}
 
@@ -572,7 +599,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                             : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                         }`}
                       >
-                        {isActive ? 'Đang chọn xem' : 'Chuyển sang ruộng này'}
+                        {isActive ? t('Đang chọn xem', 'Active') : t('Chuyển sang ruộng này', 'Switch to field')}
                       </button>
 
                       {!f.isSharedWithMe && (
@@ -582,7 +609,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                             onClick={() => openEditWizard(f)}
                             className="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition cursor-pointer flex items-center gap-1"
                           >
-                            <Pencil className="w-3.5 h-3.5" /> Chỉnh sửa
+                            <Pencil className="w-3.5 h-3.5" /> {t('Chỉnh sửa', 'Edit')}
                           </button>
 
                           <button
@@ -595,7 +622,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                             }}
                             className="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 transition cursor-pointer flex items-center gap-1"
                           >
-                            <Share2 className="w-3.5 h-3.5" /> Chia sẻ
+                            <Share2 className="w-3.5 h-3.5" /> {t('Chia sẻ', 'Share')}
                           </button>
                         </>
                       )}
@@ -605,7 +632,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       <button
                         onClick={() => setConfirmDeleteId(f.id)}
                         className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                        title="Xóa thửa ruộng"
+                        title={t('Xóa thửa ruộng', 'Delete field')}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -620,13 +647,13 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           }}
                           className="px-2 py-1 bg-rose-600 text-white font-bold rounded cursor-pointer"
                         >
-                          Xác nhận xóa
+                          {t('Xác nhận xóa', 'Confirm')}
                         </button>
                         <button
                           onClick={() => setConfirmDeleteId(null)}
                           className="px-2 py-1 bg-stone-200 text-stone-700 rounded cursor-pointer"
                         >
-                          Hủy
+                          {t('Hủy', 'Cancel')}
                         </button>
                       </div>
                     )}
@@ -650,19 +677,21 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                 </div>
                 <div>
                   <h2 className="text-base font-bold">
-                    {editingField ? `Chỉnh sửa Hồ sơ: ${editingField.name}` : 'Tạo Hồ sơ Thửa ruộng Mới'}
+                    {editingField
+                      ? `${t('Chỉnh sửa Hồ sơ:', 'Edit Field:')} ${editingField.name}`
+                      : t('Tạo Hồ sơ Thửa ruộng Mới', 'Create New Field Profile')}
                   </h2>
                   <p className="text-xs text-emerald-200">
-                    Bước {currentStep}/5:{' '}
+                    {t('Bước', 'Step')} {currentStep}/5:{' '}
                     {currentStep === 1
-                      ? 'Vị trí ruộng (Bắt buộc)'
+                      ? t('Vị trí ruộng (Bắt buộc)', 'Field Location (Required)')
                       : currentStep === 2
-                      ? 'Đặc điểm đất'
+                      ? t('Đặc điểm đất', 'Soil Characteristics')
                       : currentStep === 3
-                      ? 'Nguồn nước tưới'
+                      ? t('Nguồn nước tưới', 'Water Source')
                       : currentStep === 4
-                      ? 'Họ hạt giống & Cây trồng'
-                      : 'Mục tiêu canh tác'}
+                      ? t('Họ hạt giống & Cây trồng', 'Seed Family & Crop')
+                      : t('Mục tiêu canh tác', 'Farming Goals')}
                   </p>
                 </div>
               </div>
@@ -677,14 +706,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
               </button>
             </div>
 
-            {/* Stepper Progress (clickable when editing an existing field) */}
+            {/* Stepper Progress */}
             <div className="px-6 py-2 bg-stone-100 border-b border-stone-200 flex items-center justify-between text-xs text-stone-600">
               {[
-                { s: 1, label: '1. Vị trí*' },
-                { s: 2, label: '2. Đất' },
-                { s: 3, label: '3. Nước' },
-                { s: 4, label: '4. Hạt giống & Cây' },
-                { s: 5, label: '5. Mục tiêu' },
+                { s: 1, label: t('1. Vị trí*', '1. Location*') },
+                { s: 2, label: t('2. Đất', '2. Soil') },
+                { s: 3, label: t('3. Nước', '3. Water') },
+                { s: 4, label: t('4. Hạt giống & Cây', '4. Crop') },
+                { s: 5, label: t('5. Mục tiêu', '5. Goals') },
               ].map(st => (
                 <button
                   key={st.s}
@@ -1365,7 +1394,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   }}
                   className="px-4 py-2 border border-stone-300 text-stone-700 font-semibold rounded-xl text-xs hover:bg-stone-100 transition cursor-pointer flex items-center gap-1"
                 >
-                  <ChevronLeft className="w-4 h-4" /> Quay lại
+                  <ChevronLeft className="w-4 h-4" /> {t('Quay lại', 'Back')}
                 </button>
               ) : (
                 <button
@@ -1373,7 +1402,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   onClick={() => setWizardOpen(false)}
                   className="px-4 py-2 text-stone-500 font-semibold text-xs hover:underline cursor-pointer"
                 >
-                  Hủy bỏ
+                  {t('Hủy bỏ', 'Cancel')}
                 </button>
               )}
 
@@ -1385,7 +1414,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1"
                 >
                   {savingField ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Lưu thay đổi ngay
+                  {t('Lưu thay đổi ngay', 'Save changes now')}
                 </button>
               )}
 
@@ -1395,7 +1424,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   onClick={handleNextStep}
                   className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
                 >
-                  Tiếp theo <ChevronRight className="w-4 h-4" />
+                  {t('Tiếp theo', 'Next')} <ChevronRight className="w-4 h-4" />
                 </button>
               ) : (
                 <button
@@ -1406,10 +1435,10 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                 >
                   {savingField ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                   {savingField
-                    ? 'Đang lưu hồ sơ...'
+                    ? t('Đang lưu hồ sơ...', 'Saving...')
                     : editingField
-                    ? 'Lưu thông tin đã chỉnh sửa'
-                    : 'Hoàn thành & Lưu thửa ruộng'}
+                    ? t('Lưu thông tin đã chỉnh sửa', 'Save Changes')
+                    : t('Hoàn thành & Lưu thửa ruộng', 'Save Field Profile')}
                 </button>
               )}
             </div>
@@ -1427,7 +1456,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   <Share2 className="w-4 h-4 text-emerald-100" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold">Chia sẻ Thửa ruộng</h2>
+                  <h2 className="text-base font-bold">{t('Chia sẻ Thửa ruộng', 'Share Field')}</h2>
                   <p className="text-[11px] text-emerald-200 truncate max-w-[300px]">
                     {shareModalField.name} · {shareModalField.province}
                   </p>

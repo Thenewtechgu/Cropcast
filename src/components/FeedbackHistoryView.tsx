@@ -1,17 +1,7 @@
 import React, { useState } from 'react';
-import {
-  History,
-  Sparkles,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
-  Droplets,
-  MessageSquare,
-  Send,
-  ThumbsUp,
-  Brain,
-} from 'lucide-react';
+import { History, Sparkles, CheckCircle2, MessageSquare, Send, Brain } from 'lucide-react';
 import { FeedbackRecord, FeedbackType, FieldProfile } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface FeedbackHistoryViewProps {
   activeField: FieldProfile;
@@ -24,29 +14,83 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
   feedbackHistory,
   onAddFeedback,
 }) => {
+  const { lang, t } = useLanguage();
   const [selectedType, setSelectedType] = useState<FeedbackType>('soil_still_dry');
   const [customComment, setCustomComment] = useState('');
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   const feedbackOptions: Array<{ type: FeedbackType; label: string; desc: string }> = [
-    { type: 'soil_still_dry', label: 'Đất thực tế vẫn khô', desc: 'Đất khô nhanh hơn mô hình tính toán, rễ cần nước sớm' },
-    { type: 'soil_too_wet', label: 'Đất đang quá ẩm / ứ đọng', desc: 'Sau mưa/tưới nước thoát chậm, có dấu hiệu úng cục bộ' },
-    { type: 'crop_healthy', label: 'Cây phát triển bình thường', desc: 'Lá xanh tốt, mạ bén rễ đều, không có dấu hiệu bất thường' },
-    { type: 'crop_abnormal', label: 'Cây có dấu hiệu lạ / vàng lá', desc: 'Chóp lá thâm tái, xoăn đọt hoặc có vết chấm nấm' },
-    { type: 'helpful', label: 'Khuyến nghị AI rất hữu ích', desc: 'Đã áp dụng và thấy phù hợp với ruộng' },
-    { type: 'not_suitable', label: 'Khuyến nghị chưa sát thực tế', desc: 'Lời khuyên chưa đúng với điều kiện ruộng hôm nay' },
-    { type: 'followed', label: 'Tôi đã làm theo hướng dẫn', desc: 'Đã hoàn thành các việc được AI đề xuất' },
-    { type: 'not_followed', label: 'Tôi không thực hiện theo', desc: 'Do bận việc hoặc thời tiết thực tế thay đổi' },
+    {
+      type: 'soil_still_dry',
+      label: t('Đất thực tế vẫn khô', 'Soil is still dry'),
+      desc: t(
+        'Đất khô nhanh hơn mô hình tính toán, rễ cần nước sớm',
+        'Topsoil dried faster than model estimated; roots need water sooner'
+      ),
+    },
+    {
+      type: 'soil_too_wet',
+      label: t('Đất đang quá ẩm / ứ đọng', 'Soil too wet / waterlogged'),
+      desc: t(
+        'Sau mưa/tưới nước thoát chậm, có dấu hiệu úng cục bộ',
+        'Slow drainage after rain or irrigation; localized pooling observed'
+      ),
+    },
+    {
+      type: 'crop_healthy',
+      label: t('Cây phát triển bình thường', 'Crop growing well'),
+      desc: t(
+        'Lá xanh tốt, rễ bén đều, không có dấu hiệu bất thường',
+        'Healthy foliage and uniform stand with no stress signs'
+      ),
+    },
+    {
+      type: 'crop_abnormal',
+      label: t('Cây có dấu hiệu lạ / vàng lá', 'Crop stress / yellowing'),
+      desc: t(
+        'Chóp lá thâm tái, xoăn đọt hoặc có vết chấm nấm',
+        'Leaf yellowing, curling tips, or fungal spots noticed'
+      ),
+    },
+    {
+      type: 'helpful',
+      label: t('Khuyến nghị AI rất hữu ích', 'Recommendation was helpful'),
+      desc: t('Đã áp dụng và thấy phù hợp với ruộng', 'Applied on farm and matched field reality'),
+    },
+    {
+      type: 'not_suitable',
+      label: t('Khuyến nghị chưa sát thực tế', 'Not accurate for field'),
+      desc: t('Lời khuyên chưa đúng với điều kiện ruộng hôm nay', 'Did not match today’s field conditions'),
+    },
+    {
+      type: 'followed',
+      label: t('Tôi đã làm theo hướng dẫn', 'Followed the plan'),
+      desc: t('Đã hoàn thành các việc được đề xuất', 'Completed suggested actions'),
+    },
+    {
+      type: 'not_followed',
+      label: t('Tôi không thực hiện theo', 'Could not follow'),
+      desc: t('Do bận việc hoặc thời tiết thực tế thay đổi', 'Weather changed or schedule constraint'),
+    },
   ];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    let systemAction = 'Đã lưu phản hồi vào nhật ký huấn luyện thửa ruộng.';
+    let systemAction = t(
+      'Đã lưu phản hồi vào nhật ký huấn luyện thửa ruộng.',
+      'Saved feedback to field adaptation log.'
+    );
     if (selectedType === 'soil_still_dry') {
-      systemAction = 'AI đã ghi nhận đất thoát nước nhanh: Tăng độ nhạy tưới cho các ngày tiếp theo.';
+      systemAction = t(
+        'AI đã ghi nhận đất thoát nước nhanh: Tăng độ nhạy tưới cho các ngày tiếp theo.',
+        'Recorded fast-draining soil: Increased irrigation alert sensitivity.'
+      );
     } else if (selectedType === 'soil_too_wet') {
-      systemAction = 'AI đã ghi nhận đất thoát chậm: Ưu tiên cảnh báo ngập úng và hoãn tưới nước.';
+      systemAction = t(
+        'AI đã ghi nhận đất thoát chậm: Ưu tiên cảnh báo ngập úng và hoãn tưới nước.',
+        'Recorded slow drainage: Prioritized drainage warnings and postponed irrigation.'
+      );
     }
 
     onAddFeedback({
@@ -58,11 +102,16 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
     });
 
     setCustomComment('');
-    setSuccessNotice('Đã gửi phản hồi thành công! Trí tuệ AI của thửa ruộng đã tự động cập nhật giả định.');
+    setSuccessNotice(
+      t(
+        'Đã gửi phản hồi thành công! Trí tuệ AI của thửa ruộng đã tự động cập nhật giả định.',
+        'Feedback saved! Field diagnostics have adapted automatically.'
+      )
+    );
     setTimeout(() => setSuccessNotice(null), 5000);
   };
 
-  const fieldFeedbacks = feedbackHistory.filter(f => f.fieldId === activeField.id);
+  const fieldFeedbacks = feedbackHistory.filter((f) => f.fieldId === activeField.id);
 
   return (
     <div className="space-y-6">
@@ -71,45 +120,58 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
         <div>
           <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
             <Brain className="w-4 h-4 text-emerald-600" />
-            Vòng lặp học máy & Tự động thích ứng từ người nông dân
+            {t('Vòng lặp tự động thích ứng từ nông dân', 'Farmer-in-the-Loop Field Adaptation')}
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
-            Lịch sử Phản hồi & Trí nhớ AI Của Ruộng
+            {t('Lịch sử Phản hồi & Trí nhớ Của Ruộng', 'Field Feedback & Adaptive Memory')}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-            Khác biệt lớn nhất với app dự báo thời tiết thông thường: AI lắng nghe cảm nhận thực địa của bạn để điều chỉnh độ ẩm, khả năng thoát nước và ngưỡng khuyến nghị.
+            {t(
+              'AI lắng nghe quan sát thực địa của bạn để tinh chỉnh độ ẩm, khả năng thoát nước và ngưỡng khuyến nghị riêng cho thửa ruộng này.',
+              'Your ground observations calibrate soil moisture sensitivity, drainage assumptions, and advisory thresholds for this field.'
+            )}
           </p>
         </div>
 
         {/* Current Field Learned State */}
         <div className="bg-purple-50 border border-purple-200 rounded-xl p-3.5 text-xs text-purple-900 max-w-sm space-y-1">
           <div className="font-bold flex items-center gap-1 text-purple-800">
-            <Sparkles className="w-3.5 h-3.5 text-purple-600" /> Hồ sơ học tập của ruộng:
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />{' '}
+            {t('Hồ sơ học tập của ruộng:', 'Learned Field Profile:')}
           </div>
           <p className="text-[11px] leading-snug">
-            {activeField.adaptiveMemory?.soilAdjustment || 'Chất đất đang tuân theo mô hình mặc định. Hãy gửi phản hồi bên dưới khi đi thăm ruộng!'}
+            {activeField.adaptiveMemory?.soilAdjustment ||
+              t(
+                'Chất đất đang tuân theo mô hình mặc định. Hãy gửi phản hồi bên dưới khi đi thăm ruộng!',
+                'Soil currently follows baseline parameters. Submit observations below after inspecting your field.'
+              )}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Send New Observation / Feedback Form */}
+        {/* Left: Send New Observation */}
         <div className="lg:col-span-5 bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
           <div className="border-b border-stone-100 pb-3">
             <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-emerald-700" />
-              Gửi Quan sát Thực tế Hôm Nay
+              {t('Gửi Quan sát Thực tế Hôm Nay', 'Submit Today’s Field Observation')}
             </h2>
             <p className="text-xs text-stone-500">
-              Bạn quan sát thấy điều gì tại ruộng "{activeField.name}"?
+              {t(
+                `Bạn quan sát thấy điều gì tại ruộng "${activeField.name}"?`,
+                `What did you observe at "${activeField.name}"?`
+              )}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
             <div className="space-y-2">
-              <label className="font-bold text-stone-800 block">Chọn tình trạng quan sát:</label>
+              <label className="font-bold text-stone-800 block">
+                {t('Chọn tình trạng quan sát:', 'Select observation:')}
+              </label>
               <div className="space-y-1.5">
-                {feedbackOptions.map(opt => (
+                {feedbackOptions.map((opt) => (
                   <label
                     key={opt.type}
                     className={`p-2.5 rounded-xl border flex items-start gap-2.5 cursor-pointer transition ${
@@ -135,12 +197,17 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
             </div>
 
             <div>
-              <label className="font-bold text-stone-800 block mb-1">Ghi chú thêm (tùy chọn):</label>
+              <label className="font-bold text-stone-800 block mb-1">
+                {t('Ghi chú thêm (tùy chọn):', 'Additional note (optional):')}
+              </label>
               <textarea
                 rows={3}
-                placeholder="VD: Góc ruộng phía Đông còn đọng nước, đất pha cát nhiều hơn dự kiến..."
+                placeholder={t(
+                  'VD: Góc ruộng phía Đông còn đọng nước, đất pha cát nhiều hơn dự kiến...',
+                  'E.g., East corner holds standing water, sandier soil than expected...'
+                )}
                 value={customComment}
-                onChange={e => setCustomComment(e.target.value)}
+                onChange={(e) => setCustomComment(e.target.value)}
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 text-xs"
               />
             </div>
@@ -149,7 +216,8 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
               type="submit"
               className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
             >
-              <Send className="w-4 h-4" /> Gửi phản hồi để AI học ngay
+              <Send className="w-4 h-4" />{' '}
+              {t('Gửi phản hồi để AI học ngay', 'Save Feedback')}
             </button>
 
             {successNotice && (
@@ -161,16 +229,22 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
           </form>
         </div>
 
-        {/* Right: History Log & AI Adaptation Audit Trail */}
+        {/* Right: History Log */}
         <div className="lg:col-span-7 bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
           <div className="border-b border-stone-100 pb-3 flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                 <History className="w-4 h-4 text-emerald-700" />
-                Nhật ký Phản hồi & Tinh chỉnh của AI ({fieldFeedbacks.length})
+                {t(
+                  `Nhật ký Phản hồi & Tinh chỉnh (${fieldFeedbacks.length})`,
+                  `Feedback & Adaptation Log (${fieldFeedbacks.length})`
+                )}
               </h2>
               <p className="text-xs text-stone-500">
-                Lịch sử lưu giữ minh bạch mọi lần nông dân phản hồi và phản ứng của hệ thống
+                {t(
+                  'Lịch sử lưu giữ minh bạch mọi lần nông dân phản hồi và phản ứng của hệ thống',
+                  'Transparent audit log of field feedback and system adjustments'
+                )}
               </p>
             </div>
           </div>
@@ -178,14 +252,19 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
           {fieldFeedbacks.length === 0 ? (
             <div className="p-10 text-center text-stone-400 space-y-2">
               <History className="w-8 h-8 mx-auto opacity-50" />
-              <div className="text-xs font-semibold text-stone-700">Chưa có phản hồi nào cho thửa ruộng này</div>
+              <div className="text-xs font-semibold text-stone-700">
+                {t('Chưa có phản hồi nào cho thửa ruộng này', 'No feedback logged for this field yet')}
+              </div>
               <p className="text-[11px] text-stone-400">
-                Khi bạn gửi phản hồi ở cột bên trái hoặc trên bảng Tổng quan, các điều chỉnh sẽ xuất hiện tại đây.
+                {t(
+                  'Khi bạn gửi phản hồi ở cột bên trái hoặc trên bảng Tổng quan, các điều chỉnh sẽ xuất hiện tại đây.',
+                  'Submit observations on the left or from the Dashboard to see adaptations here.'
+                )}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {fieldFeedbacks.map(item => (
+              {fieldFeedbacks.map((item) => (
                 <div
                   key={item.id}
                   className="p-3.5 bg-stone-50/80 rounded-xl border border-stone-200 text-xs space-y-2"
@@ -193,10 +272,17 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-stone-900 flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      {feedbackOptions.find(o => o.type === item.feedbackType)?.label || item.feedbackType}
+                      {feedbackOptions.find((o) => o.type === item.feedbackType)?.label ||
+                        item.feedbackType}
                     </span>
                     <span className="text-[10px] text-stone-400 font-mono">
-                      {new Date(item.timestamp).toLocaleDateString('vi-VN')} {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(item.timestamp).toLocaleDateString(
+                        lang === 'en' ? 'en-US' : 'vi-VN'
+                      )}{' '}
+                      {new Date(item.timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
                     </span>
                   </div>
 

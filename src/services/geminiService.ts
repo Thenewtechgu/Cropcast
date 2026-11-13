@@ -7,6 +7,8 @@ import {
   FarmerConstraints,
 } from '../types';
 import { pickBestRotationStrategy } from './rotationEngine';
+import { safeJsonFetch } from './httpClient';
+import type { AppLanguage } from '../contexts/LanguageContext';
 
 export interface AdvisorApiResponse {
   success: boolean;
@@ -33,10 +35,11 @@ export const GeminiService = {
     field: FieldProfile,
     weather: WeatherObservation,
     ruleAnalysis: any,
-    feedbackHistory: FeedbackRecord[]
+    feedbackHistory: FeedbackRecord[],
+    language: AppLanguage = 'vi'
   ): Promise<AdvisorApiResponse> {
     try {
-      const response = await fetch('/api/gemini/advisor', {
+      const { res, data } = await safeJsonFetch<AdvisorApiResponse>('/api/gemini/advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -44,20 +47,25 @@ export const GeminiService = {
           weather,
           ruleAnalysis,
           feedbackHistory,
+          earthMetrics: field.adaptiveMemory?.earthMetrics,
+          language,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}`);
       }
 
-      return await response.json();
+      return data;
     } catch (err: any) {
       console.warn('Backend Gemini API not reachable or errored, using rule engine synthesis:', err.message);
       return {
         success: false,
         fallback: true,
-        message: 'Đang dùng bộ phân tích nông học tiêu chuẩn (Quy tắc chuyên gia).',
+        message:
+          language === 'en'
+            ? 'Using standard agronomic rule engine analysis.'
+            : 'Đang dùng bộ phân tích nông học tiêu chuẩn (Quy tắc chuyên gia).',
       };
     }
   },
@@ -71,26 +79,27 @@ export const GeminiService = {
     previouslyRejectedTitles: string[];
     priorities: FarmerPriorityId[];
     constraints: FarmerConstraints;
+    language?: AppLanguage;
   }): Promise<{ strategy: RotationStrategy; source: 'gemini' | 'rule_engine' }> {
+    const lang = params.language || 'vi';
     try {
-      const response = await fetch('/api/gemini/rotation-rethink', {
+      const { res, data } = await safeJsonFetch<any>('/api/gemini/rotation-rethink', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           field: params.field,
           weather: params.weather,
+          earthMetrics: params.field.adaptiveMemory?.earthMetrics,
           rejectedStrategy: params.rejectedStrategy,
           rejectionReason: params.rejectionReason,
           previouslyRejectedTitles: params.previouslyRejectedTitles,
           priorities: params.priorities,
           constraints: params.constraints,
+          language: lang,
         }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.strategy) {
-          return { strategy: data.strategy as RotationStrategy, source: 'gemini' };
-        }
+      if (res.ok && data?.success && data?.strategy) {
+        return { strategy: data.strategy as RotationStrategy, source: 'gemini' };
       }
     } catch {
       // Fall back to deterministic agronomy selector
@@ -103,7 +112,8 @@ export const GeminiService = {
       params.priorities,
       params.constraints,
       nextIds,
-      params.rejectionReason
+      params.rejectionReason,
+      lang
     );
     return { strategy: fallbackStrategy, source: 'rule_engine' };
   },
@@ -112,21 +122,23 @@ export const GeminiService = {
     message: string,
     field: FieldProfile,
     conversationHistory: Array<{ role: 'user' | 'model'; parts: string }>,
-    weather?: WeatherObservation
+    weather?: WeatherObservation,
+    language: AppLanguage = 'vi'
   ): Promise<{ reply: string; isError?: boolean; fromFallback?: boolean }> {
     try {
-      const response = await fetch('/api/gemini/chat', {
+      const { res, data } = await safeJsonFetch<any>('/api/gemini/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message,
           field,
           weather,
+          earthMetrics: field.adaptiveMemory?.earthMetrics,
           conversationHistory,
+          language,
         }),
       });
 
-      const data = await response.json().catch(() => null);
       if (data?.reply) {
         return {
           reply: data.reply,
@@ -135,15 +147,24 @@ export const GeminiService = {
         };
       }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}`);
       }
 
-      return { reply: 'Không nhận được câu trả lời từ AI.', isError: true };
+      return {
+        reply:
+          language === 'en'
+            ? 'No response received from AI.'
+            : 'Không nhận được câu trả lời từ AI.',
+        isError: true,
+      };
     } catch {
       return {
         isError: true,
-        reply: `Không thể kết nối tới máy chủ AI lúc này. Gợi ý tạm thời cho "${field.name}" (${field.crop.name}): hãy kiểm tra độ ẩm vùng rễ thực tế ngoài ruộng và rãnh thoát nước trước khi tưới hoặc bón phân.`,
+        reply:
+          language === 'en'
+            ? `Cannot reach AI server right now. Quick note for "${field.name}" (${field.crop.name}): check root moisture and field drainage before irrigating or fertilizing.`
+            : `Không thể kết nối tới máy chủ AI lúc này. Gợi ý tạm thời cho "${field.name}" (${field.crop.name}): hãy kiểm tra độ ẩm vùng rễ thực tế ngoài ruộng và rãnh thoát nước trước khi tưới hoặc bón phân.`,
       };
     }
   },
