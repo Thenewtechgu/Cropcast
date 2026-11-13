@@ -202,103 +202,110 @@ export async function executeNasaPowerSync(cellIds?: string[]): Promise<SyncLogR
     const startStr = startD.toISOString().slice(0, 10).replace(/-/g, '');
     const endStr = endD.toISOString().slice(0, 10).replace(/-/g, '');
 
-    // For demonstration and resilient testing, query sample cell or simulate NASA payload
-    for (const cell of targetCells.slice(0, 5)) {
-      try {
-        const nasaUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=${startStr}&end=${endStr}&format=JSON`;
+    // Query target cells in parallel with crisp timeout and safe JSON parsing
+    await Promise.all(
+      targetCells.slice(0, 5).map(async (cell) => {
+        try {
+          const nasaUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=${startStr}&end=${endStr}&format=JSON`;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-        const resp = await fetch(nasaUrl, {
-          signal: controller.signal,
-          headers: { 'User-Agent': 'AgriNASA-Central-Sync' }
-        }).catch(() => null);
+          const resp = await fetch(nasaUrl, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'AgriNASA-Central-Sync', Accept: 'application/json' },
+          }).catch(() => null);
 
-        clearTimeout(timeoutId);
+          clearTimeout(timeoutId);
 
-        let dataPoints: Array<{ date: string; indicator: string; value: number }> = [];
+          let dataPoints: Array<{ date: string; indicator: string; value: number }> = [];
 
-        if (resp && resp.ok) {
-          const rawText = await resp.text();
-          const trimmed = rawText.trim();
-          const json = trimmed && !trimmed.startsWith('<') ? JSON.parse(trimmed) : null;
-          const params = json?.properties?.parameter || {};
-          for (const ind of indicators) {
-            const indValues = params[ind] || {};
-            for (const [dKey, val] of Object.entries(indValues)) {
-              const numVal = Number(val);
-              // Handle NASA fill value -999 / -999.0
-              if (numVal !== -999 && !isNaN(numVal)) {
-                const formattedDate = `${dKey.slice(0, 4)}-${dKey.slice(4, 6)}-${dKey.slice(6, 8)}`;
-                dataPoints.push({ date: formattedDate, indicator: ind, value: numVal });
+          if (resp && resp.ok) {
+            const rawText = await resp.text();
+            const trimmed = rawText.trim();
+            let json: any = null;
+            if (trimmed && !trimmed.startsWith('<')) {
+              try {
+                json = JSON.parse(trimmed);
+              } catch {
+                json = null;
+              }
+            }
+            const params = json?.properties?.parameter || {};
+            for (const ind of indicators) {
+              const indValues = params[ind] || {};
+              for (const [dKey, val] of Object.entries(indValues)) {
+                const numVal = Number(val);
+                if (numVal !== -999 && !isNaN(numVal)) {
+                  const formattedDate = `${dKey.slice(0, 4)}-${dKey.slice(4, 6)}-${dKey.slice(6, 8)}`;
+                  dataPoints.push({ date: formattedDate, indicator: ind, value: numVal });
+                }
               }
             }
           }
-        }
 
-        // If network restricted or empty, generate verified physical values within NASA bounds
-        if (dataPoints.length === 0) {
-          for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
-            const formattedDate = d.toISOString().slice(0, 10);
-            indicators.forEach(ind => {
-              let simulatedVal = 25.0;
-              if (ind === 'T2M') simulatedVal = cell.climatology21Yr.avgTemp + (Math.sin(d.getDate()) * 2);
-              else if (ind === 'T2M_MIN') simulatedVal = cell.climatology21Yr.avgTemp - 4.0;
-              else if (ind === 'T2M_MAX') simulatedVal = cell.climatology21Yr.avgTemp + 5.0;
-              else if (ind === 'PRECTOTCORR') simulatedVal = Number((Math.random() * 12).toFixed(1));
-              else if (ind === 'GWETROOT') simulatedVal = cell.climatology21Yr.avgGwetroot;
-              else if (ind === 'GWETTOP') simulatedVal = cell.climatology21Yr.avgGwettop;
-              else if (ind === 'RH2M') simulatedVal = cell.climatology21Yr.avgRh2m;
-              else if (ind === 'ALLSKY_SFC_SW_DWN') simulatedVal = cell.climatology21Yr.avgSolarDwn;
+          // If network restricted or empty, generate verified physical values within NASA bounds
+          if (dataPoints.length === 0) {
+            for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+              const formattedDate = d.toISOString().slice(0, 10);
+              indicators.forEach((ind) => {
+                let simulatedVal = 25.0;
+                if (ind === 'T2M') simulatedVal = cell.climatology21Yr.avgTemp + Math.sin(d.getDate()) * 2;
+                else if (ind === 'T2M_MIN') simulatedVal = cell.climatology21Yr.avgTemp - 4.0;
+                else if (ind === 'T2M_MAX') simulatedVal = cell.climatology21Yr.avgTemp + 5.0;
+                else if (ind === 'PRECTOTCORR') simulatedVal = Number((Math.random() * 12).toFixed(1));
+                else if (ind === 'GWETROOT') simulatedVal = cell.climatology21Yr.avgGwetroot;
+                else if (ind === 'GWETTOP') simulatedVal = cell.climatology21Yr.avgGwettop;
+                else if (ind === 'RH2M') simulatedVal = cell.climatology21Yr.avgRh2m;
+                else if (ind === 'ALLSKY_SFC_SW_DWN') simulatedVal = cell.climatology21Yr.avgSolarDwn;
 
-              dataPoints.push({
-                date: formattedDate,
-                indicator: ind,
-                value: Number(simulatedVal.toFixed(2)),
+                dataPoints.push({
+                  date: formattedDate,
+                  indicator: ind,
+                  value: Number(simulatedVal.toFixed(2)),
+                });
               });
+            }
+          }
+
+          // Write to Supabase or in-memory
+          if (supabase) {
+            const rowsToInsert = dataPoints.map((dp) => ({
+              cell_id: cell.cellId,
+              date: dp.date,
+              indicator_code: dp.indicator,
+              value: dp.value,
+              unit: unitsMap[dp.indicator] || '',
+              data_source: 'NASA_POWER_DAILY',
+              version: currentActiveVersion,
+            }));
+
+            await supabase.from('nasa_daily_data').upsert(rowsToInsert, {
+              onConflict: 'cell_id,date,indicator_code',
             });
           }
-        }
 
-        // Write to Supabase or in-memory
-        if (supabase) {
-          const rowsToInsert = dataPoints.map(dp => ({
-            cell_id: cell.cellId,
-            date: dp.date,
-            indicator_code: dp.indicator,
-            value: dp.value,
-            unit: unitsMap[dp.indicator] || '',
-            data_source: 'NASA_POWER_DAILY',
-            version: currentActiveVersion,
-          }));
-
-          // Upsert with unique constraint on (cell_id, date, indicator_code)
-          await supabase.from('nasa_daily_data').upsert(rowsToInsert, {
-            onConflict: 'cell_id,date,indicator_code',
+          // Also add to memory
+          dataPoints.forEach((dp) => {
+            inMemoryDailyData = inMemoryDailyData.filter(
+              (r) => !(r.cellId === cell.cellId && r.date === dp.date && r.indicatorCode === dp.indicator)
+            );
+            inMemoryDailyData.push({
+              cellId: cell.cellId,
+              date: dp.date,
+              indicatorCode: dp.indicator,
+              value: dp.value,
+              unit: unitsMap[dp.indicator] || '',
+              version: currentActiveVersion,
+            });
           });
+
+          syncedCount += dataPoints.length;
+        } catch (cellErr) {
+          console.warn(`[Sync] Warning on cell ${cell.cellId}:`, cellErr);
         }
-
-        // Also add to memory
-        dataPoints.forEach(dp => {
-          inMemoryDailyData = inMemoryDailyData.filter(
-            r => !(r.cellId === cell.cellId && r.date === dp.date && r.indicatorCode === dp.indicator)
-          );
-          inMemoryDailyData.push({
-            cellId: cell.cellId,
-            date: dp.date,
-            indicatorCode: dp.indicator,
-            value: dp.value,
-            unit: unitsMap[dp.indicator] || '',
-            version: currentActiveVersion,
-          });
-        });
-
-        syncedCount += dataPoints.length;
-      } catch (cellErr) {
-        console.warn(`[Sync] Warning on cell ${cell.cellId}:`, cellErr);
-      }
-    }
+      })
+    );
 
     newLog.recordsSynced = syncedCount;
     newLog.status = 'SUCCESS';
@@ -1116,4 +1123,115 @@ export function getSyncLogs() {
 
 export function getDataImports() {
   return inMemoryImports;
+}
+
+// ==============================================================================
+// Chunked Staged Batch Upload Sessions (prevents HTTP 413 Payload Too Large)
+// ==============================================================================
+
+export interface StagedChunkItem {
+  fileName: string;
+  folderName: string;
+  partIndex: number;
+  totalParts: number;
+  content: string;
+}
+
+interface StagedFileAccumulator {
+  fileName: string;
+  folderName: string;
+  totalParts: number;
+  parts: string[];
+}
+
+interface StagedUploadSession {
+  sessionId: string;
+  createdAt: number;
+  filesMap: Map<string, StagedFileAccumulator>;
+}
+
+const stagedUploadSessions = new Map<string, StagedUploadSession>();
+
+function pruneExpiredUploadSessions() {
+  const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+  for (const [id, sess] of stagedUploadSessions.entries()) {
+    if (sess.createdAt < cutoff) {
+      stagedUploadSessions.delete(id);
+    }
+  }
+}
+
+export function createStagedUploadSession(): { sessionId: string } {
+  pruneExpiredUploadSessions();
+  const sessionId = `upl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  stagedUploadSessions.set(sessionId, {
+    sessionId,
+    createdAt: Date.now(),
+    filesMap: new Map(),
+  });
+  return { sessionId };
+}
+
+export function appendStagedUploadChunk(
+  sessionId: string,
+  items: StagedChunkItem[]
+): { receivedFilesCount: number } {
+  const session = stagedUploadSessions.get(sessionId);
+  if (!session) {
+    throw new Error('Phiên tải tệp đã hết hạn hoặc không tồn tại. Vui lòng thử lại.');
+  }
+  for (const item of items) {
+    const fileName = String(item.fileName || 'upload.csv');
+    const folderName = String(item.folderName || 'Thư mục gốc');
+    const partIndex = Math.max(0, Number(item.partIndex) || 0);
+    const totalParts = Math.max(1, Number(item.totalParts) || 1);
+    const key = `${folderName}::${fileName}`;
+
+    let acc = session.filesMap.get(key);
+    if (!acc || acc.totalParts !== totalParts) {
+      acc = {
+        fileName,
+        folderName,
+        totalParts,
+        parts: new Array<string>(totalParts).fill(''),
+      };
+      session.filesMap.set(key, acc);
+    }
+    acc.parts[partIndex] = String(item.content || '');
+  }
+  return { receivedFilesCount: session.filesMap.size };
+}
+
+function materializeStagedFiles(sessionId: string): BatchCsvFileInput[] {
+  const session = stagedUploadSessions.get(sessionId);
+  if (!session) {
+    throw new Error('Phiên tải tệp đã hết hạn hoặc không tồn tại. Vui lòng thử lại.');
+  }
+  const out: BatchCsvFileInput[] = [];
+  for (const acc of session.filesMap.values()) {
+    out.push({
+      fileName: acc.fileName,
+      folderName: acc.folderName,
+      content: acc.parts.join(''),
+    });
+  }
+  return out;
+}
+
+export function previewStagedUploadSession(sessionId: string): BatchPreviewResponse {
+  const files = materializeStagedFiles(sessionId);
+  if (files.length === 0) {
+    throw new Error('Chưa có tệp CSV nào trong phiên tải lên.');
+  }
+  return previewBatchCsvFiles(files);
+}
+
+export function startAsyncStagedImportJob(sessionId: string): CsvImportJobStatus {
+  const files = materializeStagedFiles(sessionId);
+  if (files.length === 0) {
+    throw new Error('Chưa có tệp CSV nào để nhập.');
+  }
+  const job = startAsyncBatchImportJob(files);
+  stagedUploadSessions.delete(sessionId);
+  return job;
 }

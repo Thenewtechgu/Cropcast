@@ -1,8 +1,10 @@
 import type { EarthEnvironmentSnapshot, FieldProfile } from '../types';
+import type { AppLanguage } from '../contexts/LanguageContext';
 import { safeJsonFetch } from './httpClient';
 
 export async function fetchFieldEarthMetrics(
-  field: FieldProfile
+  field: FieldProfile,
+  lang: AppLanguage = 'vi'
 ): Promise<EarthEnvironmentSnapshot> {
   const params = new URLSearchParams({
     fieldId: field.id,
@@ -13,14 +15,20 @@ export async function fetchFieldEarthMetrics(
   });
   const { res, data } = await safeJsonFetch<any>(`/api/nasa/environment?${params.toString()}`);
   if (!res.ok) {
-    throw new Error(data?.error || 'Không thể tải dữ liệu môi trường NASA.');
+    throw new Error(
+      data?.error ||
+        (lang === 'en'
+          ? 'Unable to load NASA environmental data.'
+          : 'Không thể tải dữ liệu môi trường NASA.')
+    );
   }
   return data as EarthEnvironmentSnapshot;
 }
 
 export async function syncFieldEarthMetrics(
   field: FieldProfile,
-  rotationId?: string
+  rotationId?: string,
+  lang: AppLanguage = 'vi'
 ): Promise<EarthEnvironmentSnapshot> {
   const { res, data } = await safeJsonFetch<any>('/api/nasa/sync-environment', {
     method: 'POST',
@@ -35,7 +43,10 @@ export async function syncFieldEarthMetrics(
     }),
   });
   if (!res.ok) {
-    throw new Error(data?.error || 'Đồng bộ dữ liệu NASA thất bại.');
+    throw new Error(
+      data?.error ||
+        (lang === 'en' ? 'NASA data sync failed.' : 'Đồng bộ dữ liệu NASA thất bại.')
+    );
   }
   return data as EarthEnvironmentSnapshot;
 }

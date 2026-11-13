@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { CalendarDays, Sparkles } from 'lucide-react';
 import { FieldProfile, PlantingRiskEvaluation } from '../types';
 import { evaluatePlantingCalendar } from '../services/agronomyEngine';
+import { getPlantDisplayName } from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface PlantingCalendarViewProps {
@@ -10,21 +12,46 @@ interface PlantingCalendarViewProps {
 
 export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({ activeField }) => {
   const { lang, t } = useLanguage();
-  const [selectedCrop, setSelectedCrop] = useState<string>(activeField.crop.name);
+  const [selectedCropKey, setSelectedCropKey] = useState<string>('active');
   const [selectedDetail, setSelectedDetail] = useState<PlantingRiskEvaluation | null>(null);
 
-  const crops = Array.from(
-    new Set([
-      activeField.crop.name,
-      t('Lúa (ST25 / Đài Thơm)', 'Rice (ST25 / Dai Thom)'),
-      t('Rau cải xanh vụ đông', 'Leafy Greens'),
-      t('Ngô lai F1 (Bắp)', 'Maize / Corn'),
-      t('Đậu tương / Lạc (Họ Đậu)', 'Soybean / Peanut (Legume)'),
-    ])
+  const cropOptions = [
+    {
+      id: 'active',
+      label: getPlantDisplayName(activeField.crop.name, lang),
+      queryValue: activeField.crop.name,
+    },
+    {
+      id: 'rice',
+      label: t('Lúa (ST25 / Đài Thơm)', 'Rice (ST25 / Dai Thom)'),
+      queryValue: t('Lúa (ST25 / Đài Thơm)', 'Rice (ST25 / Dai Thom)'),
+    },
+    {
+      id: 'veg',
+      label: t('Rau cải xanh vụ đông', 'Winter Leafy Greens'),
+      queryValue: t('Rau cải xanh vụ đông', 'Winter Leafy Greens'),
+    },
+    {
+      id: 'maize',
+      label: t('Ngô lai F1 (Bắp)', 'Maize / Corn'),
+      queryValue: t('Ngô lai F1 (Bắp)', 'Maize / Corn'),
+    },
+    {
+      id: 'legume',
+      label: t('Đậu tương / Lạc (Họ Đậu)', 'Soybean / Peanut (Legume)'),
+      queryValue: t('Đậu tương / Lạc (Họ Đậu)', 'Soybean / Peanut (Legume)'),
+    },
+  ].filter(
+    (opt, idx, arr) =>
+      idx === 0 ||
+      opt.label.toLowerCase() !== arr[0].label.toLowerCase()
   );
 
+  const selectedOption =
+    cropOptions.find((o) => o.id === selectedCropKey) || cropOptions[0];
+
   const evaluations = evaluatePlantingCalendar(
-    selectedCrop,
+    selectedOption.queryValue,
     activeField.soilType,
     activeField.lat,
     lang
@@ -81,8 +108,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({ acti
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
             {t(
-              `Dựa trên 21 năm quan trắc tại điểm khí hậu ${activeField.nasaGrid.cellId} (${activeField.province}). Đánh giá số năm xuất hiện điều kiện bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
-              `Based on 21 years of NASA POWER observations at grid ${activeField.nasaGrid.cellId} (${activeField.province}), counting adverse years in sensitive crop growth windows.`
+              `Dựa trên 21 năm quan trắc tại điểm khí hậu ${activeField.nasaGrid.cellId} (${getLocalizedRegionName(activeField.province, 'vi')}). Đánh giá số năm xuất hiện điều kiện bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
+              `Based on 21 years of NASA POWER observations at grid ${activeField.nasaGrid.cellId} (${getLocalizedRegionName(activeField.province, 'en')}), counting adverse years in sensitive crop growth windows.`
             )}
           </p>
         </div>
@@ -93,16 +120,16 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({ acti
             {t('Chọn cây trồng:', 'Select crop:')}
           </span>
           <select
-            value={selectedCrop}
+            value={selectedOption.id}
             onChange={(e) => {
-              setSelectedCrop(e.target.value);
+              setSelectedCropKey(e.target.value);
               setSelectedDetail(null);
             }}
             className="px-3 py-2 border border-stone-300 rounded-xl bg-white font-bold text-xs text-stone-900 shadow-2xs"
           >
-            {crops.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {cropOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
               </option>
             ))}
           </select>

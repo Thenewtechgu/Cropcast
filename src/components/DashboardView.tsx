@@ -20,6 +20,12 @@ import {
   EarthEnvironmentSnapshot,
 } from '../types';
 import { getSoilLabel, getDrainageLabel, getWaterLabel } from '../services/agronomyEngine';
+import {
+  getPlantDisplayName,
+  getCommonStageLabel,
+  getCommonVarietyLabel,
+} from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { EarthSustainabilityPanel } from './EarthSustainabilityPanel';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -71,9 +77,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const earth = field.adaptiveMemory?.earthMetrics;
   const smap = earth?.smapModis;
+  const localizedObsDate =
+    weather.observationDate === 'Hôm nay (Cập nhật 07:00)'
+      ? t('Hôm nay (Cập nhật 07:00)', 'Today (Updated 07:00)')
+      : weather.observationDate;
   const powerUpdatedLabel = earth?.nasaPowerLastUpdated
     ? new Date(earth.nasaPowerLastUpdated).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')
-    : weather.observationDate;
+    : localizedObsDate;
 
   return (
     <div className="space-y-6">
@@ -81,12 +91,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500">
-            <span className="font-semibold text-emerald-800">{field.crop.name}</span>
+            <span className="font-semibold text-emerald-800">
+              {getPlantDisplayName(field.crop.name, lang)}
+            </span>
             <span>·</span>
-            <span>{field.crop.currentStage}</span>
+            <span>{getCommonStageLabel(field.crop.currentStage, lang)}</span>
             <span>·</span>
             <span>
-              {field.province}
+              {getLocalizedRegionName(field.province, lang)}
               {field.district ? `, ${field.district}` : ''}
             </span>
             <span>·</span>
@@ -138,7 +150,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500">
               {t('Quan trắc ngày', 'Observed on')}{' '}
-              <span className="font-mono">{weather.observationDate}</span>
+              <span className="font-mono">{localizedObsDate}</span>
             </p>
           </div>
 
@@ -408,7 +420,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="text-xs text-stone-600">
               <div className="font-semibold text-stone-900">
-                {field.crop.name} ({field.crop.variety})
+                {getPlantDisplayName(field.crop.name, lang)} (
+                {getCommonVarietyLabel(field.crop.variety, lang)})
               </div>
               <div className="text-stone-500">
                 {t('Xuống giống:', 'Planted:')} {field.crop.plantingDate}

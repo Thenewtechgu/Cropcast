@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 // Load Firebase client config to verify admin ID tokens server-side
 let firebaseApiKey = '';
@@ -747,6 +747,10 @@ import {
   rollbackDataVersion,
   getSyncLogs,
   getDataImports,
+  createStagedUploadSession,
+  appendStagedUploadChunk,
+  previewStagedUploadSession,
+  startAsyncStagedImportJob,
 } from './server/nasaSyncManager.ts';
 import {
   registerUsernameUser,
@@ -1008,11 +1012,17 @@ app.get('/api/admin/status', async (_req: Request, res: Response) => {
 // Trigger NASA POWER Daily API sync
 app.post('/api/admin/sync', async (req: Request, res: Response) => {
   try {
-    const { cellIds } = req.body;
+    const { cellIds } = req.body || {};
     const result = await executeNasaPowerSync(cellIds);
-    res.json(result);
+    if (result.status === 'FAILED') {
+      return res.status(502).json({
+        ...result,
+        error: result.errorMessage || 'NASA POWER API không phản hồi.',
+      });
+    }
+    return res.json(result);
   } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Lỗi khi đồng bộ NASA POWER' });
+    return res.status(500).json({ error: error.message || 'Lỗi khi đồng bộ NASA POWER' });
   }
 });
 
@@ -1090,6 +1100,53 @@ app.post('/api/admin/import-batch-async', (req: Request, res: Response) => {
     res.json({ success: true, job });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Không thể khởi chạy tiến trình nhập CSV' });
+  }
+});
+
+// Chunked Staged Batch Upload Sessions (bypasses proxy HTTP 413 Payload Too Large limits)
+app.post('/api/admin/upload-session/start', (_req: Request, res: Response) => {
+  try {
+    const session = createStagedUploadSession();
+    res.json({ success: true, ...session });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể khởi tạo phiên tải tệp.' });
+  }
+});
+
+app.post('/api/admin/upload-session/:sessionId/chunk', (req: Request, res: Response) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'Dữ liệu gói tệp rỗng.' });
+    }
+    const result = appendStagedUploadChunk(req.params.sessionId, items);
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    const msg = error?.message || 'Lỗi khi nhận gói dữ liệu CSV.';
+    const status = msg.includes('hết hạn') || msg.includes('không tồn tại') ? 404 : 500;
+    return res.status(status).json({ error: msg });
+  }
+});
+
+app.post('/api/admin/upload-session/:sessionId/preview', (req: Request, res: Response) => {
+  try {
+    const batchResult = previewStagedUploadSession(req.params.sessionId);
+    return res.json(batchResult);
+  } catch (error: any) {
+    const msg = error?.message || 'Lỗi khi phân tích gói CSV.';
+    const status = msg.includes('hết hạn') || msg.includes('không tồn tại') ? 404 : 500;
+    return res.status(status).json({ error: msg });
+  }
+});
+
+app.post('/api/admin/upload-session/:sessionId/import-async', (req: Request, res: Response) => {
+  try {
+    const job = startAsyncStagedImportJob(req.params.sessionId);
+    return res.json({ success: true, job });
+  } catch (error: any) {
+    const msg = error?.message || 'Không thể khởi chạy tiến trình nhập CSV.';
+    const status = msg.includes('hết hạn') || msg.includes('không tồn tại') ? 404 : 500;
+    return res.status(status).json({ error: msg });
   }
 });
 

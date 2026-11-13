@@ -9,6 +9,7 @@ import {
   PlantingRiskEvaluation,
 } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
+import { getPlantDisplayName, getCommonStageLabel, getCommonVarietyLabel } from '../data/cropTaxonomy';
 
 /**
  * Tier 4 Agronomic Engine: Multi-Factor Decision Analysis
@@ -109,7 +110,7 @@ export function analyzeFieldAgronomy(
     type: 'USER_OBSERVATION',
     lastUpdated: field.adaptiveMemory?.lastFeedbackDate || field.crop.plantingDate,
     description: isEn
-      ? `Soil: ${getSoilLabel(field.soilType, lang)}, Drainage: ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}, Crop: ${field.crop.name} (${field.crop.currentStage}).`
+      ? `Soil: ${getSoilLabel(field.soilType, lang)}, Drainage: ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}, Crop: ${getPlantDisplayName(field.crop.name, lang)} (${getCommonStageLabel(field.crop.currentStage, lang)}).`
       : `Đất: ${getSoilLabel(field.soilType, lang)}, Thoát nước: ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}, Cây: ${field.crop.name} (${field.crop.variety}), Giai đoạn: ${field.crop.currentStage}.`,
   });
 
@@ -141,14 +142,17 @@ export function analyzeFieldAgronomy(
     field.crop.currentStage.toLowerCase().includes('flower');
 
   let riskLevel: DailyAgronomicBrief['riskLevel'] = 'LOW';
+  const cropDisplay = getPlantDisplayName(field.crop.name, lang);
+  const stageDisplay = getCommonStageLabel(field.crop.currentStage, lang);
+  const varietyDisplay = getCommonVarietyLabel(field.crop.variety, lang);
   let headline = isEn
-    ? `STABLE: Favorable conditions for ${field.crop.name}`
+    ? `STABLE: Favorable conditions for ${cropDisplay}`
     : `ỔN ĐỊNH: Điều kiện thuận lợi cho ${field.crop.name}`;
   let situation = isEn
     ? `Temperature ${weather.temp}°C, rainfall ${weather.rain}mm. Field "${field.name}" remains in stable condition.`
     : `Nhiệt độ ${weather.temp}°C, lượng mưa ${weather.rain}mm. Điều kiện ruộng ${field.name} duy trì trạng thái tốt.`;
   let analysis = isEn
-    ? `Root-zone moisture is ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (SMAP surface: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} maintains suitable water retention for ${field.crop.currentStage}.`
+    ? `Root-zone moisture is ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (SMAP surface: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} maintains suitable water retention for ${stageDisplay}.`
     : `Độ ẩm rễ đạt ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (SMAP tầng mặt: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} đang giữ độ ẩm phù hợp với nhu cầu sinh trưởng giai đoạn ${field.crop.currentStage}.`;
 
   if (isColdWet) {
@@ -165,7 +169,7 @@ export function analyzeFieldAgronomy(
       ['clay', 'clay_loam', 'acid_sulfate', 'peat_muck'].includes(field.soilType);
     if (isSlowSoil) {
       analysis = isEn
-        ? `${field.name} has slow-draining ${getSoilLabel(field.soilType, lang)} during ${field.crop.currentStage}. Standing moisture below 20°C restricts root oxygen and increases fungal pressure.`
+        ? `${field.name} has slow-draining ${getSoilLabel(field.soilType, lang)} during ${stageDisplay}. Standing moisture below 20°C restricts root oxygen and increases fungal pressure.`
         : `Thửa ruộng ${field.name} có kết cấu ${getSoilLabel(field.soilType, lang).toLowerCase()} thoát nước chậm, kết hợp giai đoạn ${field.crop.currentStage}. Nước đọng lâu ngày dưới 20°C cản trở hô hấp rễ và kích hoạt nấm hại.`;
       topActions.push({
         id: 'act-drain',
@@ -257,7 +261,7 @@ export function analyzeFieldAgronomy(
   } else if (isFlowering) {
     riskLevel = 'CAUTION';
     headline = isEn
-      ? `CAUTION: Sensitive flowering/heading stage (${field.crop.currentStage})`
+      ? `CAUTION: Sensitive flowering/heading stage (${stageDisplay})`
       : `CHÚ Ý: Giai đoạn nhạy cảm ${field.crop.currentStage}`;
     situation = isEn
       ? 'Crop is in pollination/grain-filling phase; stable root moisture is essential.'
@@ -271,7 +275,7 @@ export function analyzeFieldAgronomy(
       title: isEn ? 'Maintain steady 60–70% root-zone moisture' : 'Duy trì độ ẩm đất ổn định 60 - 70%',
       priority: 'HIGH',
       reason: isEn ? 'Flowering is highly sensitive to both drought and waterlogging' : 'Giai đoạn trổ/hoa cực kỳ nhạy cảm với sốc nước (cả úng lẫn hạn)',
-      dataBasis: `${field.crop.name} (${field.crop.currentStage})`,
+      dataBasis: `${cropDisplay} (${stageDisplay})`,
     });
     topActions.push({
       id: 'act-pest-scout',
@@ -382,7 +386,7 @@ export function analyzeFieldAgronomy(
   const agronomicExplanation = isEn
     ? `Multi-source synthesis:
 1. Soil physics: ${getSoilLabel(field.soilType, lang)} (${getDrainageLabel(adjustedDrainage, lang)}).
-2. Crop phenology: ${field.crop.name} (${field.crop.variety}) at ${field.crop.currentStage}.
+2. Crop phenology: ${cropDisplay} (${varietyDisplay}) at ${stageDisplay}.
 3. NASA POWER 21-yr baseline: Historical avg ${weather.historicalBaseline.avgTemp}°C vs current ${weather.temp}°C.
 ${earth ? `4. Earth satellites synced: OCO-2 (${earth.carbonFluxOco2.carbonUptakeTonHaYr} t CO₂/ha), GRACE (${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE), GHGx (${earth.greenhouseGasEdgar.co2eqTonHa} t CO₂e/ha).` : '4. Ready for NASA OCO-2/GRACE/GHGx sync on Dashboard.'}
 5. Adaptive memory: ${feedbackHistory.length} field feedbacks recorded.`
@@ -515,7 +519,14 @@ export function evaluatePlantingCalendar(
             : 'Điều kiện nhiệt ẩm rất tốt cho lúa vụ Đông Xuân năng suất cao.';
         }
       }
-    } else if (cropName.toLowerCase().includes('cải') || cropName.toLowerCase().includes('rau') || cropName.toLowerCase().includes('veg')) {
+    } else if (
+      cropName.toLowerCase().includes('cải') ||
+      cropName.toLowerCase().includes('rau') ||
+      cropName.toLowerCase().includes('veg') ||
+      cropName.toLowerCase().includes('green') ||
+      cropName.toLowerCase().includes('cabbage') ||
+      cropName.toLowerCase().includes('mustard')
+    ) {
       if (isNorth) {
         if (month >= 10 || month <= 2) {
           status = 'optimal';

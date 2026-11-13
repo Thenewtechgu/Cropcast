@@ -12,7 +12,11 @@ import {
   Clock,
 } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
-import { getCellMonthlyProfile, findNearestNasaGrid } from '../data/nasaVietnamGrid';
+import {
+  getCellMonthlyProfile,
+  findNearestNasaGrid,
+  getLocalizedRegionName,
+} from '../data/nasaVietnamGrid';
 import { SatelliteMap } from './SatelliteMap';
 import { computeHarmonizedIndicators } from '../services/rotationEngine';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -37,7 +41,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   const [overlayTheme, setOverlayTheme] = useState<OverlayTheme>('moisture');
 
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
-  const monthlyData = getCellMonthlyProfile(cell);
+  const monthlyData = getCellMonthlyProfile(cell, lang);
   const harmonized = computeHarmonizedIndicators(
     field,
     weather,
@@ -47,7 +51,10 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 
   const earth = field.adaptiveMemory?.earthMetrics;
   const formatTimestamp = (iso?: string) => {
-    if (!iso) return t('Chưa đồng bộ (nhấn Đồng bộ ở Tổng quan)', 'Not synced yet');
+    if (!iso) return t('Chưa đồng bộ (nhấn Đồng bộ ở Tổng quan)', 'Not synced yet (click Sync on Dashboard)');
+    if (iso === 'Hôm nay (Cập nhật 07:00)') {
+      return t('Hôm nay (Cập nhật 07:00)', 'Today (Updated 07:00)');
+    }
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
     return d.toLocaleString(lang === 'en' ? 'en-US' : 'vi-VN', {
@@ -253,7 +260,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               {t('Chuỗi khí hậu 21 năm (2005–2025)', '21-Year Climatology (2005–2025)')}
             </span>
             <span className="text-xs text-stone-500">
-              {t('Vùng', 'Region')} {cell.region}
+              {t('Vùng', 'Region')} {getLocalizedRegionName(cell.region, lang)}
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">

@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { FieldProfile, WeatherObservation, SoilType } from '../types';
 import { analyzeFieldAgronomy, getSoilLabel, getDrainageLabel } from '../services/agronomyEngine';
+import { getPlantDisplayName, getCommonStageLabel } from '../data/cropTaxonomy';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface DemoCompareModalProps {
   isOpen: boolean;
@@ -20,7 +22,7 @@ interface DemoCompareModalProps {
 }
 
 export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
+  const { lang, t } = useLanguage();
 
   // Shared weather event for both fields (e.g. cold rain spell)
   const [sharedWeather, setSharedWeather] = useState<WeatherObservation>({
@@ -127,12 +129,14 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
     nasaGrid: { cellId: 'NASA_VN_002', lat: 21.0, lon: 106.0, distanceKm: 18.2 },
   });
 
-  // Weather scenario presets for Space Apps demo
   const [weatherPreset, setWeatherPreset] = useState<'cold_rain' | 'heatwave' | 'mild'>('cold_rain');
-  const [changeLog, setChangeLog] = useState<string>('Sẵn sàng thử nghiệm: Cùng chịu đợt mưa 26mm, nhưng đất và cây khác biệt hoàn toàn!');
+  const [customNote, setCustomNote] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const applyWeatherPreset = (preset: 'cold_rain' | 'heatwave' | 'mild') => {
     setWeatherPreset(preset);
+    setCustomNote(null);
     if (preset === 'cold_rain') {
       setSharedWeather({
         ...sharedWeather,
@@ -146,7 +150,6 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         solarRadiation: 9.5,
         observationDate: 'Đợt mưa lạnh 26mm, 18.5°C',
       });
-      setChangeLog('Đã áp dụng đợt mưa lạnh 26mm, ẩm 92%, nhiệt độ 18.5°C');
     } else if (preset === 'heatwave') {
       setSharedWeather({
         ...sharedWeather,
@@ -160,7 +163,6 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         solarRadiation: 24.5,
         observationDate: 'Đợt nắng nóng gay gắt 38.5°C, bức xạ 24.5 MJ/m²',
       });
-      setChangeLog('Đã chuyển sang đợt sốc nhiệt: 38.5°C, bức xạ cực mạnh, không mưa');
     } else {
       setSharedWeather({
         ...sharedWeather,
@@ -174,12 +176,28 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         solarRadiation: 17.0,
         observationDate: 'Thời tiết ấm áp ôn hòa 25°C',
       });
-      setChangeLog('Đã chuyển sang thời tiết lý tưởng ấm áp 25°C');
     }
   };
 
-  const briefA = analyzeFieldAgronomy(fieldA, sharedWeather);
-  const briefB = analyzeFieldAgronomy(fieldB, sharedWeather);
+  const statusLog =
+    customNote ||
+    (weatherPreset === 'cold_rain'
+      ? t(
+          'Đang áp dụng đợt mưa lạnh 26mm, ẩm 92%, nhiệt độ 18.5°C — cùng thời tiết nhưng hai ruộng cần hành động trái ngược!',
+          'Active scenario: 26mm cold rain spell, 92% RH, 18.5°C — same weather triggers contrasting field advice!'
+        )
+      : weatherPreset === 'heatwave'
+      ? t(
+          'Đã chuyển sang đợt sốc nhiệt: 38.5°C, bức xạ cực mạnh, không mưa',
+          'Switched to severe heatwave: 38.5°C, intense solar radiation, 0mm rain'
+        )
+      : t(
+          'Đã chuyển sang thời tiết lý tưởng ấm áp 25°C',
+          'Switched to mild ideal weather: 25°C, 3.5mm rain'
+        ));
+
+  const briefA = analyzeFieldAgronomy(fieldA, sharedWeather, [], lang);
+  const briefB = analyzeFieldAgronomy(fieldB, sharedWeather, [], lang);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto animate-in fade-in">
@@ -192,13 +210,18 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold">Chế độ Trình diễn NASA Space Apps Challenge</h2>
+                <h2 className="text-base sm:text-lg font-bold">
+                  {t('Chế độ Trình diễn So sánh Hai Thửa Ruộng', 'Field Personalization Side-by-Side Comparison')}
+                </h2>
                 <span className="text-[10px] bg-amber-400 text-stone-900 font-extrabold px-2 py-0.5 rounded-full uppercase">
-                  DEMO Cá nhân hóa
+                  {t('DEMO Cá nhân hóa', 'Personalization Demo')}
                 </span>
               </div>
               <p className="text-xs text-stone-300">
-                Minh chứng: Cùng một dữ liệu thời tiết NASA, AI đưa ra khuyến nghị khác biệt hoàn toàn theo hồ sơ ruộng!
+                {t(
+                  'Minh chứng: Cùng một dữ liệu thời tiết NASA, AI đưa ra khuyến nghị khác biệt hoàn toàn theo hồ sơ ruộng!',
+                  'Proof: Identical NASA weather produces tailored agronomic decisions depending on each field profile!'
+                )}
               </p>
             </div>
           </div>
@@ -218,14 +241,14 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-emerald-700" />
                 <span className="text-xs font-bold text-stone-800 uppercase tracking-wide">
-                  1. Dữ liệu thời tiết chung tác động lên cả 2 ruộng
+                  {t('1. Dữ liệu thời tiết chung tác động lên cả 2 ruộng', '1. Shared Weather Input for Both Fields')}
                 </span>
                 <span className="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded">
                   NASA POWER 0.5° Grid
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-stone-500">Kịch bản thử nghiệm:</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-stone-500">{t('Kịch bản thử nghiệm:', 'Scenario:')}</span>
                 <button
                   onClick={() => applyWeatherPreset('cold_rain')}
                   className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition cursor-pointer ${
@@ -234,7 +257,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                       : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                   }`}
                 >
-                  🌧️ Mưa Lạnh (26mm, 18.5°C)
+                  {t('Mưa Lạnh (26mm, 18.5°C)', 'Cold Rain (26mm, 18.5°C)')}
                 </button>
                 <button
                   onClick={() => applyWeatherPreset('heatwave')}
@@ -244,7 +267,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                       : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                   }`}
                 >
-                  🔥 Sốc Nhiệt (38.5°C, Nắng gắt)
+                  {t('Sốc Nhiệt (38.5°C, Nắng gắt)', 'Heatwave (38.5°C, Dry)')}
                 </button>
                 <button
                   onClick={() => applyWeatherPreset('mild')}
@@ -254,7 +277,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                       : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                   }`}
                 >
-                  ⛅ Ôn Hòa (25°C, Nắng nhẹ)
+                  {t('Ôn Hòa (25°C, Nắng nhẹ)', 'Mild (25°C, Gentle Rain)')}
                 </button>
               </div>
             </div>
@@ -262,40 +285,42 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
             {/* Current Shared Weather Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Nhiệt độ</div>
+                <div className="text-stone-500 text-[10px]">{t('Nhiệt độ', 'Temperature')}</div>
                 <div className="font-bold text-stone-800 text-sm">{sharedWeather.temp}°C</div>
-                <div className="text-[10px] text-stone-500">Đêm: {sharedWeather.minTemp}°C</div>
+                <div className="text-[10px] text-stone-500">
+                  {t('Đêm:', 'Night:')} {sharedWeather.minTemp}°C
+                </div>
               </div>
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Lượng mưa</div>
+                <div className="text-stone-500 text-[10px]">{t('Lượng mưa', 'Rainfall')}</div>
                 <div className="font-bold text-stone-800 text-sm">{sharedWeather.rain} mm</div>
-                <div className="text-[10px] text-stone-500">Mưa tích lũy</div>
+                <div className="text-[10px] text-stone-500">{t('Mưa tích lũy', 'Cumulative')}</div>
               </div>
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Độ ẩm không khí</div>
+                <div className="text-stone-500 text-[10px]">{t('Độ ẩm không khí', 'Humidity')}</div>
                 <div className="font-bold text-stone-800 text-sm">{sharedWeather.humidity}%</div>
-                <div className="text-[10px] text-stone-500">Nguy cơ nấm</div>
+                <div className="text-[10px] text-stone-500">{t('Nguy cơ nấm', 'Fungal risk')}</div>
               </div>
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Ẩm tầng mặt</div>
+                <div className="text-stone-500 text-[10px]">{t('Ẩm tầng mặt', 'Surface moisture')}</div>
                 <div className="font-bold text-stone-800 text-sm">{(sharedWeather.gwettop * 100).toFixed(0)}%</div>
-                <div className="text-[10px] text-stone-500">Lớp 0–5 cm</div>
+                <div className="text-[10px] text-stone-500">0–5 cm</div>
               </div>
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Ẩm vùng rễ</div>
+                <div className="text-stone-500 text-[10px]">{t('Ẩm vùng rễ', 'Root moisture')}</div>
                 <div className="font-bold text-stone-800 text-sm">{(sharedWeather.gwetroot * 100).toFixed(0)}%</div>
-                <div className="text-[10px] text-stone-500">Lớp 0–100 cm</div>
+                <div className="text-[10px] text-stone-500">0–100 cm</div>
               </div>
               <div className="p-2 rounded-lg bg-stone-50 border border-stone-200 text-center">
-                <div className="text-stone-500 text-[10px]">Nắng &amp; Bức xạ</div>
+                <div className="text-stone-500 text-[10px]">{t('Nắng & Bức xạ', 'Solar radiation')}</div>
                 <div className="font-bold text-stone-800 text-sm">{sharedWeather.solarRadiation} MJ/m²</div>
-                <div className="text-[10px] text-stone-500">Bốc hơi nước</div>
+                <div className="text-[10px] text-stone-500">{t('Bốc hơi nước', 'ET forcing')}</div>
               </div>
             </div>
 
             <div className="text-xs text-stone-500 flex items-center gap-1.5 italic bg-amber-50/50 p-2 rounded-lg border border-amber-100">
               <Info className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-              <span>{changeLog}</span>
+              <span>{statusLog}</span>
             </div>
           </div>
 
@@ -304,33 +329,45 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
             {/* COLUMN A: Farmer A */}
             <div className="bg-white rounded-2xl border-2 border-emerald-600/40 shadow-sm p-4 sm:p-5 flex flex-col justify-between space-y-4 relative">
               <div className="absolute -top-3 left-4 bg-emerald-800 text-white text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs">
-                THỬA RUỘNG A (Nông dân A)
+                {t('THỬA RUỘNG A (Nông dân A)', 'FIELD A (Farmer A)')}
               </div>
 
               {/* Field Profile A */}
               <div className="pt-2 space-y-2 border-b border-stone-100 pb-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-stone-900 text-base">{fieldA.name}</h3>
+                  <h3 className="font-bold text-stone-900 text-base">
+                    {t('Nông dân A: Ruộng rau cải', 'Farmer A: Vegetable Plot')}
+                  </h3>
                   <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">
-                    {fieldA.crop.name}
+                    {getPlantDisplayName(fieldA.crop.name, lang)}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
-                    <span className="text-stone-400 block text-[10px]">Loại đất & Thoát nước:</span>
-                    <span className="font-bold text-stone-800">{getSoilLabel(fieldA.soilType)}</span>
-                    <span className="text-amber-700 text-[11px] block">({getDrainageLabel(fieldA.soilCharacteristics.drainage)})</span>
+                    <span className="text-stone-400 block text-[10px]">
+                      {t('Loại đất & Thoát nước:', 'Soil & Drainage:')}
+                    </span>
+                    <span className="font-bold text-stone-800">{getSoilLabel(fieldA.soilType, lang)}</span>
+                    <span className="text-amber-700 text-[11px] block">
+                      ({getDrainageLabel(fieldA.soilCharacteristics.drainage, lang)})
+                    </span>
                   </div>
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
-                    <span className="text-stone-400 block text-[10px]">Giai đoạn sinh trưởng:</span>
-                    <span className="font-bold text-stone-800">{fieldA.crop.currentStage}</span>
-                    <span className="text-stone-500 text-[11px] block">Rễ non nông 3-5cm</span>
+                    <span className="text-stone-400 block text-[10px]">
+                      {t('Giai đoạn sinh trưởng:', 'Growth stage:')}
+                    </span>
+                    <span className="font-bold text-stone-800">
+                      {getCommonStageLabel(fieldA.crop.currentStage, lang)}
+                    </span>
+                    <span className="text-stone-500 text-[11px] block">
+                      {t('Rễ non nông 3–5cm', 'Shallow 3–5cm roots')}
+                    </span>
                   </div>
                 </div>
 
                 {/* Tweak controls for Field A */}
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-[11px] text-stone-500">Thử đổi đất:</span>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[11px] text-stone-500">{t('Thử đổi đất:', 'Try changing soil:')}</span>
                   {(['clay', 'sand', 'loam'] as SoilType[]).map(st => (
                     <button
                       key={st}
@@ -341,7 +378,12 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                           soilType: st,
                           soilCharacteristics: { ...fieldA.soilCharacteristics, drainage: newDrainage },
                         });
-                        setChangeLog(`Đã đổi Ruộng A sang đất ${getSoilLabel(st)} (${getDrainageLabel(newDrainage)}). Nhấn Phân tích lại để xem kết quả!`);
+                        setCustomNote(
+                          t(
+                            `Đã đổi Ruộng A sang đất ${getSoilLabel(st, 'vi')} (${getDrainageLabel(newDrainage, 'vi')}).`,
+                            `Updated Field A soil to ${getSoilLabel(st, 'en')} (${getDrainageLabel(newDrainage, 'en')}).`
+                          )
+                        );
                       }}
                       className={`text-[10px] px-2 py-0.5 rounded border transition cursor-pointer ${
                         fieldA.soilType === st
@@ -349,7 +391,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                           : 'bg-stone-100 text-stone-600 border-stone-200 hover:bg-stone-200'
                       }`}
                     >
-                      {getSoilLabel(st)}
+                      {getSoilLabel(st, lang)}
                     </button>
                   ))}
                 </div>
@@ -360,7 +402,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    Khuyến nghị của AI cho Ruộng A
+                    {t('Khuyến nghị cho Ruộng A', 'Advisory for Field A')}
                   </span>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -371,7 +413,12 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                         : 'bg-emerald-100 text-emerald-800'
                     }`}
                   >
-                    Mức độ: {briefA.riskLevel === 'WARNING' || briefA.riskLevel === 'CRITICAL' ? 'Cảnh báo' : briefA.riskLevel === 'CAUTION' ? 'Cần chú ý' : 'Ổn định'}
+                    {t('Mức độ:', 'Level:')}{' '}
+                    {briefA.riskLevel === 'WARNING' || briefA.riskLevel === 'CRITICAL'
+                      ? t('Cảnh báo', 'Warning')
+                      : briefA.riskLevel === 'CAUTION'
+                      ? t('Cần chú ý', 'Caution')
+                      : t('Ổn định', 'Stable')}
                   </span>
                 </div>
 
@@ -382,7 +429,9 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
 
                 {/* Top 3 Actions for A */}
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold text-stone-700">3 việc nên làm ngay:</div>
+                  <div className="text-[11px] font-bold text-stone-700">
+                    {t('Việc nên làm ngay:', 'Priority actions:')}
+                  </div>
                   {briefA.topActions.map(act => (
                     <div
                       key={act.id}
@@ -401,7 +450,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                 {briefA.postponeActions.length > 0 && (
                   <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs">
                     <div className="font-bold text-rose-800 flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Việc nên tạm hoãn:
+                      <AlertTriangle className="w-3.5 h-3.5" /> {t('Việc nên tạm hoãn:', 'Postpone:')}
                     </div>
                     <ul className="list-disc pl-4 text-[11px] text-rose-700 space-y-0.5 mt-1">
                       {briefA.postponeActions.map((item, i) => (
@@ -416,33 +465,45 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
             {/* COLUMN B: Farmer B */}
             <div className="bg-white rounded-2xl border-2 border-blue-600/40 shadow-sm p-4 sm:p-5 flex flex-col justify-between space-y-4 relative">
               <div className="absolute -top-3 left-4 bg-blue-800 text-white text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs">
-                THỬA RUỘNG B (Nông dân B)
+                {t('THỬA RUỘNG B (Nông dân B)', 'FIELD B (Farmer B)')}
               </div>
 
               {/* Field Profile B */}
               <div className="pt-2 space-y-2 border-b border-stone-100 pb-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-stone-900 text-base">{fieldB.name}</h3>
+                  <h3 className="font-bold text-stone-900 text-base">
+                    {t('Nông dân B: Ruộng ngô lai', 'Farmer B: Hybrid Maize Plot')}
+                  </h3>
                   <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">
-                    {fieldB.crop.name}
+                    {getPlantDisplayName(fieldB.crop.name, lang)}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
-                    <span className="text-stone-400 block text-[10px]">Loại đất & Thoát nước:</span>
-                    <span className="font-bold text-stone-800">{getSoilLabel(fieldB.soilType)}</span>
-                    <span className="text-blue-700 text-[11px] block">({getDrainageLabel(fieldB.soilCharacteristics.drainage)})</span>
+                    <span className="text-stone-400 block text-[10px]">
+                      {t('Loại đất & Thoát nước:', 'Soil & Drainage:')}
+                    </span>
+                    <span className="font-bold text-stone-800">{getSoilLabel(fieldB.soilType, lang)}</span>
+                    <span className="text-blue-700 text-[11px] block">
+                      ({getDrainageLabel(fieldB.soilCharacteristics.drainage, lang)})
+                    </span>
                   </div>
                   <div className="bg-stone-50 p-2 rounded-lg border border-stone-200">
-                    <span className="text-stone-400 block text-[10px]">Giai đoạn sinh trưởng:</span>
-                    <span className="font-bold text-stone-800">{fieldB.crop.currentStage}</span>
-                    <span className="text-stone-500 text-[11px] block">Rễ sâu 25-40cm</span>
+                    <span className="text-stone-400 block text-[10px]">
+                      {t('Giai đoạn sinh trưởng:', 'Growth stage:')}
+                    </span>
+                    <span className="font-bold text-stone-800">
+                      {getCommonStageLabel(fieldB.crop.currentStage, lang)}
+                    </span>
+                    <span className="text-stone-500 text-[11px] block">
+                      {t('Rễ sâu 25–40cm', 'Deep 25–40cm roots')}
+                    </span>
                   </div>
                 </div>
 
                 {/* Tweak controls for Field B */}
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-[11px] text-stone-500">Thử đổi giống/cây:</span>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[11px] text-stone-500">{t('Thử đổi giống/cây:', 'Try changing crop:')}</span>
                   {[
                     { name: 'Ngô lai (Bắp)', cat: 'maize', stage: 'Vươn lóng mạnh' },
                     { name: 'Lúa ST25', cat: 'rice', stage: 'Làm đòng trổ bông' },
@@ -459,7 +520,12 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                             currentStage: c.stage,
                           },
                         });
-                        setChangeLog(`Đã đổi Ruộng B sang ${c.name} (${c.stage}). Nhấn Phân tích lại để thấy sự khác biệt!`);
+                        setCustomNote(
+                          t(
+                            `Đã đổi Ruộng B sang ${c.name} (${c.stage}).`,
+                            `Updated Field B crop to ${getPlantDisplayName(c.name, 'en')} (${getCommonStageLabel(c.stage, 'en')}).`
+                          )
+                        );
                       }}
                       className={`text-[10px] px-2 py-0.5 rounded border transition cursor-pointer ${
                         fieldB.crop.name === c.name
@@ -467,7 +533,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                           : 'bg-stone-100 text-stone-600 border-stone-200 hover:bg-stone-200'
                       }`}
                     >
-                      {c.name}
+                      {getPlantDisplayName(c.name, lang)}
                     </button>
                   ))}
                 </div>
@@ -478,7 +544,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                    Khuyến nghị của AI cho Ruộng B
+                    {t('Khuyến nghị cho Ruộng B', 'Advisory for Field B')}
                   </span>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -489,7 +555,12 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                         : 'bg-blue-100 text-blue-800'
                     }`}
                   >
-                    Mức độ: {briefB.riskLevel === 'WARNING' || briefB.riskLevel === 'CRITICAL' ? 'Cảnh báo' : briefB.riskLevel === 'CAUTION' ? 'Cần chú ý' : 'Ổn định'}
+                    {t('Mức độ:', 'Level:')}{' '}
+                    {briefB.riskLevel === 'WARNING' || briefB.riskLevel === 'CRITICAL'
+                      ? t('Cảnh báo', 'Warning')
+                      : briefB.riskLevel === 'CAUTION'
+                      ? t('Cần chú ý', 'Caution')
+                      : t('Ổn định', 'Stable')}
                   </span>
                 </div>
 
@@ -500,7 +571,9 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
 
                 {/* Top 3 Actions for B */}
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold text-stone-700">3 việc nên làm ngay:</div>
+                  <div className="text-[11px] font-bold text-stone-700">
+                    {t('Việc nên làm ngay:', 'Priority actions:')}
+                  </div>
                   {briefB.topActions.map(act => (
                     <div
                       key={act.id}
@@ -519,7 +592,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                 {briefB.postponeActions.length > 0 && (
                   <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs">
                     <div className="font-bold text-rose-800 flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Việc nên tạm hoãn:
+                      <AlertTriangle className="w-3.5 h-3.5" /> {t('Việc nên tạm hoãn:', 'Postpone:')}
                     </div>
                     <ul className="list-disc pl-4 text-[11px] text-rose-700 space-y-0.5 mt-1">
                       {briefB.postponeActions.map((item, i) => (
@@ -535,14 +608,26 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
           {/* Differentiator Summary Box */}
           <div className="p-4 bg-gradient-to-r from-emerald-900 via-stone-900 to-blue-950 text-white rounded-xl space-y-2">
             <div className="flex items-center gap-2 font-bold text-amber-300 text-xs uppercase tracking-wider">
-              <Sparkles className="w-4 h-4" /> Kết luận khoa học chứng minh giá trị cá nhân hóa
+              <Sparkles className="w-4 h-4" />{' '}
+              {t('Kết luận khoa học chứng minh giá trị cá nhân hóa', 'Scientific Takeaway: Field-Level Personalization')}
             </div>
             <p className="text-xs text-stone-200 leading-relaxed">
-              Thời tiết đo từ NASA POWER là như nhau (độ phân giải 0.5°), nhưng:
+              {t(
+                'Thời tiết đo từ NASA POWER là như nhau (độ phân giải 0.5°), nhưng:',
+                'The 0.5° NASA POWER grid weather is identical, yet:'
+              )}
               <br />
-              • <strong>Ruộng A (Đất sét, rau con):</strong> AI ưu tiên khơi thông rãnh thoát nước, cảnh báo ngạt rễ và hoãn tưới vì đất giữ nước lâu.
+              • <strong>{t('Ruộng A (Đất sét, rau con):', 'Field A (Clay, seedling greens):')}</strong>{' '}
+              {t(
+                'AI ưu tiên khơi thông rãnh thoát nước, cảnh báo ngạt rễ và hoãn tưới vì đất giữ nước lâu.',
+                'AI prioritizes clearing drainage furrows, flags root hypoxia, and postpones irrigation due to high retention.'
+              )}
               <br />
-              • <strong>Ruộng B (Đất cát, ngô đang lớn):</strong> AI yêu cầu kiểm tra ẩm độ thực tầng rễ vì đất cát thoát nước rất nhanh, không được chủ quan coi trời mưa là đã đủ nước!
+              • <strong>{t('Ruộng B (Đất cát, ngô đang lớn):', 'Field B (Sandy, vegetative maize):')}</strong>{' '}
+              {t(
+                'AI yêu cầu kiểm tra ẩm độ thực tầng rễ vì đất cát thoát nước rất nhanh, không được chủ quan coi trời mưa là đã đủ nước!',
+                'AI advises checking deeper root moisture since sandy soils drain fast and shallow rainfall can evaporate rapidly.'
+              )}
             </p>
           </div>
         </div>
@@ -550,13 +635,16 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         {/* Footer */}
         <div className="p-4 bg-white border-t border-stone-200 flex items-center justify-between shrink-0">
           <div className="text-[11px] text-stone-500 italic">
-            * Dữ liệu mô phỏng thử nghiệm Space Apps, có nhãn DEMO rõ ràng theo tiêu chuẩn.
+            {t(
+              '* Dữ liệu mô phỏng thử nghiệm so sánh trực quan theo hồ sơ ruộng.',
+              '* Simulated field comparison demonstrating profile-aware agronomy.'
+            )}
           </div>
           <button
             onClick={onClose}
             className="px-5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-xl transition cursor-pointer"
           >
-            Đóng bảng so sánh
+            {t('Đóng bảng so sánh', 'Close Comparison')}
           </button>
         </div>
       </div>

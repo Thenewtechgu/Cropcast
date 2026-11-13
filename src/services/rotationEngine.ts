@@ -6,10 +6,18 @@ import {
   RotationStrategy,
   WeatherObservation,
 } from '../types';
-import { findNearestNasaGrid, getCellMonthlyProfile } from '../data/nasaVietnamGrid';
-import { getSeedFamilyById, inferSeedFamilyFromCrop } from '../data/cropTaxonomy';
+import { findNearestNasaGrid, getCellMonthlyProfile, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { getSeedFamilyById, inferSeedFamilyFromCrop, getPlantDisplayName, getFamilyDisplayName } from '../data/cropTaxonomy';
 import { getSoilLabel, getDrainageLabel } from './agronomyEngine';
 import type { AppLanguage } from '../contexts/LanguageContext';
+
+export function getLocalizedEvapRisk(risk: 'Thấp' | 'Trung bình' | 'Cao' | string, lang: AppLanguage = 'vi'): string {
+  if (lang !== 'en') return risk;
+  if (risk === 'Cao') return 'High';
+  if (risk === 'Trung bình') return 'Moderate';
+  if (risk === 'Thấp') return 'Low';
+  return risk;
+}
 
 export interface ScenarioAdjustments {
   rainDeltaPct: number;
@@ -223,7 +231,7 @@ export function computeHarmonizedIndicators(
     longTermWaterTrend,
     vegetationStressNote,
     dataFusionSummary: isEn
-      ? `Harmonizing 21-year NASA POWER (${cell.region}), ${getSoilLabel(field.soilType, 'en')}, and ${earth ? 'OCO-2 + GRACE + GHGx satellite observations' : 'field soil/water physics'}.`
+      ? `Harmonizing 21-year NASA POWER (${getLocalizedRegionName(cell.region, 'en')}), ${getSoilLabel(field.soilType, 'en')}, and ${earth ? 'OCO-2 + GRACE + GHGx satellite observations' : 'field soil/water physics'}.`
       : `Đồng bộ dữ liệu NASA POWER 21 năm (${cell.region}), đất ${getSoilLabel(field.soilType, 'vi').toLowerCase()} (${getDrainageLabel(field.soilCharacteristics.drainage, 'vi').toLowerCase()})${earth ? ' cùng chỉ số OCO-2, GRACE và GHGx' : ''}.`,
   };
 }
@@ -372,13 +380,13 @@ export function generateRotationStrategies(
     id: 'rot-baseline',
     isCurrentBaseline: true,
     title: isEn
-      ? `Current Baseline: Continue ${field.crop.name}`
+      ? `Current Baseline: Continue ${getPlantDisplayName(field.crop.name, 'en')} (${getFamilyDisplayName(currentFamily, 'en')})`
       : `Phương án hiện tại: Tiếp tục trồng ${field.crop.name} (${currentFamily.name})`,
     sequenceSummary: isEn
-      ? `${field.crop.name} → Bare fallow → ${field.crop.name}`
+      ? `${getPlantDisplayName(field.crop.name, 'en')} → Bare fallow → ${getPlantDisplayName(field.crop.name, 'en')}`
       : `${field.crop.name} → Nghỉ đất trống → ${field.crop.name}`,
     nextCropFamily: familyId,
-    nextCropName: field.crop.name,
+    nextCropName: getPlantDisplayName(field.crop.name, lang),
     suitabilityScore: isWaterTight || ghgHigh || priorities.includes('pest_break') ? 52 : 68,
     whySuggested: isEn
       ? 'Reference baseline reflecting your current monoculture setup to compare water, emissions, and pest risk.'
@@ -437,7 +445,7 @@ export function generateRotationStrategies(
       ? `Nitrogen-Fixing & Low-Emission Rotation: ${legumeCrop}`
       : `Luân canh Cố định đạm & Giảm phát thải: Xen vụ ${legumeCrop}`,
     sequenceSummary: isEn
-      ? `${field.crop.name} → ${legumeCrop} (Legume) → Main season`
+      ? `${getPlantDisplayName(field.crop.name, 'en')} → ${legumeCrop} (Legume) → Main season`
       : `${field.crop.name} → ${legumeCrop} (Họ Đậu) → Vụ chính kế tiếp`,
     nextCropFamily: 'fabaceae',
     nextCropName: legumeCrop,
@@ -514,7 +522,7 @@ export function generateRotationStrategies(
       ? `Drought-Resilient & Income Rotation: ${resilientCrop}`
       : `Luân canh Chịu hạn & Tăng thu nhập: Trồng ${resilientCrop}`,
     sequenceSummary: isEn
-      ? `${field.crop.name} → ${resilientCrop} → Legume / Main crop`
+      ? `${getPlantDisplayName(field.crop.name, 'en')} → ${resilientCrop} → Legume / Main crop`
       : `${field.crop.name} → ${resilientCrop} → Họ Đậu / Vụ chính`,
     nextCropFamily: resilientFamily,
     nextCropName: resilientCrop,
@@ -568,7 +576,7 @@ export function generateRotationStrategies(
       ? 'Carbon Cover Crop & Soil Recovery: Sesbania / Sunn Hemp / Black Bean'
       : 'Luân canh Cây che phủ & Phục hồi Carbon đất: Gieo Điền thanh / Muồng hoa vàng',
     sequenceSummary: isEn
-      ? `${field.crop.name} → Green Manure Cover (45–55d) → Main crop`
+      ? `${getPlantDisplayName(field.crop.name, 'en')} → Green Manure Cover (45–55d) → Main crop`
       : `${field.crop.name} → Cây che phủ họ Đậu (45–55 ngày) → Vụ chính`,
     nextCropFamily: 'fabaceae',
     nextCropName: isEn
@@ -672,7 +680,7 @@ export function pickBestRotationStrategy(
       ? `Tailored Rotation for Your Field: ${altCrop}`
       : `Phương án điều chỉnh riêng cho ruộng của bạn: Trồng ${altCrop}`,
     sequenceSummary: isEn
-      ? `${field.crop.name} → ${altCrop} → Straw Mulch`
+      ? `${getPlantDisplayName(field.crop.name, 'en')} → ${altCrop} → Straw Mulch`
       : `${field.crop.name} → ${altCrop} → Phủ rơm giữ ẩm`,
     nextCropFamily: altFamily,
     nextCropName: altCrop,

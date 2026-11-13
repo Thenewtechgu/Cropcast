@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface SatelliteMapProps {
   lat: number;
@@ -21,8 +22,10 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
   interactive = true,
   showNasaGrid = true,
   onLocationChange,
-  fieldLabel = 'Vị trí thửa ruộng',
+  fieldLabel,
 }) => {
+  const { lang, t } = useLanguage();
+  const displayFieldLabel = fieldLabel || t('Vị trí thửa ruộng', 'Field Location');
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layersRef = useRef<{
@@ -53,7 +56,7 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
-        attribution: 'Ảnh vệ tinh: Esri World Imagery',
+        attribution: 'Esri World Imagery',
         maxZoom: 18,
       }
     );
@@ -71,7 +74,7 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     const osmLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
       {
-        attribution: 'Bản đồ đường: Esri World Street Map',
+        attribution: 'Esri World Street Map',
         maxZoom: 18,
       }
     );
@@ -171,9 +174,14 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
         iconAnchor: [7, 7],
       });
       L.marker([cell.lat, cell.lon], { icon: nasaIcon })
-        .bindTooltip(`Điểm dữ liệu khí hậu gần nhất (${cell.cellId} · cách ${distanceKm} km)`, {
-          direction: 'top',
-        })
+        .bindTooltip(
+          lang === 'en'
+            ? `Nearest climate grid (${cell.cellId} · ${distanceKm} km away)`
+            : `Điểm dữ liệu khí hậu gần nhất (${cell.cellId} · cách ${distanceKm} km)`,
+          {
+            direction: 'top',
+          }
+        )
         .addTo(group);
     }
 
@@ -186,12 +194,14 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
       iconSize: [24, 24],
       iconAnchor: [12, 12],
     });
+    const latSuffix = lang === 'en' ? 'N' : 'B';
+    const lonSuffix = lang === 'en' ? 'E' : 'Đ';
     L.marker([lat, lon], { icon: fieldIcon })
-      .bindTooltip(`${fieldLabel} (${lat.toFixed(4)}°B, ${lon.toFixed(4)}°Đ)`, {
+      .bindTooltip(`${displayFieldLabel} (${lat.toFixed(4)}°${latSuffix}, ${lon.toFixed(4)}°${lonSuffix})`, {
         direction: 'top',
       })
       .addTo(group);
-  }, [lat, lon, showNasaGrid, fieldLabel]);
+  }, [lat, lon, showNasaGrid, displayFieldLabel, lang]);
 
   return (
     <div className={`relative w-full ${heightClass} rounded-xl overflow-hidden border border-stone-300 bg-stone-900`}>
@@ -208,7 +218,7 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
                 : 'text-stone-700 hover:bg-stone-100'
             }`}
           >
-            Ảnh vệ tinh
+            {t('Ảnh vệ tinh', 'Satellite')}
           </button>
           <button
             type="button"
@@ -219,13 +229,13 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
                 : 'text-stone-700 hover:bg-stone-100'
             }`}
           >
-            Bản đồ đường
+            {t('Bản đồ đường', 'Street Map')}
           </button>
         </div>
       )}
 
       <div className="absolute bottom-2 left-2 z-20 bg-stone-950/80 text-white px-2.5 py-1 rounded-md text-[11px] font-mono tabular-nums pointer-events-none">
-        {lat.toFixed(4)}°B, {lon.toFixed(4)}°Đ
+        {lat.toFixed(4)}°{lang === 'en' ? 'N' : 'B'}, {lon.toFixed(4)}°{lang === 'en' ? 'E' : 'Đ'}
       </div>
     </div>
   );

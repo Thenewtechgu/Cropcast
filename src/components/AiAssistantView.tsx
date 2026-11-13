@@ -3,6 +3,12 @@ import { Bot, Send, User, Loader2, RefreshCw } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
 import { GeminiService } from '../services/geminiService';
 import { getSoilLabel } from '../services/agronomyEngine';
+import {
+  getPlantDisplayName,
+  getCommonStageLabel,
+  getCommonVarietyLabel,
+} from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface AiAssistantViewProps {
@@ -26,7 +32,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
     sender: 'ai',
     text: t(
       `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu NASA POWER, OCO-2, GRACE và GHGx. Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
-      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${field.crop.name}, ${field.crop.variety}) in ${field.province} using NASA POWER, OCO-2, GRACE-FO, and GHGx data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using NASA POWER, OCO-2, GRACE-FO, and GHGx data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
     ),
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
@@ -143,7 +149,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         </div>
 
         <div className="text-xs bg-emerald-50 text-emerald-900 font-semibold px-3 py-1.5 rounded-xl border border-emerald-200 self-start sm:self-auto">
-          {t('Cây:', 'Crop:')} {activeField.crop.name} • {activeField.crop.currentStage}
+          {t('Cây:', 'Crop:')} {getPlantDisplayName(activeField.crop.name, lang)} • {getCommonStageLabel(activeField.crop.currentStage, lang)}
         </div>
       </div>
 

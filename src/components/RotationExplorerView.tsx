@@ -32,10 +32,17 @@ import {
   analyzeBareFieldAndStressTimeline,
   computeHarmonizedIndicators,
   pickBestRotationStrategy,
+  getLocalizedEvapRisk,
 } from '../services/rotationEngine';
 import { GeminiService } from '../services/geminiService';
 import { getSoilLabel, getDrainageLabel } from '../services/agronomyEngine';
-import { getSeedFamilyById, inferSeedFamilyFromCrop } from '../data/cropTaxonomy';
+import {
+  getSeedFamilyById,
+  inferSeedFamilyFromCrop,
+  getFamilyDisplayName,
+  getPlantDisplayName,
+} from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { fetchFieldEarthMetrics } from '../services/earthSyncService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -139,7 +146,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
 
   const bestStrategy =
     customBestStrategy ||
-    pickBestRotationStrategy(field, weather, priorities, constraints, rejectedIds, lang);
+    pickBestRotationStrategy(field, weather, priorities, constraints, rejectedIds, undefined, lang);
 
   const bareMonthsCount = timeline.filter((m) => m.fieldState === 'bare_fallow').length;
   const highStressMonthsCount = timeline.filter((m) => m.stressLevel === 'high').length;
@@ -238,7 +245,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             </span>
             <span className="text-stone-500">
               {t('Ruộng:', 'Field:')} <strong className="text-stone-800">{field.name}</strong> (
-              {field.province})
+              {getLocalizedRegionName(field.province, lang)})
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900">
@@ -248,8 +255,9 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             )}
           </h1>
           <p className="text-xs sm:text-sm text-stone-600">
-            {t('Cây hiện tại:', 'Current crop:')} <strong>{field.crop.name}</strong> (
-            {currentFamily.name}) • {t('Đất:', 'Soil:')}{' '}
+            {t('Cây hiện tại:', 'Current crop:')}{' '}
+            <strong>{getPlantDisplayName(field.crop.name, lang)}</strong> (
+            {getFamilyDisplayName(currentFamily, lang)}) • {t('Đất:', 'Soil:')}{' '}
             <strong>{getSoilLabel(field.soilType, lang)}</strong> (
             {getDrainageLabel(field.soilCharacteristics.drainage, lang)})
           </p>
@@ -573,7 +581,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
                     {t('Ẩm rễ:', 'Root:')} {m.soilMoisturePct}%
                   </span>
                   <span>
-                    {t('Bốc hơi:', 'ET:')} {m.evaporationRisk}
+                    {t('Bốc hơi:', 'ET:')} {getLocalizedEvapRisk(m.evaporationRisk, lang)}
                   </span>
                 </div>
               </div>

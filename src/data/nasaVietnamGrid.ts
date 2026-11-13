@@ -1,4 +1,5 @@
 import { NasaGridCell } from '../types';
+import type { AppLanguage } from '../contexts/LanguageContext';
 
 /**
  * 531 NASA POWER 0.5° Grid Cells covering Vietnam (2005-2025: 21 Years)
@@ -184,11 +185,36 @@ export function findNearestNasaGrid(lat: number, lon: number): { cell: NasaGridC
   };
 }
 
+const REGION_EN_MAP: Record<string, string> = {
+  'Đồng bằng Sông Hồng': 'Red River Delta',
+  'Đông Bắc Bộ': 'Northeast Vietnam',
+  'Tây Bắc Bộ': 'Northwest Vietnam',
+  'Bắc Trung Bộ': 'North Central Coast',
+  'Duyên hải Nam Trung Bộ': 'South Central Coast',
+  'Tây Nguyên': 'Central Highlands',
+  'Đông Nam Bộ': 'Southeast Vietnam',
+  'Đồng bằng Sông Cửu Long': 'Mekong River Delta',
+  'Vùng Đảo ven bờ & Vịnh Bắc Bộ': 'Coastal Islands & Tonkin Gulf',
+  'Quần đảo Hoàng Sa & Trường Sa': 'Hoang Sa & Truong Sa Archipelagos',
+  'Việt Nam': 'Vietnam',
+  'Hà Nội': 'Hanoi',
+  'Hưng Yên': 'Hung Yen',
+};
+
+export function getLocalizedRegionName(region: string, lang: AppLanguage = 'vi'): string {
+  if (lang !== 'en') return region;
+  const clean = (region || '').trim();
+  return REGION_EN_MAP[clean] || clean;
+}
+
 /**
  * Generates 12-month historical profile for a given cell (2005-2025)
  */
-export function getCellMonthlyProfile(cell: NasaGridCell) {
-  const months = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
+export function getCellMonthlyProfile(cell: NasaGridCell, lang: AppLanguage = 'vi') {
+  const months =
+    lang === 'en'
+      ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      : ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
   const baseT = cell.climatology21Yr.avgTemp;
   const isNorth = cell.lat > 16.5;
 

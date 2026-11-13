@@ -161,7 +161,7 @@ export default function App() {
         );
         setAuthUser({
           uid: fbUser.uid,
-          displayName: fbUser.displayName || 'Nông dân CropCast',
+          displayName: fbUser.displayName || t('Nông dân CropCast', 'CropCast Farmer'),
           email: fbUser.email || '',
           photoURL: fbUser.photoURL || undefined,
           emailVerified: fbUser.emailVerified,
@@ -215,7 +215,10 @@ export default function App() {
 
     if (!authUser) {
       setAuthMessage(
-        'Bạn vừa mở một đường dẫn chia sẻ thửa ruộng. Vui lòng đăng nhập hoặc tạo tài khoản để xem thửa ruộng này.'
+        t(
+          'Bạn vừa mở một đường dẫn chia sẻ thửa ruộng. Vui lòng đăng nhập hoặc tạo tài khoản để xem thửa ruộng này.',
+          'You opened a shared field link. Please sign in or create an account to view this field.'
+        )
       );
       setAuthModalOpen(true);
       return;
@@ -243,13 +246,21 @@ export default function App() {
         navigateToTab('fields');
         setShareBanner({
           type: 'ok',
-          text: `Đã mở quyền xem thửa ruộng "${res.fieldName}" được chia sẻ bởi ${res.ownerName}.`,
+          text: t(
+            `Đã mở quyền xem thửa ruộng "${res.fieldName}" được chia sẻ bởi ${res.ownerName}.`,
+            `View access granted for "${res.fieldName}" shared by ${res.ownerName}.`
+          ),
         });
       })
       .catch((err: any) => {
         setShareBanner({
           type: 'err',
-          text: err?.message || 'Không thể mở đường dẫn chia sẻ thửa ruộng này.',
+          text:
+            err?.message ||
+            t(
+              'Không thể mở đường dẫn chia sẻ thửa ruộng này.',
+              'Unable to open this shared field link.'
+            ),
         });
       });
   }, [authReady, authUser, pendingShareToken]);
@@ -381,7 +392,7 @@ export default function App() {
     }
     if (authUser.authMode === 'local_server') {
       const created = await LocalServerStorage.createField(newFieldData);
-      const brief = analyzeFieldAgronomy(created, weather);
+      const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
       const newTasks = generateTasksFromBrief(brief, created);
       await LocalServerStorage.createTasks(newTasks);
       await refreshLocalServerState();
@@ -390,7 +401,7 @@ export default function App() {
       return;
     }
     const created = await FirestoreService.createField(authUser.uid, newFieldData);
-    const brief = analyzeFieldAgronomy(created, weather);
+    const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
     const newTasks = generateTasksFromBrief(brief, created);
     await FirestoreService.createTasks(authUser.uid, newTasks);
     setActiveFieldId(created.id);
@@ -420,7 +431,7 @@ export default function App() {
   };
 
   const handleCreateShareLink = async (field: FieldProfile): Promise<string> => {
-    if (!authUser) throw new Error('Vui lòng đăng nhập để chia sẻ.');
+    if (!authUser) throw new Error(t('Vui lòng đăng nhập để chia sẻ.', 'Please sign in to share.'));
     if (authUser.authMode === 'local_server') {
       const token = await LocalServerStorage.createShareLink(field.id);
       await refreshLocalServerState();
@@ -440,7 +451,7 @@ export default function App() {
   };
 
   const handleShareByEmail = async (field: FieldProfile, email: string): Promise<string> => {
-    if (!authUser) throw new Error('Vui lòng đăng nhập để chia sẻ.');
+    if (!authUser) throw new Error(t('Vui lòng đăng nhập để chia sẻ.', 'Please sign in to share.'));
     if (authUser.authMode === 'local_server') {
       const res = await LocalServerStorage.shareByTarget(field.id, email);
       await refreshLocalServerState();
@@ -483,8 +494,14 @@ export default function App() {
       ) {
         const adjustment =
           feedback.feedbackType === 'soil_still_dry'
-            ? 'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới'
-            : 'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh';
+            ? t(
+                'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
+                'Field dried faster than forecast: Increased irrigation reminder sensitivity'
+              )
+            : t(
+                'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
+                'Field retained moisture / drained slowly: Prioritized drainage checks'
+              );
         await LocalServerStorage.updateField({
           ...activeField,
           adaptiveMemory: {
@@ -504,8 +521,14 @@ export default function App() {
     ) {
       const adjustment =
         feedback.feedbackType === 'soil_still_dry'
-          ? 'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới'
-          : 'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh';
+          ? t(
+              'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
+              'Field dried faster than forecast: Increased irrigation reminder sensitivity'
+            )
+          : t(
+              'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
+              'Field retained moisture / drained slowly: Prioritized drainage checks'
+            );
       await FirestoreService.updateField({
         ...activeField,
         adaptiveMemory: {
@@ -525,10 +548,19 @@ export default function App() {
       userComment: note,
       systemActionTaken:
         type === 'soil_still_dry'
-          ? 'Ghi nhận đất khô nhanh: Tăng độ nhạy nhắc tưới'
+          ? t(
+              'Ghi nhận đất khô nhanh: Tăng độ nhạy nhắc tưới',
+              'Recorded fast-drying soil: Increased irrigation alert sensitivity'
+            )
           : type === 'soil_too_wet'
-          ? 'Ghi nhận đất thoát chậm: Ưu tiên thoát nước'
-          : 'Đã lưu phản hồi vào nhật ký ruộng',
+          ? t(
+              'Ghi nhận đất thoát chậm: Ưu tiên thoát nước',
+              'Recorded slow drainage: Prioritized field drainage'
+            )
+          : t(
+              'Đã lưu phản hồi vào nhật ký ruộng',
+              'Saved feedback to field log'
+            ),
       appliedToProfile: true,
     });
   };

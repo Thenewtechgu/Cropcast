@@ -46,8 +46,14 @@ import {
 import { auth, BOOTSTRAP_ADMIN_EMAIL } from '../firebase';
 import { FirestoreService } from '../services/firestoreService';
 import { CsvQueueStorage, StoredCsvSessionState } from '../services/csvQueueStorage';
-import { ALL_NASA_CELLS } from '../data/nasaVietnamGrid';
+import { ALL_NASA_CELLS, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import {
+  getPlantDisplayName,
+  getCommonStageLabel,
+  getCommonVarietyLabel,
+} from '../data/cropTaxonomy';
 import { getSoilLabel } from '../services/agronomyEngine';
+import { useLanguage, AppLanguage } from '../contexts/LanguageContext';
 import { SatelliteMap } from './SatelliteMap';
 
 const ADMIN_TAB_STORAGE_KEY = 'cropcast_admin_tab';
@@ -66,13 +72,18 @@ interface CsvProgressState {
   startedAt: number;
 }
 
-function formatEta(seconds: number | null): string {
-  if (seconds === null || !Number.isFinite(seconds)) return 'Đang tính toán...';
-  if (seconds <= 1) return 'Còn ~1 giây';
-  if (seconds < 60) return `Còn ~${Math.ceil(seconds)} giây`;
+function formatEta(seconds: number | null, lang: AppLanguage = 'vi'): string {
+  if (seconds === null || !Number.isFinite(seconds)) {
+    return lang === 'en' ? 'Calculating...' : 'Đang tính toán...';
+  }
+  if (seconds <= 1) return lang === 'en' ? '~1s left' : 'Còn ~1 giây';
+  if (seconds < 60) {
+    const s = Math.ceil(seconds);
+    return lang === 'en' ? `~${s}s left` : `Còn ~${s} giây`;
+  }
   const mins = Math.floor(seconds / 60);
   const secs = Math.ceil(seconds % 60);
-  return `Còn ~${mins} phút ${secs} giây`;
+  return lang === 'en' ? `~${mins}m ${secs}s left` : `Còn ~${mins} phút ${secs} giây`;
 }
 
 function formatBytesMb(bytes: number): string {
@@ -110,36 +121,62 @@ interface BatchPreviewResponse {
   }>;
 }
 
-const NASA_INDICATORS = [
-  { code: 'T2M', label: 'Nhiệt độ TB 2m (°C)', defaultVal: '26.5' },
-  { code: 'T2M_MIN', label: 'Nhiệt độ tối thiểu (°C)', defaultVal: '21.0' },
-  { code: 'T2M_MAX', label: 'Nhiệt độ tối đa (°C)', defaultVal: '32.0' },
-  { code: 'PRECTOTCORR', label: 'Lượng mưa hiệu chỉnh (mm/ngày)', defaultVal: '12.4' },
-  { code: 'GWETROOT', label: 'Độ ẩm đất vùng rễ (0–1)', defaultVal: '0.72' },
-  { code: 'GWETTOP', label: 'Độ ẩm đất tầng mặt (0–1)', defaultVal: '0.68' },
-  { code: 'RH2M', label: 'Độ ẩm không khí (%)', defaultVal: '84' },
-  { code: 'ALLSKY_SFC_SW_DWN', label: 'Bức xạ mặt trời (MJ/m²/ngày)', defaultVal: '17.5' },
-];
+function getNasaIndicators(lang: AppLanguage) {
+  return [
+    { code: 'T2M', label: lang === 'en' ? 'Mean Temp 2m (°C)' : 'Nhiệt độ TB 2m (°C)', defaultVal: '26.5' },
+    { code: 'T2M_MIN', label: lang === 'en' ? 'Min Temp (°C)' : 'Nhiệt độ tối thiểu (°C)', defaultVal: '21.0' },
+    { code: 'T2M_MAX', label: lang === 'en' ? 'Max Temp (°C)' : 'Nhiệt độ tối đa (°C)', defaultVal: '32.0' },
+    { code: 'PRECTOTCORR', label: lang === 'en' ? 'Bias-Corrected Precip (mm/day)' : 'Lượng mưa hiệu chỉnh (mm/ngày)', defaultVal: '12.4' },
+    { code: 'GWETROOT', label: lang === 'en' ? 'Root-Zone Soil Wetness (0–1)' : 'Độ ẩm đất vùng rễ (0–1)', defaultVal: '0.72' },
+    { code: 'GWETTOP', label: lang === 'en' ? 'Surface Soil Wetness (0–1)' : 'Độ ẩm đất tầng mặt (0–1)', defaultVal: '0.68' },
+    { code: 'RH2M', label: lang === 'en' ? 'Relative Humidity (%)' : 'Độ ẩm không khí (%)', defaultVal: '84' },
+    { code: 'ALLSKY_SFC_SW_DWN', label: lang === 'en' ? 'Solar Irradiance (MJ/m²/day)' : 'Bức xạ mặt trời (MJ/m²/ngày)', defaultVal: '17.5' },
+  ];
+}
 
-const WATER_LABELS: Record<WaterSourceType, string> = {
-  river: 'Nước sông / kênh',
-  pond: 'Ao / hồ chứa',
-  well: 'Giếng khoan / giếng đào',
-  tap: 'Nước máy / thủy cục',
-  rain: 'Phụ thuộc nước mưa',
-  other: 'Nguồn nước khác',
-};
+function getWaterLabels(lang: AppLanguage): Record<WaterSourceType, string> {
+  if (lang === 'en') {
+    return {
+      river: 'River / Canal',
+      pond: 'Pond / Reservoir',
+      well: 'Borehole / Dug Well',
+      tap: 'Piped / Municipal Water',
+      rain: 'Rain-fed',
+      other: 'Other water source',
+    };
+  }
+  return {
+    river: 'Nước sông / kênh',
+    pond: 'Ao / hồ chứa',
+    well: 'Giếng khoan / giếng đào',
+    tap: 'Nước máy / thủy cục',
+    rain: 'Phụ thuộc nước mưa',
+    other: 'Nguồn nước khác',
+  };
+}
+
+function getFolderDisplayName(folderName: string, lang: AppLanguage): string {
+  if (lang !== 'en') return folderName;
+  const map: Record<string, string> = {
+    'Tệp tải lẻ': 'Loose files',
+    'Thư mục CSV': 'CSV Folder',
+    'Tệp CSV chọn trực tiếp': 'Directly selected CSV files',
+    'Tệp kéo thả': 'Dropped files',
+  };
+  return map[folderName] || folderName;
+}
 
 function isCsvOrTextFile(name: string): boolean {
   const lower = name.toLowerCase();
   return lower.endsWith('.csv') || lower.endsWith('.txt');
 }
 
-function readFileAsText(file: File): Promise<string> {
+function readFileAsText(file: File, lang: AppLanguage = 'vi'): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error(`Không thể đọc tệp ${file.name}`));
+    reader.onerror = () =>
+      reject(new Error(lang === 'en' ? `Unable to read file ${file.name}` : `Không thể đọc tệp ${file.name}`));
     reader.readAsText(file);
   });
 }
@@ -188,6 +225,11 @@ async function collectFilesFromEntry(
 export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = ({
   onDatasetUpdated,
 }) => {
+  const { lang, t } = useLanguage();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
+  const nasaIndicators = useMemo(() => getNasaIndicators(lang), [lang]);
+  const waterLabels = useMemo(() => getWaterLabels(lang), [lang]);
+
   const [adminTab, setAdminTabState] = useState<'overview' | 'fields' | 'users' | 'nasa'>(() => {
     try {
       const saved = localStorage.getItem(ADMIN_TAB_STORAGE_KEY);
@@ -239,6 +281,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const folderInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   const pollTimerRef = useRef<number | null>(null);
+  const stagedSessionRef = useRef<{ signature: string; sessionId: string } | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [readingQueue, setReadingQueue] = useState(false);
   const [queuedFiles, setQueuedFiles] = useState<QueuedCsvFile[]>([]);
@@ -275,7 +318,10 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       const data = await FirestoreService.getAdminPlatformStats();
       setPlatformStats(data);
     } catch (err: any) {
-      setStatsError(err?.message || 'Không thể tải thống kê người dùng và thửa ruộng.');
+      setStatsError(
+        err?.message ||
+          t('Không thể tải thống kê người dùng và thửa ruộng.', 'Unable to load user and field statistics.')
+      );
     } finally {
       setStatsLoading(false);
     }
@@ -420,7 +466,10 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
 
     setLastCompletedBatch(completedSummary);
     setImportSuccessMsg(
-      `Đã nhập thành công ${completedSummary.totalFolders} thư mục (${completedSummary.totalFiles} tệp CSV) với ${completedSummary.validRows.toLocaleString('vi-VN')} bản ghi vào kho NASA! Phiên bản: ${completedSummary.version}`
+      t(
+        `Đã nhập thành công ${completedSummary.totalFolders} thư mục (${completedSummary.totalFiles} tệp CSV) với ${completedSummary.validRows.toLocaleString('vi-VN')} bản ghi vào kho NASA! Phiên bản: ${completedSummary.version}`,
+        `Successfully imported ${completedSummary.totalFolders} folders (${completedSummary.totalFiles} CSV files) with ${completedSummary.validRows.toLocaleString('en-US')} records into the NASA warehouse! Version: ${completedSummary.version}`
+      )
     );
     queuedFilesRef.current = [];
     setQueuedFiles([]);
@@ -481,7 +530,9 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       } else if (job.status === 'FAILED') {
         setImporting(false);
         setCsvProgress(null);
-        setActionErrorMsg(job.error || 'Quá trình nhập CSV trên máy chủ gặp lỗi.');
+        setActionErrorMsg(
+          job.error || t('Quá trình nhập CSV trên máy chủ gặp lỗi.', 'The server CSV import job failed.')
+        );
         await CsvQueueStorage.savePatch({ activeImportJobId: null });
       }
     } catch {
@@ -505,7 +556,12 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       }
 
       if (saved?.activeImportJobId) {
-        setRestoredNotice('Đã khôi phục thanh trạng thái ETA tiến trình nhập CSV sau khi tải lại trang.');
+        setRestoredNotice(
+          t(
+            'Đã khôi phục thanh trạng thái ETA tiến trình nhập CSV sau khi tải lại trang.',
+            'Restored the CSV import ETA progress bar after page reload.'
+          )
+        );
         pollImportJob(saved.activeImportJobId);
       } else if (saved?.queuedFiles && saved.queuedFiles.length > 0) {
         queuedFilesRef.current = saved.queuedFiles;
@@ -513,11 +569,17 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         if (saved.batchPreview) {
           setBatchPreview(saved.batchPreview);
           setRestoredNotice(
-            `Đã khôi phục ${saved.queuedFiles.length} tệp CSV và thông tin phân tích trước khi tải lại trang.`
+            t(
+              `Đã khôi phục ${saved.queuedFiles.length} tệp CSV và thông tin phân tích trước khi tải lại trang.`,
+              `Restored ${saved.queuedFiles.length} CSV files and analysis results from before the page reload.`
+            )
           );
         } else {
           setRestoredNotice(
-            `Đã khôi phục ${saved.queuedFiles.length} tệp CSV đã đọc trước khi tải lại trang — đang phân tích lại...`
+            t(
+              `Đã khôi phục ${saved.queuedFiles.length} tệp CSV đã đọc trước khi tải lại trang — đang phân tích lại...`,
+              `Restored ${saved.queuedFiles.length} CSV files from before reload — re-analyzing...`
+            )
           );
           await runBatchPreview(saved.queuedFiles);
         }
@@ -538,16 +600,20 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     (platformStats?.allFields || []).forEach((f) => {
       if (f.province) set.add(f.province);
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
-  }, [platformStats]);
+    return Array.from(set).sort((a, b) =>
+      getLocalizedRegionName(a, lang).localeCompare(getLocalizedRegionName(b, lang), lang)
+    );
+  }, [platformStats, lang]);
 
   const availableCrops = useMemo(() => {
     const set = new Set<string>();
     (platformStats?.allFields || []).forEach((f) => {
       if (f.cropName) set.add(f.cropName);
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
-  }, [platformStats]);
+    return Array.from(set).sort((a, b) =>
+      getPlantDisplayName(a, lang).localeCompare(getPlantDisplayName(b, lang), lang)
+    );
+  }, [platformStats, lang]);
 
   const filteredFields = useMemo(() => {
     const all = platformStats?.allFields || [];
@@ -561,12 +627,14 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         f.ownerName.toLowerCase().includes(q) ||
         f.ownerEmail.toLowerCase().includes(q) ||
         f.province.toLowerCase().includes(q) ||
+        getLocalizedRegionName(f.province, lang).toLowerCase().includes(q) ||
         f.district.toLowerCase().includes(q) ||
         f.cropName.toLowerCase().includes(q) ||
+        getPlantDisplayName(f.cropName, lang).toLowerCase().includes(q) ||
         f.nasaCellId.toLowerCase().includes(q)
       );
     });
-  }, [platformStats, fieldSearch, provinceFilter, cropFilter]);
+  }, [platformStats, fieldSearch, provinceFilter, cropFilter, lang]);
 
   // Folder grouping summary for queued CSV files
   const queuedFolders = useMemo(() => {
@@ -593,11 +661,19 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       await fetchPlatformStats();
       setAdminActionSuccess(
         !currentIsAdmin
-          ? `Đã cấp quyền Quản trị viên cho ${email || uid}.`
-          : `Đã gỡ quyền Quản trị viên của ${email || uid}.`
+          ? t(
+              `Đã cấp quyền Quản trị viên cho ${email || uid}.`,
+              `Granted Admin privileges to ${email || uid}.`
+            )
+          : t(
+              `Đã gỡ quyền Quản trị viên của ${email || uid}.`,
+              `Revoked Admin privileges from ${email || uid}.`
+            )
       );
     } catch (err: any) {
-      setActionErrorMsg(err?.message || 'Không thể cập nhật quyền quản trị.');
+      setActionErrorMsg(
+        err?.message || t('Không thể cập nhật quyền quản trị.', 'Unable to update admin privileges.')
+      );
     } finally {
       setTogglingAdminUid(null);
     }
@@ -610,11 +686,21 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     setAdminActionSuccess(null);
 
     if (!targetEmail || !targetEmail.includes('@')) {
-      setActionErrorMsg('Vui lòng nhập địa chỉ Email Google hợp lệ của người cần cấp quyền Admin.');
+      setActionErrorMsg(
+        t(
+          'Vui lòng nhập địa chỉ Email Google hợp lệ của người cần cấp quyền Admin.',
+          'Please enter a valid Google Email address for the new Admin.'
+        )
+      );
       return;
     }
     if (targetEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
-      setAdminActionSuccess(`${BOOTSTRAP_ADMIN_EMAIL} đã là Admin gốc mặc định của hệ thống.`);
+      setAdminActionSuccess(
+        t(
+          `${BOOTSTRAP_ADMIN_EMAIL} đã là Admin gốc mặc định của hệ thống.`,
+          `${BOOTSTRAP_ADMIN_EMAIL} is already the default root Admin.`
+        )
+      );
       setAdminEmailInput('');
       return;
     }
@@ -624,12 +710,20 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     );
     if (!matchedUser) {
       setActionErrorMsg(
-        `Chưa tìm thấy tài khoản "${targetEmail}" trong danh sách người dùng. Người này cần đăng nhập Google vào CropCast ít nhất 1 lần trước để hệ thống ghi nhận UID rồi bạn bấm Cấp quyền Admin.`
+        t(
+          `Chưa tìm thấy tài khoản "${targetEmail}" trong danh sách người dùng. Người này cần đăng nhập Google vào CropCast ít nhất 1 lần trước để hệ thống ghi nhận UID rồi bạn bấm Cấp quyền Admin.`,
+          `Account "${targetEmail}" was not found in the user list. They must sign in to CropCast with Google at least once first before being granted Admin rights.`
+        )
       );
       return;
     }
     if (matchedUser.isAdmin) {
-      setAdminActionSuccess(`Tài khoản ${matchedUser.email} đã có quyền Quản trị viên rồi.`);
+      setAdminActionSuccess(
+        t(
+          `Tài khoản ${matchedUser.email} đã có quyền Quản trị viên rồi.`,
+          `Account ${matchedUser.email} already has Admin privileges.`
+        )
+      );
       setAdminEmailInput('');
       return;
     }
@@ -643,7 +737,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     if (!auth.currentUser) return;
     const numericVal = parseFloat(manualValue);
     if (!Number.isFinite(numericVal)) {
-      setActionErrorMsg('Giá trị đo NASA phải là số hợp lệ.');
+      setActionErrorMsg(t('Giá trị đo NASA phải là số hợp lệ.', 'NASA measurement value must be a valid number.'));
       return;
     }
     setSavingManual(true);
@@ -664,12 +758,17 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         latestNasaDate: manualDate,
       });
       setManualSuccessMsg(
-        `Đã lưu chỉ số ${manualIndicator} = ${numericVal} cho ô lưới ${manualCellId} ngày ${manualDate} lên hệ thống!`
+        t(
+          `Đã lưu chỉ số ${manualIndicator} = ${numericVal} cho ô lưới ${manualCellId} ngày ${manualDate} lên hệ thống!`,
+          `Saved indicator ${manualIndicator} = ${numericVal} for grid cell ${manualCellId} on ${manualDate}!`
+        )
       );
       onDatasetUpdated?.();
       fetchPlatformStats();
     } catch (err: any) {
-      setActionErrorMsg(err?.message || 'Không thể lưu bản ghi NASA thủ công.');
+      setActionErrorMsg(
+        err?.message || t('Không thể lưu bản ghi NASA thủ công.', 'Unable to save manual NASA observation.')
+      );
     } finally {
       setSavingManual(false);
     }
@@ -678,7 +777,12 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const handleTriggerSync = async () => {
     setSyncing(true);
     setActionErrorMsg(null);
-    setSyncMessage('Đang kết nối NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...');
+    setSyncMessage(
+      t(
+        'Đang kết nối NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...',
+        'Connecting to NASA POWER Daily API and syncing Vietnam grid cells...'
+      )
+    );
     try {
       const headers = await getAdminHeaders(true);
       const res = await fetch('/api/admin/sync', {
@@ -687,9 +791,12 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         body: JSON.stringify({}),
       });
       const data = await parseJsonSafely<any>(res);
-      if (res.ok) {
+      if (res.ok && data.status !== 'FAILED') {
         setSyncMessage(
-          `Đồng bộ thành công! Đã xử lý ${data.recordsSynced} bản ghi. Dữ liệu mới nhất: ${data.latestNasaDate}`
+          t(
+            `Đồng bộ thành công! Đã xử lý ${data.recordsSynced} bản ghi. Dữ liệu mới nhất: ${data.latestNasaDate}`,
+            `Sync completed! Processed ${data.recordsSynced} records. Latest data date: ${data.latestNasaDate}`
+          )
         );
         if (auth.currentUser) {
           await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
@@ -701,11 +808,16 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
           });
         }
       } else {
-        setSyncMessage(`Lỗi đồng bộ: ${data.error || 'NASA API không phản hồi'}`);
+        setSyncMessage(
+          t(
+            `Lỗi đồng bộ: ${data.error || data.errorMessage || `NASA API không phản hồi (HTTP ${res.status})`}`,
+            `Sync error: ${data.error || data.errorMessage || `NASA API did not respond (HTTP ${res.status})`}`
+          )
+        );
       }
       fetchStatus();
     } catch (err: any) {
-      setSyncMessage(`Lỗi kết nối: ${err.message}`);
+      setSyncMessage(t(`Lỗi kết nối: ${err.message}`, `Connection error: ${err.message}`));
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMessage(null), 8000);
@@ -730,8 +842,142 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     }
   };
 
+  const computeQueueSignature = (items: QueuedCsvFile[]): string =>
+    items.map((f) => `${f.key}:${f.size}:${f.content.length}`).join('|');
+
+  const splitContentOnLines = (content: string, maxChunkChars = 680_000): string[] => {
+    if (content.length <= maxChunkChars) return [content];
+    const parts: string[] = [];
+    let cursor = 0;
+    while (cursor < content.length) {
+      if (content.length - cursor <= maxChunkChars) {
+        parts.push(content.slice(cursor));
+        break;
+      }
+      const sliceEnd = cursor + maxChunkChars;
+      const lastNewline = content.lastIndexOf('\n', sliceEnd);
+      const cutAt = lastNewline > cursor ? lastNewline + 1 : sliceEnd;
+      parts.push(content.slice(cursor, cutAt));
+      cursor = cutAt;
+    }
+    return parts;
+  };
+
+  const uploadQueuedFilesInChunks = async (
+    items: QueuedCsvFile[],
+    headers: Record<string, string>,
+    phase: 'analyzing' | 'importing'
+  ): Promise<string> => {
+    const MAX_REQUEST_CHARS = 700_000;
+    type ChunkItem = {
+      fileName: string;
+      folderName: string;
+      partIndex: number;
+      totalParts: number;
+      content: string;
+    };
+
+    const allPieces: ChunkItem[] = [];
+    for (const f of items) {
+      const parts = splitContentOnLines(f.content, MAX_REQUEST_CHARS);
+      parts.forEach((partContent, idx) => {
+        allPieces.push({
+          fileName: f.fileName,
+          folderName: f.folderName,
+          partIndex: idx,
+          totalParts: parts.length,
+          content: partContent,
+        });
+      });
+    }
+
+    const requestBatches: ChunkItem[][] = [];
+    let currentBatch: ChunkItem[] = [];
+    let currentBatchChars = 0;
+    for (const piece of allPieces) {
+      const pieceLen = piece.content.length;
+      if (currentBatch.length > 0 && currentBatchChars + pieceLen > MAX_REQUEST_CHARS) {
+        requestBatches.push(currentBatch);
+        currentBatch = [];
+        currentBatchChars = 0;
+      }
+      currentBatch.push(piece);
+      currentBatchChars += pieceLen;
+    }
+    if (currentBatch.length > 0) {
+      requestBatches.push(currentBatch);
+    }
+
+    const startRes = await fetch('/api/admin/upload-session/start', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+    const startData = await parseJsonSafely<any>(startRes);
+    if (!startRes.ok || !startData?.sessionId) {
+      throw new Error(
+        startData?.error ||
+          t('Không thể khởi tạo phiên tải tệp lên máy chủ.', 'Unable to initialize server upload session.')
+      );
+    }
+    const sessionId = String(startData.sessionId);
+
+    const totalBytes = items.reduce((sum, f) => sum + f.size, 0);
+    const totalChars = Math.max(1, allPieces.reduce((sum, p) => sum + p.content.length, 0));
+    let sentChars = 0;
+    const startedAt = Date.now();
+
+    for (let b = 0; b < requestBatches.length; b++) {
+      const batch = requestBatches[b];
+      const chunkRes = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/chunk`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ items: batch }),
+      });
+      const chunkData = await parseJsonSafely<any>(chunkRes);
+      if (!chunkRes.ok) {
+        throw new Error(
+          chunkData?.error ||
+            t(
+              `Lỗi khi gửi gói dữ liệu CSV (${b + 1}/${requestBatches.length}).`,
+              `Error sending CSV data packet (${b + 1}/${requestBatches.length}).`
+            )
+        );
+      }
+
+      sentChars += batch.reduce((sum, p) => sum + p.content.length, 0);
+      const ratio = sentChars / totalChars;
+      const elapsedSec = (Date.now() - startedAt) / 1000;
+      const etaSeconds =
+        ratio > 0.05 && elapsedSec > 0.1
+          ? Math.max(1, Math.ceil((elapsedSec / ratio) * (1 - ratio)))
+          : null;
+
+      setCsvProgress({
+        active: true,
+        phase,
+        totalFiles: items.length,
+        processedFiles: Math.min(items.length, chunkData.receivedFilesCount || items.length),
+        totalBytes,
+        processedBytes: Math.round(totalBytes * ratio),
+        currentFileName:
+          batch[batch.length - 1]?.fileName || t('Đang truyền gói CSV...', 'Streaming CSV packet...'),
+        percent: phase === 'analyzing' ? Math.min(92, 50 + Math.round(ratio * 42)) : Math.min(45, 5 + Math.round(ratio * 40)),
+        etaSeconds,
+        startedAt,
+      });
+    }
+
+    stagedSessionRef.current = {
+      signature: computeQueueSignature(items),
+      sessionId,
+    };
+    return sessionId;
+  };
+
   const runBatchPreview = async (items: QueuedCsvFile[]) => {
     if (items.length === 0) {
+      stagedSessionRef.current = null;
       setBatchPreview(null);
       await CsvQueueStorage.savePatch({ batchPreview: null });
       return;
@@ -743,36 +989,31 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       active: true,
       phase: 'analyzing',
       totalFiles: items.length,
-      processedFiles: items.length,
+      processedFiles: 0,
       totalBytes,
-      processedBytes: totalBytes,
-      currentFileName: 'Đang tổng hợp & kiểm tra trùng lặp...',
-      percent: 92,
-      etaSeconds: 1,
+      processedBytes: 0,
+      currentFileName: t('Đang chia nhỏ & gửi tệp CSV an toàn...', 'Chunking & uploading CSV files safely...'),
+      percent: 50,
+      etaSeconds: null,
       startedAt: Date.now(),
     });
     try {
       const headers = await getAdminHeaders(true);
-      const res = await fetch('/api/admin/preview-batch', {
+      const sessionId = await uploadQueuedFilesInChunks(items, headers, 'analyzing');
+      const res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/preview`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          files: items.map((f) => ({
-            fileName: f.fileName,
-            folderName: f.folderName,
-            content: f.content,
-          })),
-        }),
+        body: JSON.stringify({}),
       });
       const data = await parseJsonSafely<any>(res);
       if (res.ok) {
         setBatchPreview(data);
         await CsvQueueStorage.savePatch({ batchPreview: data, readingProgress: null });
       } else {
-        setActionErrorMsg(data.error || 'Không thể kiểm tra cấu trúc các tệp CSV.');
+        setActionErrorMsg(data.error || t('Không thể kiểm tra cấu trúc các tệp CSV.', 'Unable to validate CSV file structure.'));
       }
     } catch (err: any) {
-      setActionErrorMsg(err?.message || 'Lỗi khi kiểm tra hàng loạt tệp CSV.');
+      setActionErrorMsg(err?.message || t('Lỗi khi kiểm tra hàng loạt tệp CSV.', 'Error validating batch CSV files.'));
     } finally {
       setPreviewing(false);
       setCsvProgress((prev) => (prev?.phase === 'importing' ? prev : null));
@@ -784,7 +1025,12 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   ) => {
     const csvEntries = entries.filter((item) => isCsvOrTextFile(item.file.name));
     if (csvEntries.length === 0) {
-      setActionErrorMsg('Không tìm thấy tệp định dạng .csv trong thư mục hoặc danh sách vừa chọn.');
+      setActionErrorMsg(
+        t(
+          'Không tìm thấy tệp định dạng .csv trong thư mục hoặc danh sách vừa chọn.',
+          'No .csv files were found in the selected folder or file list.'
+        )
+      );
       return;
     }
 
@@ -821,7 +1067,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         const chunk = csvEntries.slice(i, i + CHUNK_SIZE);
         const loadedChunk = await Promise.all(
           chunk.map(async ({ file, folderName }) => {
-            const content = await readFileAsText(file);
+            const content = await readFileAsText(file, lang);
             const safeFolder = folderName || 'Tệp tải lẻ';
             return {
               key: `${safeFolder}::${file.name}`,
@@ -884,7 +1130,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       const mergedQueue = Array.from(map.values());
       await runBatchPreview(mergedQueue);
     } catch (err: any) {
-      setActionErrorMsg(err?.message || 'Lỗi khi đọc tệp CSV từ thư mục.');
+      setActionErrorMsg(err?.message || t('Lỗi khi đọc tệp CSV từ thư mục.', 'Error reading CSV files from folder.'));
       setCsvProgress(null);
     } finally {
       setReadingQueue(false);
@@ -961,7 +1207,12 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     if (collected.length > 0) {
       await appendFilesToQueue(collected);
     } else {
-      setActionErrorMsg('Không tìm thấy tệp .csv hợp lệ trong các thư mục vừa kéo thả.');
+      setActionErrorMsg(
+        t(
+          'Không tìm thấy tệp .csv hợp lệ trong các thư mục vừa kéo thả.',
+          'No valid .csv files were found in the dropped folders.'
+        )
+      );
     }
   };
 
@@ -979,6 +1230,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   };
 
   const handleClearQueue = async () => {
+    stagedSessionRef.current = null;
     queuedFilesRef.current = [];
     setQueuedFiles([]);
     setBatchPreview(null);
@@ -1012,31 +1264,43 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     });
     try {
       const headers = await getAdminHeaders(true);
-      const res = await fetch('/api/admin/import-batch-async', {
+      const sig = computeQueueSignature(queuedFiles);
+      let sessionId =
+        stagedSessionRef.current?.signature === sig ? stagedSessionRef.current.sessionId : '';
+
+      if (!sessionId) {
+        sessionId = await uploadQueuedFilesInChunks(queuedFiles, headers, 'importing');
+      }
+
+      let res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/import-async`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          files: queuedFiles.map((f) => ({
-            fileName: f.fileName,
-            folderName: f.folderName,
-            content: f.content,
-          })),
-        }),
+        body: JSON.stringify({}),
       });
+
+      if (res.status === 404) {
+        sessionId = await uploadQueuedFilesInChunks(queuedFiles, headers, 'importing');
+        res = await fetch(`/api/admin/upload-session/${encodeURIComponent(sessionId)}/import-async`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({}),
+        });
+      }
 
       const data = await parseJsonSafely<any>(res);
       if (res.ok && data.job?.jobId) {
+        stagedSessionRef.current = null;
         await CsvQueueStorage.savePatch({ activeImportJobId: data.job.jobId });
         pollImportJob(data.job.jobId);
       } else {
         setImporting(false);
         setCsvProgress(null);
-        setActionErrorMsg(data.error || 'Không thể nhập hàng loạt dữ liệu CSV.');
+        setActionErrorMsg(data.error || t('Không thể nhập hàng loạt dữ liệu CSV.', 'Unable to run batch CSV import.'));
       }
     } catch (err: any) {
       setImporting(false);
       setCsvProgress(null);
-      setActionErrorMsg(`Lỗi khi nhập dữ liệu: ${err.message}`);
+      setActionErrorMsg(t(`Lỗi khi nhập dữ liệu: ${err.message}`, `Data import error: ${err.message}`));
     }
   };
 
@@ -1057,7 +1321,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         fetchStatus();
         setTimeout(() => setRollbackSuccessMsg(null), 6000);
       } else {
-        setActionErrorMsg(data.error || 'Không thể khôi phục phiên bản.');
+        setActionErrorMsg(data.error || t('Không thể khôi phục phiên bản.', 'Unable to roll back version.'));
       }
     } catch (err: any) {
       setActionErrorMsg(err.message);
@@ -1091,17 +1355,23 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Cổng Quản Trị Tổng Thể Hệ Thống
+              <Lock className="w-3 h-3" /> {t('Cổng Quản Trị Tổng Thể Hệ Thống', 'System-Wide Admin Portal')}
             </span>
             <span className="text-xs text-stone-400">
-              Toàn bộ nông dân · Tất cả thửa ruộng · Nhập dữ liệu NASA POWER nhiều thư mục CSV
+              {t(
+                'Toàn bộ nông dân · Tất cả thửa ruộng · Nhập dữ liệu NASA POWER nhiều thư mục CSV',
+                'All farmers · All fields · Multi-folder NASA POWER CSV batch import'
+              )}
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black tracking-tight mt-1">
-            Quản trị Tổng thể CropCast &amp; Kho Dữ liệu NASA POWER
+            {t('Quản trị Tổng thể CropCast & Kho Dữ liệu NASA POWER', 'CropCast Platform Admin & NASA POWER Warehouse')}
           </h1>
           <p className="text-xs sm:text-sm text-stone-300 mt-0.5">
-            Giám sát tổng quan toàn bộ ứng dụng, kiểm tra danh sách mọi thửa ruộng trên hệ thống và nhập dữ liệu NASA POWER bằng nhiều thư mục CSV cùng lúc.
+            {t(
+              'Giám sát tổng quan toàn bộ ứng dụng, kiểm tra danh sách mọi thửa ruộng trên hệ thống và nhập dữ liệu NASA POWER bằng nhiều thư mục CSV cùng lúc.',
+              'Monitor platform-wide analytics, inspect all registered fields, and import NASA POWER data from multiple CSV folders at once.'
+            )}
           </p>
         </div>
 
@@ -1115,7 +1385,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             className="px-3.5 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-100 border border-stone-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${statsLoading || loading ? 'animate-spin' : ''}`} />
-            Làm mới số liệu
+            {t('Làm mới số liệu', 'Refresh metrics')}
           </button>
           <button
             type="button"
@@ -1124,7 +1394,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Đang đồng bộ...' : 'Đồng bộ NASA ngay'}
+            {syncing ? t('Đang đồng bộ...', 'Syncing...') : t('Đồng bộ NASA ngay', 'Sync NASA Now')}
           </button>
         </div>
       </div>
@@ -1140,7 +1410,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <BarChart3 className="w-4 h-4" /> Tổng quan Hệ thống
+          <BarChart3 className="w-4 h-4" /> {t('Tổng quan Hệ thống', 'System Overview')}
         </button>
         <button
           type="button"
@@ -1151,7 +1421,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <MapPin className="w-4 h-4" /> Tất cả Thửa ruộng ({platformStats?.allFields.length ?? '—'})
+          <MapPin className="w-4 h-4" /> {t('Tất cả Thửa ruộng', 'All Fields')} ({platformStats?.allFields.length ?? '—'})
         </button>
         <button
           type="button"
@@ -1162,7 +1432,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <Users className="w-4 h-4" /> Người dùng ({platformStats?.totalUsers ?? '—'})
+          <Users className="w-4 h-4" /> {t('Người dùng', 'Users')} ({platformStats?.totalUsers ?? '—'})
         </button>
         <button
           type="button"
@@ -1173,7 +1443,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               : 'text-stone-600 hover:bg-stone-100'
           }`}
         >
-          <Database className="w-4 h-4" /> Dữ liệu NASA POWER (CSV nhiều thư mục)
+          <Database className="w-4 h-4" /> {t('Dữ liệu NASA POWER (CSV nhiều thư mục)', 'NASA POWER Data (Multi-Folder CSV)')}
         </button>
       </div>
 
@@ -1221,33 +1491,33 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
-                <span className="text-[11px] uppercase font-bold">Tổng số người dùng</span>
+                <span className="text-[11px] uppercase font-bold">{t('Tổng số người dùng', 'Total Users')}</span>
                 <Users className="w-4 h-4 text-emerald-700" />
               </div>
               <div className="text-2xl font-black text-stone-900 tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalUsers ?? 0}
               </div>
               <div className="text-[11px] text-stone-500">
-                Tài khoản nông dân &amp; quản trị đã đăng ký
+                {t('Tài khoản nông dân & quản trị đã đăng ký', 'Registered farmer & admin accounts')}
               </div>
             </div>
 
             <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
-                <span className="text-[11px] uppercase font-bold">Tổng số thửa ruộng</span>
+                <span className="text-[11px] uppercase font-bold">{t('Tổng số thửa ruộng', 'Total Fields')}</span>
                 <MapPin className="w-4 h-4 text-blue-700" />
               </div>
               <div className="text-2xl font-black text-stone-900 tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalFields ?? 0}
               </div>
               <div className="text-[11px] text-emerald-700 font-semibold">
-                Tổng diện tích: {statsLoading ? '...' : platformStats?.totalAreaHa ?? 0} ha
+                {t('Tổng diện tích:', 'Total area:')} {statsLoading ? '...' : platformStats?.totalAreaHa ?? 0} ha
               </div>
             </div>
 
             <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
-                <span className="text-[11px] uppercase font-bold">Việc đồng ruộng &amp; Phản hồi</span>
+                <span className="text-[11px] uppercase font-bold">{t('Việc đồng ruộng & Phản hồi', 'Field Tasks & Feedback')}</span>
                 <CheckCircle2 className="w-4 h-4 text-amber-600" />
               </div>
               <div className="text-2xl font-black text-stone-900 tabular-nums">
@@ -1256,20 +1526,20 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   : `${platformStats?.completedTasks ?? 0}/${platformStats?.totalTasks ?? 0}`}
               </div>
               <div className="text-[11px] text-stone-500">
-                Phản hồi thực địa đã ghi nhận: <strong>{platformStats?.totalFeedbacks ?? 0}</strong>
+                {t('Phản hồi thực địa đã ghi nhận:', 'Recorded field feedback:')} <strong>{platformStats?.totalFeedbacks ?? 0}</strong>
               </div>
             </div>
 
             <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
-                <span className="text-[11px] uppercase font-bold">Chia sẻ &amp; Gói NASA</span>
+                <span className="text-[11px] uppercase font-bold">{t('Chia sẻ & Gói NASA', 'Shares & NASA Batches')}</span>
                 <Share2 className="w-4 h-4 text-purple-700" />
               </div>
               <div className="text-2xl font-black text-stone-900 tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalActiveShares ?? 0}
               </div>
               <div className="text-[11px] text-stone-500">
-                Lượt chia sẻ ruộng · <strong>{platformStats?.totalNasaDatasets ?? 0}</strong> gói NASA đã nạp
+                {t('Lượt chia sẻ ruộng ·', 'Active field shares ·')} <strong>{platformStats?.totalNasaDatasets ?? 0}</strong> {t('gói NASA đã nạp', 'NASA batches loaded')}
               </div>
             </div>
           </div>
@@ -1278,10 +1548,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-xs">
             <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-emerald-700" /> Phân bố ruộng theo Tỉnh / Vùng
+                <MapPin className="w-4 h-4 text-emerald-700" /> {t('Phân bố ruộng theo Tỉnh / Vùng', 'Fields by Province / Region')}
               </h3>
               {!platformStats || platformStats.fieldsByProvince.length === 0 ? (
-                <p className="text-stone-400 italic py-4">Chưa có thửa ruộng nào được tạo.</p>
+                <p className="text-stone-400 italic py-4">{t('Chưa có thửa ruộng nào được tạo.', 'No fields have been created yet.')}</p>
               ) : (
                 <div className="space-y-2">
                   {platformStats.fieldsByProvince.map((p) => (
@@ -1289,9 +1559,9 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       key={p.province}
                       className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
                     >
-                      <span className="font-semibold text-stone-800">{p.province}</span>
+                      <span className="font-semibold text-stone-800">{getLocalizedRegionName(p.province, lang)}</span>
                       <span className="font-mono font-bold text-emerald-800">
-                        {p.count} thửa ({p.areaHa} ha)
+                        {p.count} {t('thửa', 'fields')} ({p.areaHa} ha)
                       </span>
                     </div>
                   ))}
@@ -1301,10 +1571,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
             <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
-                <Sprout className="w-4 h-4 text-emerald-700" /> Cơ cấu Cây trồng đang canh tác
+                <Sprout className="w-4 h-4 text-emerald-700" /> {t('Cơ cấu Cây trồng đang canh tác', 'Active Crop Mix')}
               </h3>
               {!platformStats || platformStats.fieldsByCrop.length === 0 ? (
-                <p className="text-stone-400 italic py-4">Chưa có dữ liệu cây trồng.</p>
+                <p className="text-stone-400 italic py-4">{t('Chưa có dữ liệu cây trồng.', 'No crop data yet.')}</p>
               ) : (
                 <div className="space-y-2">
                   {platformStats.fieldsByCrop.map((c) => (
@@ -1312,8 +1582,8 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       key={c.cropName}
                       className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
                     >
-                      <span className="font-semibold text-stone-800">{c.cropName}</span>
-                      <span className="font-mono font-bold text-stone-900">{c.count} thửa</span>
+                      <span className="font-semibold text-stone-800">{getPlantDisplayName(c.cropName, lang)}</span>
+                      <span className="font-mono font-bold text-stone-900">{c.count} {t('thửa', 'fields')}</span>
                     </div>
                   ))}
                 </div>
@@ -1322,10 +1592,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
             <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-amber-700" /> Phân loại Chất đất trên toàn hệ thống
+                <Layers className="w-4 h-4 text-amber-700" /> {t('Phân loại Chất đất trên toàn hệ thống', 'Soil Type Distribution')}
               </h3>
               {!platformStats || platformStats.fieldsBySoil.length === 0 ? (
-                <p className="text-stone-400 italic py-4">Chưa có dữ liệu chất đất.</p>
+                <p className="text-stone-400 italic py-4">{t('Chưa có dữ liệu chất đất.', 'No soil type data yet.')}</p>
               ) : (
                 <div className="space-y-2">
                   {platformStats.fieldsBySoil.map((s) => (
@@ -1334,9 +1604,9 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
                     >
                       <span className="font-semibold text-stone-800">
-                        {getSoilLabel(s.soilType as any)}
+                        {getSoilLabel(s.soilType as any, lang)}
                       </span>
-                      <span className="font-mono font-bold text-stone-900">{s.count} thửa</span>
+                      <span className="font-mono font-bold text-stone-900">{s.count} {t('thửa', 'fields')}</span>
                     </div>
                   ))}
                 </div>
@@ -1350,10 +1620,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div>
                 <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-emerald-700" />
-                  Thửa ruộng mới nhất trên toàn hệ thống
+                  {t('Thửa ruộng mới nhất trên toàn hệ thống', 'Latest Fields Across Platform')}
                 </h3>
                 <p className="text-xs text-stone-500">
-                  Tổng quan các thửa ruộng gần đây của tất cả người dùng. Nhấn để xem bản đồ vệ tinh hoặc mở danh sách đầy đủ.
+                  {t(
+                    'Tổng quan các thửa ruộng gần đây của tất cả người dùng. Nhấn để xem bản đồ vệ tinh hoặc mở danh sách đầy đủ.',
+                    'Recent fields across all users. Click any card to inspect on satellite map or open the full directory.'
+                  )}
                 </p>
               </div>
               <button
@@ -1361,12 +1634,12 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 onClick={() => setAdminTab('fields')}
                 className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition cursor-pointer self-start sm:self-auto"
               >
-                Xem tất cả thửa ruộng →
+                {t('Xem tất cả thửa ruộng →', 'View all fields →')}
               </button>
             </div>
 
             {!platformStats || platformStats.allFields.length === 0 ? (
-              <p className="text-xs text-stone-400 italic py-4">Chưa có thửa ruộng nào trên hệ thống.</p>
+              <p className="text-xs text-stone-400 italic py-4">{t('Chưa có thửa ruộng nào trên hệ thống.', 'No fields registered on the platform yet.')}</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {platformStats.allFields.slice(0, 6).map((f) => (
@@ -1380,15 +1653,15 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       <div>
                         <div className="font-bold text-sm text-stone-900 line-clamp-1">{f.name}</div>
                         <div className="text-[11px] text-stone-500">
-                          {f.district ? `${f.district}, ` : ''}{f.province} · {f.areaHa} ha
+                          {f.district ? `${f.district}, ` : ''}{getLocalizedRegionName(f.province, lang)} · {f.areaHa} ha
                         </div>
                       </div>
                       <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                        {f.cropName}
+                        {getPlantDisplayName(f.cropName, lang)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-stone-600 pt-1 border-t border-stone-200/70">
-                      <span className="truncate max-w-[170px]">Chủ: <strong>{f.ownerName}</strong></span>
+                      <span className="truncate max-w-[170px]">{t('Chủ:', 'Owner:')} <strong>{f.ownerName}</strong></span>
                       <span className="font-mono text-emerald-700 font-semibold">{f.nasaCellId}</span>
                     </div>
                   </button>
@@ -1406,10 +1679,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             <div>
               <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-emerald-700" />
-                Tổng hợp Toàn bộ Thửa ruộng trên CropCast ({filteredFields.length}/{platformStats?.allFields.length ?? 0})
+                {t('Tổng hợp Toàn bộ Thửa ruộng trên CropCast', 'All Fields Directory on CropCast')} ({filteredFields.length}/{platformStats?.allFields.length ?? 0})
               </h2>
               <p className="text-xs text-stone-500">
-                Quản trị viên xem toàn bộ thửa ruộng của tất cả tài khoản, chủ sở hữu, tọa độ vệ tinh và điểm dữ liệu NASA gần nhất.
+                {t(
+                  'Quản trị viên xem toàn bộ thửa ruộng của tất cả tài khoản, chủ sở hữu, tọa độ vệ tinh và điểm dữ liệu NASA gần nhất.',
+                  'Administrators can review every field across all accounts, owners, satellite coordinates, and nearest NASA grid cells.'
+                )}
               </p>
             </div>
 
@@ -1421,7 +1697,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   type="text"
                   value={fieldSearch}
                   onChange={(e) => setFieldSearch(e.target.value)}
-                  placeholder="Tìm tên ruộng, chủ sở hữu, email, cây..."
+                  placeholder={t('Tìm tên ruộng, chủ sở hữu, email, cây...', 'Search field, owner, email, crop...')}
                   className="pl-8 pr-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-900 w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -1431,9 +1707,9 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 onChange={(e) => setProvinceFilter(e.target.value)}
                 className="px-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-800"
               >
-                <option value="ALL">Tất cả Tỉnh/Thành</option>
+                <option value="ALL">{t('Tất cả Tỉnh/Thành', 'All Provinces / Regions')}</option>
                 {availableProvinces.map((p) => (
-                  <option key={p} value={p}>{p}</option>
+                  <option key={p} value={p}>{getLocalizedRegionName(p, lang)}</option>
                 ))}
               </select>
 
@@ -1442,9 +1718,9 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 onChange={(e) => setCropFilter(e.target.value)}
                 className="px-3 py-2 border border-stone-300 rounded-xl text-xs bg-white text-stone-800"
               >
-                <option value="ALL">Tất cả Cây trồng</option>
+                <option value="ALL">{t('Tất cả Cây trồng', 'All Crops')}</option>
                 {availableCrops.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c} value={c}>{getPlantDisplayName(c, lang)}</option>
                 ))}
               </select>
             </div>
@@ -1452,25 +1728,25 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
           {statsLoading ? (
             <div className="p-8 text-center text-xs text-stone-500 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> Đang tải toàn bộ thửa ruộng...
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> {t('Đang tải toàn bộ thửa ruộng...', 'Loading all fields...')}
             </div>
           ) : filteredFields.length === 0 ? (
             <div className="p-8 text-center text-xs text-stone-400">
-              Không có thửa ruộng nào phù hợp bộ lọc hiện tại.
+              {t('Không có thửa ruộng nào phù hợp bộ lọc hiện tại.', 'No fields match the current filters.')}
             </div>
           ) : (
             <div className="overflow-x-auto border border-stone-200 rounded-xl">
               <table className="w-full text-left text-xs">
                 <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px] uppercase">
                   <tr>
-                    <th className="p-3 font-bold">Thửa ruộng &amp; Địa điểm</th>
-                    <th className="p-3 font-bold">Chủ sở hữu</th>
-                    <th className="p-3 font-bold">Tọa độ &amp; Ô lưới NASA</th>
-                    <th className="p-3 font-bold">Cây trồng &amp; Giai đoạn</th>
-                    <th className="p-3 font-bold">Đất &amp; Nguồn nước</th>
-                    <th className="p-3 font-bold">Diện tích</th>
-                    <th className="p-3 font-bold">Chia sẻ</th>
-                    <th className="p-3 font-bold text-right">Chi tiết</th>
+                    <th className="p-3 font-bold">{t('Thửa ruộng & Địa điểm', 'Field & Location')}</th>
+                    <th className="p-3 font-bold">{t('Chủ sở hữu', 'Owner')}</th>
+                    <th className="p-3 font-bold">{t('Tọa độ & Ô lưới NASA', 'Coords & NASA Cell')}</th>
+                    <th className="p-3 font-bold">{t('Cây trồng & Giai đoạn', 'Crop & Stage')}</th>
+                    <th className="p-3 font-bold">{t('Đất & Nguồn nước', 'Soil & Water')}</th>
+                    <th className="p-3 font-bold">{t('Diện tích', 'Area')}</th>
+                    <th className="p-3 font-bold">{t('Chia sẻ', 'Sharing')}</th>
+                    <th className="p-3 font-bold text-right">{t('Chi tiết', 'Details')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -1479,7 +1755,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       <td className="p-3">
                         <div className="font-bold text-stone-900">{f.name}</div>
                         <div className="text-[11px] text-stone-500">
-                          {f.district ? `${f.district}, ` : ''}{f.province}
+                          {f.district ? `${f.district}, ` : ''}{getLocalizedRegionName(f.province, lang)}
                         </div>
                       </td>
                       <td className="p-3">
@@ -1490,24 +1766,24 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       </td>
                       <td className="p-3 font-mono">
                         <div className="text-stone-800 text-[11px]">
-                          {f.lat.toFixed(4)}°B, {f.lon.toFixed(4)}°Đ
+                          {f.lat.toFixed(4)}°{lang === 'en' ? 'N' : 'B'}, {f.lon.toFixed(4)}°{lang === 'en' ? 'E' : 'Đ'}
                         </div>
                         <div className="text-[11px] text-emerald-700 font-bold">
                           {f.nasaCellId} ({f.nasaDistanceKm} km)
                         </div>
                       </td>
                       <td className="p-3">
-                        <div className="font-bold text-emerald-900">{f.cropName}</div>
+                        <div className="font-bold text-emerald-900">{getPlantDisplayName(f.cropName, lang)}</div>
                         <div className="text-[11px] text-stone-500">
-                          Giống: {f.cropVariety} · {f.currentStage}
+                          {t('Giống:', 'Variety:')} {getCommonVarietyLabel(f.cropVariety, lang)} · {getCommonStageLabel(f.currentStage, lang)}
                         </div>
                       </td>
                       <td className="p-3">
                         <div className="font-semibold text-stone-800">
-                          {getSoilLabel(f.soilType)}
+                          {getSoilLabel(f.soilType, lang)}
                         </div>
                         <div className="text-[11px] text-stone-500">
-                          {WATER_LABELS[f.waterSourceType] || 'Nguồn nước khác'}
+                          {waterLabels[f.waterSourceType] || waterLabels.other}
                         </div>
                       </td>
                       <td className="p-3 font-mono font-bold text-stone-900 tabular-nums">
@@ -1519,7 +1795,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                             <Share2 className="w-3 h-3" /> {f.sharedCount}
                           </span>
                         ) : (
-                          <span className="text-[11px] text-stone-400">Riêng tư</span>
+                          <span className="text-[11px] text-stone-400">{t('Riêng tư', 'Private')}</span>
                         )}
                       </td>
                       <td className="p-3 text-right">
@@ -1528,7 +1804,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                           onClick={() => setInspectingField(f)}
                           className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold transition inline-flex items-center gap-1 cursor-pointer"
                         >
-                          <Eye className="w-3.5 h-3.5" /> Xem chi tiết
+                          <Eye className="w-3.5 h-3.5" /> {t('Xem chi tiết', 'Inspect')}
                         </button>
                       </td>
                     </tr>
@@ -1547,10 +1823,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             <div>
               <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                 <Users className="w-5 h-5 text-emerald-700" />
-                Danh sách Tài khoản Nông dân &amp; Quản trị viên
+                {t('Danh sách Tài khoản Nông dân & Quản trị viên', 'Farmers & Administrators Directory')}
               </h2>
               <p className="text-xs text-stone-500">
-                Admin gốc mặc định: <strong className="font-mono text-stone-800">{BOOTSTRAP_ADMIN_EMAIL}</strong>. Quản trị viên có thể cấp hoặc gỡ quyền Admin cho các tài khoản Google khác.
+                {t('Admin gốc mặc định:', 'Default root Admin:')} <strong className="font-mono text-stone-800">{BOOTSTRAP_ADMIN_EMAIL}</strong>. {t('Quản trị viên có thể cấp hoặc gỡ quyền Admin cho các tài khoản Google khác.', 'Administrators can grant or revoke Admin privileges for other Google accounts.')}
               </p>
             </div>
           </div>
@@ -1562,13 +1838,16 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
           >
             <div className="flex-1 space-y-1">
               <label className="font-bold text-emerald-950 block">
-                Thêm Quản trị viên mới bằng Email Google
+                {t('Thêm Quản trị viên mới bằng Email Google', 'Grant Admin Privileges by Google Email')}
               </label>
               <input
                 type="email"
                 value={adminEmailInput}
                 onChange={(e) => setAdminEmailInput(e.target.value)}
-                placeholder="Nhập email Google đã từng đăng nhập CropCast (VD: dongnghiep@gmail.com)"
+                placeholder={t(
+                  'Nhập email Google đã từng đăng nhập CropCast (VD: dongnghiep@gmail.com)',
+                  'Enter a Google email that has signed in to CropCast (e.g., colleague@gmail.com)'
+                )}
                 className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
@@ -1577,7 +1856,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               disabled={statsLoading || togglingAdminUid !== null}
               className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
             >
-              <ShieldCheck className="w-4 h-4" /> Thêm Admin
+              <ShieldCheck className="w-4 h-4" /> {t('Thêm Admin', 'Add Admin')}
             </button>
           </form>
 
@@ -1599,24 +1878,24 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
           {statsLoading ? (
             <div className="p-8 text-center text-xs text-stone-500 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> Đang tải danh sách tài khoản...
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-700" /> {t('Đang tải danh sách tài khoản...', 'Loading user directory...')}
             </div>
           ) : !platformStats || platformStats.users.length === 0 ? (
             <div className="p-8 text-center text-xs text-stone-400">
-              Chưa có người dùng nào đăng ký tài khoản trên hệ thống.
+              {t('Chưa có người dùng nào đăng ký tài khoản trên hệ thống.', 'No registered user accounts on the platform yet.')}
             </div>
           ) : (
             <div className="overflow-x-auto border border-stone-200 rounded-xl">
               <table className="w-full text-left text-xs">
                 <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px] uppercase">
                   <tr>
-                    <th className="p-3 font-bold">Người dùng</th>
-                    <th className="p-3 font-bold">Email / Tài khoản</th>
-                    <th className="p-3 font-bold">Vai trò</th>
-                    <th className="p-3 font-bold">Số ruộng</th>
-                    <th className="p-3 font-bold">Tổng diện tích</th>
-                    <th className="p-3 font-bold">Ngày tham gia</th>
-                    <th className="p-3 font-bold text-right">Phân quyền</th>
+                    <th className="p-3 font-bold">{t('Người dùng', 'User')}</th>
+                    <th className="p-3 font-bold">{t('Email / Tài khoản', 'Email / Account')}</th>
+                    <th className="p-3 font-bold">{t('Vai trò', 'Role')}</th>
+                    <th className="p-3 font-bold">{t('Số ruộng', 'Fields')}</th>
+                    <th className="p-3 font-bold">{t('Tổng diện tích', 'Total Area')}</th>
+                    <th className="p-3 font-bold">{t('Ngày tham gia', 'Joined')}</th>
+                    <th className="p-3 font-bold text-right">{t('Phân quyền', 'Permissions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -1630,23 +1909,23 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                         <td className="p-3">
                           {u.isAdmin ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 font-bold text-[11px]">
-                              <ShieldCheck className="w-3 h-3 text-amber-700" /> Quản trị viên
+                              <ShieldCheck className="w-3 h-3 text-amber-700" /> {t('Quản trị viên', 'Administrator')}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-semibold text-[11px]">
-                              <UserCheck className="w-3 h-3" /> Nông dân
+                              <UserCheck className="w-3 h-3" /> {t('Nông dân', 'Farmer')}
                             </span>
                           )}
                         </td>
                         <td className="p-3 font-bold text-stone-900 tabular-nums">{u.fieldCount}</td>
                         <td className="p-3 font-mono text-stone-700 tabular-nums">{u.totalAreaHa} ha</td>
                         <td className="p-3 text-stone-500">
-                          {new Date(u.createdAt).toLocaleDateString('vi-VN')}
+                          {new Date(u.createdAt).toLocaleDateString(locale)}
                         </td>
                         <td className="p-3 text-right">
                           {isBootstrap ? (
                             <span className="text-[11px] text-stone-400 font-semibold">
-                              Admin gốc
+                              {t('Admin gốc', 'Root Admin')}
                             </span>
                           ) : (
                             <button
@@ -1660,10 +1939,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                               }`}
                             >
                               {togglingAdminUid === u.uid
-                                ? 'Đang lưu...'
+                                ? t('Đang lưu...', 'Saving...')
                                 : u.isAdmin
-                                ? 'Gỡ quyền Admin'
-                                : 'Cấp quyền Admin'}
+                                ? t('Gỡ quyền Admin', 'Revoke Admin')
+                                : t('Cấp quyền Admin', 'Grant Admin')}
                             </button>
                           )}
                         </td>
@@ -1684,36 +1963,36 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
               <div className="flex items-center justify-between text-stone-400">
-                <span className="text-[10px] uppercase font-bold">Ngày NASA mới nhất</span>
+                <span className="text-[10px] uppercase font-bold">{t('Ngày NASA mới nhất', 'Latest NASA Date')}</span>
                 <Clock className="w-4 h-4 text-emerald-600" />
               </div>
               <div className="text-xl font-black text-stone-900">{status?.latestNasaDate || '2026-11-08'}</div>
-              <div className="text-[11px] text-stone-500">Độ trễ xử lý vệ tinh ~48-72 giờ</div>
+              <div className="text-[11px] text-stone-500">{t('Độ trễ xử lý vệ tinh ~48-72 giờ', 'Satellite processing lag ~48–72h')}</div>
             </div>
 
             <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
               <div className="flex items-center justify-between text-stone-400">
-                <span className="text-[10px] uppercase font-bold">Tổng số bản ghi kho</span>
+                <span className="text-[10px] uppercase font-bold">{t('Tổng số bản ghi kho', 'Warehouse Records')}</span>
                 <Database className="w-4 h-4 text-blue-600" />
               </div>
               <div className="text-xl font-black text-stone-900">
-                {status?.totalRecords ? status.totalRecords.toLocaleString('vi-VN') : '1.550.640'}
+                {status?.totalRecords ? status.totalRecords.toLocaleString(locale) : (lang === 'en' ? '1,550,640' : '1.550.640')}
               </div>
-              <div className="text-[11px] text-stone-500">531 ô lưới × 8 chỉ số NASA</div>
+              <div className="text-[11px] text-stone-500">{t('531 ô lưới × 8 chỉ số NASA', '531 grid cells × 8 NASA parameters')}</div>
             </div>
 
             <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
               <div className="flex items-center justify-between text-stone-400">
-                <span className="text-[10px] uppercase font-bold">Phiên bản dữ liệu</span>
+                <span className="text-[10px] uppercase font-bold">{t('Phiên bản dữ liệu', 'Dataset Version')}</span>
                 <Layers className="w-4 h-4 text-purple-600" />
               </div>
               <div className="text-xl font-black text-stone-900">{status?.activeVersion || 'v2026.11'}</div>
-              <div className="text-[11px] text-emerald-700 font-semibold">Khóa độc nhất: ô lưới + ngày + mã</div>
+              <div className="text-[11px] text-emerald-700 font-semibold">{t('Khóa độc nhất: ô lưới + ngày + mã', 'Unique key: cell + date + code')}</div>
             </div>
 
             <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
               <div className="flex items-center justify-between text-stone-400">
-                <span className="text-[10px] uppercase font-bold">Tự động đồng bộ API</span>
+                <span className="text-[10px] uppercase font-bold">{t('Tự động đồng bộ API', 'Auto API Sync')}</span>
                 <Server className="w-4 h-4 text-emerald-600" />
               </div>
               <button
@@ -1725,7 +2004,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     : 'bg-stone-100 text-stone-600 border-stone-300'
                 }`}
               >
-                Đồng bộ hàng ngày: {status?.autoSyncEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+                {t('Đồng bộ hàng ngày:', 'Daily sync:')} {status?.autoSyncEnabled ? t('ĐANG BẬT', 'ENABLED') : t('ĐANG TẮT', 'DISABLED')}
               </button>
             </div>
           </div>
@@ -1735,16 +2014,19 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             <div className="border-b border-stone-100 pb-3">
               <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                 <PlusCircle className="w-5 h-5 text-emerald-700" />
-                1. Nhập nhanh Dữ liệu Khí hậu NASA Thủ công
+                {t('1. Nhập nhanh Dữ liệu Khí hậu NASA Thủ công', '1. Quick Manual NASA Observation Entry')}
               </h2>
               <p className="text-xs text-stone-500">
-                Cập nhật tức thì một chỉ số quan trắc (nhiệt độ, lượng mưa, độ ẩm đất rễ/mặt, bức xạ) cho bất kỳ ô lưới Việt Nam nào.
+                {t(
+                  'Cập nhật tức thì một chỉ số quan trắc (nhiệt độ, lượng mưa, độ ẩm đất rễ/mặt, bức xạ) cho bất kỳ ô lưới Việt Nam nào.',
+                  'Instantly upsert a single observation (temperature, rainfall, root/surface soil wetness, solar radiation) for any Vietnam grid cell.'
+                )}
               </p>
             </div>
 
             <form onSubmit={handleManualNasaSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs items-end">
               <div>
-                <label className="font-bold text-stone-700 block mb-1">Ô lưới NASA (531 ô)</label>
+                <label className="font-bold text-stone-700 block mb-1">{t('Ô lưới NASA (531 ô)', 'NASA Grid Cell (531)')}</label>
                 <select
                   value={manualCellId}
                   onChange={(e) => setManualCellId(e.target.value)}
@@ -1752,14 +2034,14 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 >
                   {ALL_NASA_CELLS.slice(0, 120).map((c) => (
                     <option key={c.cellId} value={c.cellId}>
-                      {c.cellId} · {c.region}
+                      {c.cellId} · {getLocalizedRegionName(c.region, lang)}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="font-bold text-stone-700 block mb-1">Ngày quan trắc</label>
+                <label className="font-bold text-stone-700 block mb-1">{t('Ngày quan trắc', 'Observation Date')}</label>
                 <input
                   type="date"
                   value={manualDate}
@@ -1770,18 +2052,18 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               </div>
 
               <div>
-                <label className="font-bold text-stone-700 block mb-1">Chỉ số NASA POWER</label>
+                <label className="font-bold text-stone-700 block mb-1">{t('Chỉ số NASA POWER', 'NASA POWER Indicator')}</label>
                 <select
                   value={manualIndicator}
                   onChange={(e) => {
                     const code = e.target.value;
                     setManualIndicator(code);
-                    const found = NASA_INDICATORS.find((x) => x.code === code);
+                    const found = nasaIndicators.find((x) => x.code === code);
                     if (found) setManualValue(found.defaultVal);
                   }}
                   className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
                 >
-                  {NASA_INDICATORS.map((ind) => (
+                  {nasaIndicators.map((ind) => (
                     <option key={ind.code} value={ind.code}>
                       {ind.code} — {ind.label}
                     </option>
@@ -1790,7 +2072,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               </div>
 
               <div>
-                <label className="font-bold text-stone-700 block mb-1">Giá trị đo</label>
+                <label className="font-bold text-stone-700 block mb-1">{t('Giá trị đo', 'Value')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -1807,7 +2089,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 {savingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
-                {savingManual ? 'Đang lưu...' : 'Thêm dữ liệu NASA'}
+                {savingManual ? t('Đang lưu...', 'Saving...') : t('Thêm dữ liệu NASA', 'Add NASA Observation')}
               </button>
             </form>
 
@@ -1825,10 +2107,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div>
                 <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                   <CloudUpload className="w-5 h-5 text-emerald-700" />
-                  2. Nhập dữ liệu NASA POWER bằng CSV (Nhiều thư mục cùng lúc)
+                  {t('2. Nhập dữ liệu NASA POWER bằng CSV (Nhiều thư mục cùng lúc)', '2. NASA POWER CSV Batch Importer (Multi-Folder)')}
                 </h2>
                 <p className="text-xs text-stone-500">
-                  Hỗ trợ cả tệp xuất chuẩn từ NASA POWER (có phần -END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) lẫn tệp 4 cột (cell_id, date, indicator_code, value). Tự bỏ qua giá trị thiếu -999.
+                  {t(
+                    'Hỗ trợ cả tệp xuất chuẩn từ NASA POWER (có phần -END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) lẫn tệp 4 cột (cell_id, date, indicator_code, value). Tự bỏ qua giá trị thiếu -999.',
+                    'Supports both standard NASA POWER exports (-END HEADER-, Latitude/Longitude, YEAR,MO,DY, T2M, PRECTOTCORR, GWETROOT...) and 4-column CSVs (cell_id, date, indicator_code, value). Automatically skips -999 missing values.'
+                  )}
                 </p>
               </div>
 
@@ -1837,7 +2122,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 onClick={handleDownloadSampleCsv}
                 className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold inline-flex items-center gap-1 cursor-pointer underline shrink-0"
               >
-                <Download className="w-3.5 h-3.5" /> Tải tệp mẫu NASA POWER (.CSV)
+                <Download className="w-3.5 h-3.5" /> {t('Tải tệp mẫu NASA POWER (.CSV)', 'Download Sample NASA POWER (.CSV)')}
               </button>
             </div>
 
@@ -1883,10 +2168,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
               <div className="space-y-1 max-w-xl">
                 <p className="text-sm font-bold text-stone-900">
-                  Kéo thả đồng thời nhiều thư mục NASA POWER vào đây
+                  {t('Kéo thả đồng thời nhiều thư mục NASA POWER vào đây', 'Drag & drop multiple NASA POWER CSV folders here')}
                 </p>
                 <p className="text-xs text-stone-500">
-                  Hoặc nhấn nút bên dưới để chọn từng thư mục cộng dồn vào hàng đợi (có thể thêm liên tiếp nhiều thư mục khác nhau trước khi bấm nhập).
+                  {t(
+                    'Hoặc nhấn nút bên dưới để chọn từng thư mục cộng dồn vào hàng đợi (có thể thêm liên tiếp nhiều thư mục khác nhau trước khi bấm nhập).',
+                    'Or click below to append folders or files into the upload queue (you can add multiple batches before importing).'
+                  )}
                 </p>
               </div>
 
@@ -1896,14 +2184,14 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   onClick={() => folderInputRef.current?.click()}
                   className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <FolderPlus className="w-4 h-4" /> + Thêm thư mục CSV
+                  <FolderPlus className="w-4 h-4" /> {t('+ Thêm thư mục CSV', '+ Add CSV Folder')}
                 </button>
                 <button
                   type="button"
                   onClick={() => filesInputRef.current?.click()}
                   className="px-4 py-2 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" /> + Thêm nhiều tệp CSV
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" /> {t('+ Thêm nhiều tệp CSV', '+ Add Multiple CSV Files')}
                 </button>
                 {queuedFiles.length > 0 && (
                   <button
@@ -1911,14 +2199,14 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     onClick={handleClearQueue}
                     className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Xóa hàng đợi ({queuedFiles.length} tệp)
+                    <Trash2 className="w-3.5 h-3.5" /> {t('Xóa hàng đợi', 'Clear Queue')} ({queuedFiles.length} {t('tệp', 'files')})
                   </button>
                 )}
               </div>
 
               {readingQueue && (
                 <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5 pt-1">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang quét các thư mục và đọc tệp CSV...
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('Đang quét các thư mục và đọc tệp CSV...', 'Scanning folders and reading CSV files...')}
                 </div>
               )}
             </div>
@@ -1947,15 +2235,15 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
                     <span>
                       {csvProgress.phase === 'reading'
-                        ? 'Đang đọc tệp CSV từ máy (tự lưu nếu tải lại trang)...'
+                        ? t('Đang đọc tệp CSV từ máy (tự lưu nếu tải lại trang)...', 'Reading CSV files (persisted across page reloads)...')
                         : csvProgress.phase === 'analyzing'
-                        ? 'Đang phân tích cấu trúc & lọc dữ liệu trùng...'
-                        : 'Đang nhập dữ liệu CSV vào Kho NASA...'}
+                        ? t('Đang phân tích cấu trúc & lọc dữ liệu trùng...', 'Analyzing structure & deduplicating rows...')
+                        : t('Đang nhập dữ liệu CSV vào Kho NASA...', 'Importing CSV data into NASA Warehouse...')}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-0.5 rounded-full bg-white border border-emerald-300 text-emerald-900 font-bold font-mono text-[11px]">
-                      ETA: {formatEta(csvProgress.etaSeconds)}
+                      ETA: {formatEta(csvProgress.etaSeconds, lang)}
                     </span>
                     <span className="font-black text-emerald-900 font-mono text-sm tabular-nums">
                       {csvProgress.percent}%
@@ -1972,13 +2260,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-900">
                   <span className="truncate max-w-md font-medium">
-                    Tệp hiện tại: <strong className="font-mono">{csvProgress.currentFileName || '—'}</strong>
+                    {t('Tệp hiện tại:', 'Current file:')} <strong className="font-mono">{csvProgress.currentFileName || '—'}</strong>
                   </span>
                   <span className="font-mono font-semibold tabular-nums">
-                    {csvProgress.processedFiles}/{csvProgress.totalFiles} tệp ·{' '}
+                    {csvProgress.processedFiles}/{csvProgress.totalFiles} {t('tệp', 'files')} ·{' '}
                     {formatBytesMb(csvProgress.processedBytes)} / {formatBytesMb(csvProgress.totalBytes)}
                     {typeof csvProgress.processedRows === 'number' && csvProgress.processedRows > 0
-                      ? ` · ${csvProgress.processedRows.toLocaleString('vi-VN')} dòng`
+                      ? ` · ${csvProgress.processedRows.toLocaleString(locale)} ${t('dòng', 'rows')}`
                       : ''}
                   </span>
                 </div>
@@ -1990,7 +2278,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div className="space-y-2.5 p-4 bg-stone-50 rounded-xl border border-stone-200">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-stone-800">
-                    Hàng đợi hiện tại: {queuedFolders.length} thư mục · {queuedFiles.length} tệp CSV
+                    {t('Hàng đợi hiện tại:', 'Current queue:')} {queuedFolders.length} {t('thư mục', 'folders')} · {queuedFiles.length} {t('tệp CSV', 'CSV files')}
                   </span>
                   <button
                     type="button"
@@ -1999,33 +2287,36 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     className="px-3 py-1.5 bg-white hover:bg-stone-100 text-emerald-800 border border-emerald-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    {previewing ? 'Đang kiểm tra...' : 'Kiểm tra lại hàng loạt'}
+                    {previewing ? t('Đang kiểm tra...', 'Checking...') : t('Kiểm tra lại hàng loạt', 'Re-validate Batch')}
                   </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {queuedFolders.map((folder) => (
-                    <div
-                      key={folder.folderName}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs shadow-2xs"
-                    >
-                      <FolderOpen className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span className="font-bold text-stone-800 max-w-[220px] truncate" title={folder.folderName}>
-                        {folder.folderName}
-                      </span>
-                      <span className="text-[11px] font-mono text-emerald-700 font-semibold">
-                        {folder.fileCount} tệp ({(folder.totalBytes / 1024).toFixed(1)} KB)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveFolderFromQueue(folder.folderName)}
-                        className="text-stone-400 hover:text-rose-600 cursor-pointer"
-                        title="Gỡ thư mục này khỏi hàng đợi"
+                  {queuedFolders.map((folder) => {
+                    const displayFolder = getFolderDisplayName(folder.folderName, lang);
+                    return (
+                      <div
+                        key={folder.folderName}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs shadow-2xs"
                       >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <FolderOpen className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span className="font-bold text-stone-800 max-w-[220px] truncate" title={displayFolder}>
+                          {displayFolder}
+                        </span>
+                        <span className="text-[11px] font-mono text-emerald-700 font-semibold">
+                          {folder.fileCount} {t('tệp', 'files')} ({(folder.totalBytes / 1024).toFixed(1)} KB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFolderFromQueue(folder.folderName)}
+                          className="text-stone-400 hover:text-rose-600 cursor-pointer"
+                          title={t('Gỡ thư mục này khỏi hàng đợi', 'Remove this folder from queue')}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -2034,7 +2325,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             {previewing && (
               <div className="p-4 text-center text-xs text-stone-500 italic flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
-                Đang phân tích cấu trúc các thư mục NASA POWER và lọc dữ liệu trùng lặp...
+                {t(
+                  'Đang phân tích cấu trúc các thư mục NASA POWER và lọc dữ liệu trùng lặp...',
+                  'Analyzing NASA POWER folder schemas and deduplicating records...'
+                )}
               </div>
             )}
 
@@ -2042,7 +2336,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div className="space-y-4 pt-2 border-t border-stone-100">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-stone-800 flex items-center gap-1.5">
-                    <Eye className="w-4 h-4 text-emerald-600" /> Kết quả kiểm tra hàng loạt trước khi nhập
+                    <Eye className="w-4 h-4 text-emerald-600" /> {t('Kết quả kiểm tra hàng loạt trước khi nhập', 'Pre-Import Batch Validation Results')}
                   </span>
                   <span
                     className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
@@ -2052,44 +2346,44 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     }`}
                   >
                     {batchPreview.preview.errors.length === 0
-                      ? 'Tất cả tệp hợp lệ'
-                      : `Có ${batchPreview.preview.errors.length} cảnh báo tệp`}
+                      ? t('Tất cả tệp hợp lệ', 'All files valid')
+                      : t(`Có ${batchPreview.preview.errors.length} cảnh báo tệp`, `${batchPreview.preview.errors.length} file warnings`)}
                   </span>
                 </div>
 
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Số thư mục</span>
-                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFolders} thư mục</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Số thư mục', 'Folders')}</span>
+                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFolders} {t('thư mục', 'folders')}</span>
                   </div>
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Số tệp CSV</span>
-                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFiles} tệp</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Số tệp CSV', 'CSV Files')}</span>
+                    <span className="font-bold text-stone-900 text-sm">{batchPreview.totalFiles} {t('tệp', 'files')}</span>
                   </div>
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Bản ghi hợp lệ</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Bản ghi hợp lệ', 'Valid Rows')}</span>
                     <span className="font-bold text-emerald-700 text-sm">
-                      {batchPreview.preview.validRows.toLocaleString('vi-VN')}
+                      {batchPreview.preview.validRows.toLocaleString(locale)}
                     </span>
                   </div>
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Ô lưới nhận diện</span>
-                    <span className="font-bold text-stone-800 text-sm">{batchPreview.preview.uniqueCells} ô</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Ô lưới nhận diện', 'Grid Cells')}</span>
+                    <span className="font-bold text-stone-800 text-sm">{batchPreview.preview.uniqueCells} {t('ô', 'cells')}</span>
                   </div>
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Khoảng ngày</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Khoảng ngày', 'Date Range')}</span>
                     <span className="font-bold text-stone-800 text-[11px] truncate block">
                       {batchPreview.preview.startDate || '—'} → {batchPreview.preview.endDate || '—'}
                     </span>
                   </div>
                   <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                    <span className="text-stone-400 text-[10px] block">Chỉ số NASA</span>
+                    <span className="text-stone-400 text-[10px] block">{t('Chỉ số NASA', 'Indicators')}</span>
                     <span
                       className="font-bold text-emerald-800 text-[11px] truncate block"
                       title={batchPreview.preview.indicatorsDetected.join(', ')}
                     >
-                      {batchPreview.preview.indicatorsDetected.join(', ') || 'Chưa rõ'}
+                      {batchPreview.preview.indicatorsDetected.join(', ') || t('Chưa rõ', 'Unknown')}
                     </span>
                   </div>
                 </div>
@@ -2100,23 +2394,23 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     <table className="w-full text-left text-xs">
                       <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 text-[11px]">
                         <tr>
-                          <th className="p-2.5 font-bold">Thư mục nguồn</th>
-                          <th className="p-2.5 font-bold">Số tệp CSV</th>
-                          <th className="p-2.5 font-bold">Dữ liệu hợp lệ</th>
-                          <th className="p-2.5 font-bold">Trạng thái</th>
+                          <th className="p-2.5 font-bold">{t('Thư mục nguồn', 'Source Folder')}</th>
+                          <th className="p-2.5 font-bold">{t('Số tệp CSV', 'CSV Files')}</th>
+                          <th className="p-2.5 font-bold">{t('Dữ liệu hợp lệ', 'Valid Rows')}</th>
+                          <th className="p-2.5 font-bold">{t('Trạng thái', 'Status')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
                         {batchPreview.folderSummaries.map((fs) => (
                           <tr key={fs.folderName} className="hover:bg-stone-50/50">
-                            <td className="p-2.5 font-semibold text-stone-900">{fs.folderName}</td>
+                            <td className="p-2.5 font-semibold text-stone-900">{getFolderDisplayName(fs.folderName, lang)}</td>
                             <td className="p-2.5 font-mono text-stone-700">{fs.fileCount}</td>
                             <td className="p-2.5 font-mono font-bold text-emerald-700">
-                              {fs.validRows.toLocaleString('vi-VN')} dòng
+                              {fs.validRows.toLocaleString(locale)} {t('dòng', 'rows')}
                             </td>
                             <td className="p-2.5">
                               {fs.errors.length === 0 ? (
-                                <span className="text-[11px] font-bold text-emerald-700">Hợp lệ</span>
+                                <span className="text-[11px] font-bold text-emerald-700">{t('Hợp lệ', 'Valid')}</span>
                               ) : (
                                 <span className="text-[11px] font-bold text-rose-700">
                                   {fs.errors[0]}
@@ -2134,7 +2428,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 {batchPreview.preview.errors.length > 0 && (
                   <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs space-y-1">
                     <div className="font-bold flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> Các cảnh báo cấu trúc tệp:
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> {t('Các cảnh báo cấu trúc tệp:', 'File schema warnings:')}
                     </div>
                     <ul className="list-disc pl-5 max-h-32 overflow-y-auto">
                       {batchPreview.preview.errors.slice(0, 15).map((err, i) => (
@@ -2150,10 +2444,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     <table className="w-full text-left text-xs">
                       <thead className="bg-stone-50 border-b border-stone-200 text-stone-500 text-[11px]">
                         <tr>
-                          <th className="p-2 font-semibold">Ô lưới gần nhất</th>
-                          <th className="p-2 font-semibold">Ngày quan trắc</th>
-                          <th className="p-2 font-semibold">Mã chỉ số NASA</th>
-                          <th className="p-2 font-semibold">Giá trị đo</th>
+                          <th className="p-2 font-semibold">{t('Ô lưới gần nhất', 'Nearest Cell')}</th>
+                          <th className="p-2 font-semibold">{t('Ngày quan trắc', 'Observation Date')}</th>
+                          <th className="p-2 font-semibold">{t('Mã chỉ số NASA', 'NASA Indicator')}</th>
+                          <th className="p-2 font-semibold">{t('Giá trị đo', 'Value')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
@@ -2178,7 +2472,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       onClick={handleClearQueue}
                       className="px-4 py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-100 transition cursor-pointer"
                     >
-                      Hủy hàng đợi
+                      {t('Hủy hàng đợi', 'Cancel Queue')}
                     </button>
                     <button
                       type="button"
@@ -2192,8 +2486,11 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                         <CheckCircle2 className="w-4 h-4" />
                       )}
                       {importing
-                        ? 'Đang nhập hàng loạt vào Kho NASA...'
-                        : `Nhập toàn bộ ${batchPreview.totalFolders} thư mục (${batchPreview.preview.validRows.toLocaleString('vi-VN')} dòng) vào Kho NASA`}
+                        ? t('Đang nhập hàng loạt vào Kho NASA...', 'Batch importing into NASA Warehouse...')
+                        : t(
+                            `Nhập toàn bộ ${batchPreview.totalFolders} thư mục (${batchPreview.preview.validRows.toLocaleString('vi-VN')} dòng) vào Kho NASA`,
+                            `Import all ${batchPreview.totalFolders} folders (${batchPreview.preview.validRows.toLocaleString('en-US')} rows) into NASA Warehouse`
+                          )}
                     </button>
                   </div>
                 )}
@@ -2214,12 +2511,12 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   <div className="flex items-center gap-2 text-xs font-bold text-stone-900">
                     <CheckCircle2 className="w-4 h-4 text-emerald-700" />
                     <span>
-                      Thông tin gói CSV gần nhất đã đọc &amp; lưu ({lastCompletedBatch.version})
+                      {t('Thông tin gói CSV gần nhất đã đọc & lưu', 'Latest Imported CSV Batch Summary')} ({lastCompletedBatch.version})
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-stone-500">
                     <span>
-                      Lúc {new Date(lastCompletedBatch.completedAt).toLocaleString('vi-VN')}
+                      {t('Lúc', 'At')} {new Date(lastCompletedBatch.completedAt).toLocaleString(locale)}
                     </span>
                     <button
                       type="button"
@@ -2228,7 +2525,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                         await CsvQueueStorage.savePatch({ lastCompletedBatch: null });
                       }}
                       className="text-stone-400 hover:text-stone-700 font-bold cursor-pointer"
-                      title="Ẩn tóm tắt này"
+                      title={t('Ẩn tóm tắt này', 'Dismiss summary')}
                     >
                       ✕
                     </button>
@@ -2237,29 +2534,29 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                   <div className="p-2.5 bg-white rounded-xl border border-stone-200">
-                    <span className="text-[10px] text-stone-400 block">Thư mục / Tệp</span>
+                    <span className="text-[10px] text-stone-400 block">{t('Thư mục / Tệp', 'Folders / Files')}</span>
                     <span className="font-bold text-stone-900">
-                      {lastCompletedBatch.totalFolders} thư mục · {lastCompletedBatch.totalFiles} tệp
+                      {lastCompletedBatch.totalFolders} {t('thư mục', 'folders')} · {lastCompletedBatch.totalFiles} {t('tệp', 'files')}
                     </span>
                   </div>
                   <div className="p-2.5 bg-white rounded-xl border border-stone-200">
-                    <span className="text-[10px] text-stone-400 block">Dòng dữ liệu hợp lệ</span>
+                    <span className="text-[10px] text-stone-400 block">{t('Dòng dữ liệu hợp lệ', 'Valid Rows')}</span>
                     <span className="font-bold text-emerald-700">
-                      {lastCompletedBatch.validRows.toLocaleString('vi-VN')} dòng
+                      {lastCompletedBatch.validRows.toLocaleString(locale)} {t('dòng', 'rows')}
                     </span>
                   </div>
                   <div className="p-2.5 bg-white rounded-xl border border-stone-200">
-                    <span className="text-[10px] text-stone-400 block">Ô lưới NASA</span>
-                    <span className="font-bold text-stone-900">{lastCompletedBatch.uniqueCells} ô</span>
+                    <span className="text-[10px] text-stone-400 block">{t('Ô lưới NASA', 'NASA Grid Cells')}</span>
+                    <span className="font-bold text-stone-900">{lastCompletedBatch.uniqueCells} {t('ô', 'cells')}</span>
                   </div>
                   <div className="p-2.5 bg-white rounded-xl border border-stone-200">
-                    <span className="text-[10px] text-stone-400 block">Khoảng ngày</span>
+                    <span className="text-[10px] text-stone-400 block">{t('Khoảng ngày', 'Date Range')}</span>
                     <span className="font-bold text-stone-800 text-[11px]">
                       {lastCompletedBatch.startDate || '—'} → {lastCompletedBatch.endDate || '—'}
                     </span>
                   </div>
                   <div className="p-2.5 bg-white rounded-xl border border-stone-200">
-                    <span className="text-[10px] text-stone-400 block">Chỉ số NASA</span>
+                    <span className="text-[10px] text-stone-400 block">{t('Chỉ số NASA', 'NASA Indicators')}</span>
                     <span className="font-bold text-emerald-800 text-[11px] truncate block">
                       {lastCompletedBatch.indicatorsDetected.join(', ') || '—'}
                     </span>
@@ -2271,10 +2568,10 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                     <table className="w-full text-left text-xs">
                       <thead className="bg-stone-50 border-b border-stone-200 text-stone-500 text-[11px]">
                         <tr>
-                          <th className="p-2 font-semibold">Ô lưới</th>
-                          <th className="p-2 font-semibold">Ngày</th>
-                          <th className="p-2 font-semibold">Chỉ số</th>
-                          <th className="p-2 font-semibold">Giá trị</th>
+                          <th className="p-2 font-semibold">{t('Ô lưới', 'Cell')}</th>
+                          <th className="p-2 font-semibold">{t('Ngày', 'Date')}</th>
+                          <th className="p-2 font-semibold">{t('Chỉ số', 'Indicator')}</th>
+                          <th className="p-2 font-semibold">{t('Giá trị', 'Value')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
@@ -2301,17 +2598,20 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 <div>
                   <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                     <Clock className="w-4 h-4 text-emerald-700" />
-                    Lịch sử Đồng bộ &amp; Nhập dữ liệu NASA POWER
+                    {t('Lịch sử Đồng bộ & Nhập dữ liệu NASA POWER', 'NASA POWER Sync & Import History')}
                   </h2>
                   <p className="text-xs text-stone-500">
-                    Ghi nhận chi tiết mọi phiên đồng bộ API, nhập tay và tải lên hàng loạt thư mục CSV
+                    {t(
+                      'Ghi nhận chi tiết mọi phiên đồng bộ API, nhập tay và tải lên hàng loạt thư mục CSV',
+                      'Detailed audit log of every API sync, manual entry, and multi-folder CSV upload'
+                    )}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={fetchStatus}
                   className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100 transition cursor-pointer"
-                  title="Làm mới"
+                  title={t('Làm mới', 'Refresh')}
                 >
                   <RefreshCw className="w-4 h-4" />
                 </button>
@@ -2319,7 +2619,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
               <div className="space-y-2.5">
                 {syncLogs.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-stone-400">Chưa có nhật ký đồng bộ</div>
+                  <div className="p-8 text-center text-xs text-stone-400">{t('Chưa có nhật ký đồng bộ', 'No sync logs recorded yet')}</div>
                 ) : (
                   syncLogs.map((log) => {
                     const isSuccess = log.status === 'SUCCESS';
@@ -2345,13 +2645,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                             <span className="font-bold text-stone-900">{log.syncType}</span>
                           </div>
                           <span className="text-[10px] text-stone-400 font-mono">
-                            {new Date(log.startTime).toLocaleString('vi-VN')}
+                            {new Date(log.startTime).toLocaleString(locale)}
                           </span>
                         </div>
 
                         <div className="flex items-center justify-between text-[11px] text-stone-600">
-                          <span>Bản ghi đã đồng bộ: <strong>{log.recordsSynced.toLocaleString('vi-VN')}</strong></span>
-                          <span>Mốc dữ liệu NASA: <strong>{log.latestNasaDate || 'N/A'}</strong></span>
+                          <span>{t('Bản ghi đã đồng bộ:', 'Records synced:')} <strong>{log.recordsSynced.toLocaleString(locale)}</strong></span>
+                          <span>{t('Mốc dữ liệu NASA:', 'NASA data date:')} <strong>{log.latestNasaDate || 'N/A'}</strong></span>
                         </div>
 
                         {log.details?.message && (
@@ -2360,7 +2660,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
                         {log.errorMessage && (
                           <p className="text-[11px] text-rose-700 font-medium bg-rose-50 p-1.5 rounded">
-                            Lỗi: {log.errorMessage}
+                            {t('Lỗi:', 'Error:')} {log.errorMessage}
                           </p>
                         )}
                       </div>
@@ -2374,10 +2674,13 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div className="border-b border-stone-100 pb-3">
                 <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                   <RotateCcw className="w-4 h-4 text-purple-700" />
-                  Khôi phục Phiên bản Dữ liệu
+                  {t('Khôi phục Phiên bản Dữ liệu', 'Dataset Version Rollback')}
                 </h2>
                 <p className="text-xs text-stone-500">
-                  Bảo vệ an toàn kho: Cho phép hoàn tác về trạng thái trước nếu gói nhập bị sai lệch
+                  {t(
+                    'Bảo vệ an toàn kho: Cho phép hoàn tác về trạng thái trước nếu gói nhập bị sai lệch',
+                    'Warehouse safeguard: Revert to a previous snapshot if an imported batch contains errors'
+                  )}
                 </p>
               </div>
 
@@ -2401,14 +2704,14 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-stone-500">
-                        <span>{imp.recordCount.toLocaleString('vi-VN')} bản ghi</span>
+                        <span>{imp.recordCount.toLocaleString(locale)} {t('bản ghi', 'records')}</span>
                         <span>{imp.startDate} → {imp.endDate}</span>
                       </div>
 
                       <div className="flex items-center justify-between pt-1 border-t border-stone-200/60">
                         {isCurrent ? (
                           <span className="text-[11px] font-bold text-purple-800 flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" /> Phiên bản đang kích hoạt
+                            <Check className="w-3.5 h-3.5" /> {t('Phiên bản đang kích hoạt', 'Active version')}
                           </span>
                         ) : confirmRollbackVer === imp.version ? (
                           <div className="flex items-center gap-1.5">
@@ -2417,14 +2720,14 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                               onClick={() => handleRollback(imp.version)}
                               className="text-[11px] bg-purple-700 text-white px-2 py-0.5 rounded font-bold cursor-pointer"
                             >
-                              Xác nhận khôi phục
+                              {t('Xác nhận khôi phục', 'Confirm Rollback')}
                             </button>
                             <button
                               type="button"
                               onClick={() => setConfirmRollbackVer(null)}
                               className="text-[11px] bg-stone-200 text-stone-700 px-2 py-0.5 rounded cursor-pointer"
                             >
-                              Hủy
+                              {t('Hủy', 'Cancel')}
                             </button>
                           </div>
                         ) : (
@@ -2433,11 +2736,11 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                             onClick={() => setConfirmRollbackVer(imp.version)}
                             className="text-[11px] text-purple-700 hover:text-purple-900 font-bold underline cursor-pointer flex items-center gap-1"
                           >
-                            <RotateCcw className="w-3 h-3" /> Khôi phục phiên bản này
+                            <RotateCcw className="w-3 h-3" /> {t('Khôi phục phiên bản này', 'Restore this version')}
                           </button>
                         )}
                         <span className="text-[10px] text-stone-400">
-                          {new Date(imp.createdAt).toLocaleDateString('vi-VN')}
+                          {new Date(imp.createdAt).toLocaleDateString(locale)}
                         </span>
                       </div>
                     </div>
@@ -2453,25 +2756,28 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-emerald-400" />
                 <h3 className="font-bold text-sm text-stone-100">
-                  Kiến trúc Kho Dữ liệu Tập trung &amp; Bảo mật Phân quyền
+                  {t('Kiến trúc Kho Dữ liệu Tập trung & Bảo mật Phân quyền', 'Central Data Warehouse Architecture & Access Control')}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(`-- Xem tệp /src/db/supabase_schema.sql trong mã nguồn dự án`);
+                  navigator.clipboard.writeText(`-- See /src/db/supabase_schema.sql in repository source`);
                   setCopiedSql(true);
                   setTimeout(() => setCopiedSql(false), 3000);
                 }}
                 className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-300 px-3 py-1.5 rounded-lg border border-stone-700 flex items-center gap-1.5 transition cursor-pointer"
               >
                 {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedSql ? 'Đã sao chép' : 'Sao chép đường dẫn DDL'}
+                {copiedSql ? t('Đã sao chép', 'Copied') : t('Sao chép đường dẫn DDL', 'Copy DDL path')}
               </button>
             </div>
 
             <p className="text-xs text-stone-400 leading-relaxed">
-              Dữ liệu NASA POWER nhập từ nhiều thư mục CSV được chuẩn hóa về 531 ô lưới Việt Nam với khóa duy nhất chống trùng lặp theo ô lưới, ngày và mã chỉ số. Chỉ tài khoản Quản trị viên mới có quyền đọc toàn hệ thống và ghi bổ sung kho dữ liệu NASA.
+              {t(
+                'Dữ liệu NASA POWER nhập từ nhiều thư mục CSV được chuẩn hóa về 531 ô lưới Việt Nam với khóa duy nhất chống trùng lặp theo ô lưới, ngày và mã chỉ số. Chỉ tài khoản Quản trị viên mới có quyền đọc toàn hệ thống và ghi bổ sung kho dữ liệu NASA.',
+                'NASA POWER CSV batches are normalized onto the 531 Vietnam 0.5° grid cells with a composite uniqueness key on cell, date, and indicator code. Only Administrator accounts can inspect platform-wide records and append data to the NASA warehouse.'
+              )}
             </p>
           </div>
         </div>
@@ -2484,12 +2790,12 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             <div className="p-4 sm:p-5 bg-stone-900 text-white flex items-center justify-between">
               <div>
                 <div className="text-[11px] font-bold text-emerald-300 uppercase">
-                  Chi tiết Thửa ruộng (Chế độ Giám sát Quản trị)
+                  {t('Chi tiết Thửa ruộng (Chế độ Giám sát Quản trị)', 'Field Details (Admin Read-Only Inspector)')}
                 </div>
                 <h3 className="text-base sm:text-lg font-black">{inspectingField.name}</h3>
                 <p className="text-xs text-stone-300">
                   {inspectingField.district ? `${inspectingField.district}, ` : ''}
-                  {inspectingField.province} · Chủ sở hữu: {inspectingField.ownerName}
+                  {getLocalizedRegionName(inspectingField.province, lang)} · {t('Chủ sở hữu:', 'Owner:')} {inspectingField.ownerName}
                 </p>
               </div>
               <button
@@ -2514,51 +2820,51 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
-                  <div className="text-[10px] font-bold uppercase text-stone-400">Chủ sở hữu &amp; Chia sẻ</div>
+                  <div className="text-[10px] font-bold uppercase text-stone-400">{t('Chủ sở hữu & Chia sẻ', 'Owner & Sharing')}</div>
                   <div className="font-bold text-stone-900">{inspectingField.ownerName}</div>
                   <div className="font-mono text-stone-600 text-[11px]">{inspectingField.ownerEmail || inspectingField.ownerId}</div>
                   <div className="text-[11px] text-purple-800 font-semibold pt-1">
                     {inspectingField.sharedCount > 0
-                      ? `Đang chia sẻ (${inspectingField.sharedCount} lượt / liên kết)`
-                      : 'Chế độ riêng tư'}
+                      ? t(`Đang chia sẻ (${inspectingField.sharedCount} lượt / liên kết)`, `Shared (${inspectingField.sharedCount} recipients / links)`)
+                      : t('Chế độ riêng tư', 'Private field')}
                   </div>
                 </div>
 
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
                   <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
-                    <Navigation className="w-3 h-3 text-emerald-700" /> Tọa độ &amp; Ô lưới NASA
+                    <Navigation className="w-3 h-3 text-emerald-700" /> {t('Tọa độ & Ô lưới NASA', 'Coordinates & NASA Cell')}
                   </div>
                   <div className="font-mono font-bold text-stone-900">
-                    {inspectingField.lat.toFixed(5)}°B, {inspectingField.lon.toFixed(5)}°Đ
+                    {inspectingField.lat.toFixed(5)}°{lang === 'en' ? 'N' : 'B'}, {inspectingField.lon.toFixed(5)}°{lang === 'en' ? 'E' : 'Đ'}
                   </div>
                   <div className="text-[11px] text-emerald-800 font-semibold">
-                    Điểm khí hậu: {inspectingField.nasaCellId} (cách {inspectingField.nasaDistanceKm} km)
+                    {t('Điểm khí hậu:', 'Climate grid:')} {inspectingField.nasaCellId} ({t('cách', 'dist.')} {inspectingField.nasaDistanceKm} km)
                   </div>
                   <div className="text-[11px] text-stone-500">
-                    Diện tích canh tác: <strong>{inspectingField.areaHa} ha</strong>
+                    {t('Diện tích canh tác:', 'Cultivated area:')} <strong>{inspectingField.areaHa} ha</strong>
                   </div>
                 </div>
 
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
                   <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
-                    <Sprout className="w-3 h-3 text-emerald-700" /> Cây trồng hiện tại
+                    <Sprout className="w-3 h-3 text-emerald-700" /> {t('Cây trồng hiện tại', 'Current Crop')}
                   </div>
-                  <div className="font-bold text-stone-900">{inspectingField.cropName}</div>
+                  <div className="font-bold text-stone-900">{getPlantDisplayName(inspectingField.cropName, lang)}</div>
                   <div className="text-[11px] text-stone-600">
-                    Giống: {inspectingField.cropVariety} · Giai đoạn: {inspectingField.currentStage}
+                    {t('Giống:', 'Variety:')} {getCommonVarietyLabel(inspectingField.cropVariety, lang)} · {t('Giai đoạn:', 'Stage:')} {getCommonStageLabel(inspectingField.currentStage, lang)}
                   </div>
                 </div>
 
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
                   <div className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
-                    <Droplets className="w-3 h-3 text-blue-700" /> Chất đất &amp; Nguồn nước
+                    <Droplets className="w-3 h-3 text-blue-700" /> {t('Chất đất & Nguồn nước', 'Soil & Water Source')}
                   </div>
-                  <div className="font-bold text-stone-900">{getSoilLabel(inspectingField.soilType)}</div>
+                  <div className="font-bold text-stone-900">{getSoilLabel(inspectingField.soilType, lang)}</div>
                   <div className="text-[11px] text-stone-600">
-                    {WATER_LABELS[inspectingField.waterSourceType] || 'Nguồn nước khác'}
+                    {waterLabels[inspectingField.waterSourceType] || waterLabels.other}
                   </div>
                   <div className="text-[11px] text-stone-400">
-                    Ngày tạo: {new Date(inspectingField.createdAt).toLocaleString('vi-VN')}
+                    {t('Ngày tạo:', 'Created:')} {new Date(inspectingField.createdAt).toLocaleString(locale)}
                   </div>
                 </div>
               </div>
@@ -2570,7 +2876,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 onClick={() => setInspectingField(null)}
                 className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
-                Đóng
+                {t('Đóng', 'Close')}
               </button>
             </div>
           </div>

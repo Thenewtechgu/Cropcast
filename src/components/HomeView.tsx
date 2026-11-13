@@ -10,8 +10,13 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { SatelliteMap } from './SatelliteMap';
-import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
-import { SEED_FAMILIES } from '../data/cropTaxonomy';
+import { findNearestNasaGrid, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import {
+  SEED_FAMILIES,
+  getFamilyDisplayName,
+  getFamilyShortTag,
+  getPlantDisplayName,
+} from '../data/cropTaxonomy';
 import {
   FarmerConstraints,
   FarmerPriorityId,
@@ -156,6 +161,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       sandboxPriorities,
       sandboxConstraints,
       rejectedIds,
+      undefined,
       lang
     );
 
@@ -321,7 +327,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <span className="text-stone-400 text-[11px] block">
                   {t('Điểm khí hậu gần nhất', 'Nearest climate grid')}
                 </span>
-                <span className="font-bold text-stone-900">{cell.region}</span>
+                <span className="font-bold text-stone-900">
+                  {getLocalizedRegionName(cell.region, lang)}
+                </span>
                 <span className="text-[11px] text-emerald-700 font-medium block">
                   {t(`Cách ${distanceKm} km`, `${distanceKm} km away`)}
                 </span>
@@ -375,13 +383,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         : 'bg-stone-50 text-stone-800 border-stone-200 hover:bg-stone-100'
                     }`}
                   >
-                    <div className="text-xs font-bold leading-snug">{fam.name}</div>
+                    <div className="text-xs font-bold leading-snug">
+                      {getFamilyDisplayName(fam, lang)}
+                    </div>
                     <div
                       className={`text-[10px] mt-0.5 ${
                         sandboxFamily === fam.id ? 'text-emerald-200' : 'text-stone-500'
                       }`}
                     >
-                      {fam.shortTag}
+                      {getFamilyShortTag(fam, lang)}
                     </div>
                   </button>
                 ))}
@@ -403,7 +413,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
                     }`}
                   >
-                    {pl.name}
+                    {getPlantDisplayName(pl, lang)}
                   </button>
                 ))}
               </div>
@@ -440,8 +450,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-800">
                   {t(
-                    `3. Chiến lược Luân canh Tốt nhất cho ${sampleCrop.name} tại ${cell.region}:`,
-                    `3. Best Rotation Strategy for ${sampleCrop.name} in ${cell.region}:`
+                    `3. Chiến lược Luân canh Tốt nhất cho ${getPlantDisplayName(sampleCrop, 'vi')} tại ${getLocalizedRegionName(cell.region, 'vi')}:`,
+                    `3. Best Rotation Strategy for ${getPlantDisplayName(sampleCrop, 'en')} in ${getLocalizedRegionName(cell.region, 'en')}:`
                   )}
                 </span>
                 <button
