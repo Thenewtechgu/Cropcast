@@ -5,11 +5,13 @@ import appletConfig from '../firebase-applet-config.json';
 
 const env = import.meta.env;
 
-const explicitProjectId = (env.VITE_FIREBASE_PROJECT_ID || '').trim();
+const envVal = (key: keyof ImportMetaEnv): string => String(env[key] || '').trim();
+
+const explicitProjectId = envVal('VITE_FIREBASE_PROJECT_ID');
 const isOverriddenProject = Boolean(
   explicitProjectId && explicitProjectId !== appletConfig.projectId
 );
-const rawDbId = (env.VITE_FIREBASE_DATABASE_ID || '').trim();
+const rawDbId = envVal('VITE_FIREBASE_DATABASE_ID');
 const resolvedDatabaseId = rawDbId
   ? rawDbId === '(default)'
     ? ''
@@ -18,20 +20,18 @@ const resolvedDatabaseId = rawDbId
   ? ''
   : appletConfig.firestoreDatabaseId || '';
 
+const resolvedMeasurementId =
+  envVal('VITE_FIREBASE_MEASUREMENT_ID') ||
+  (!isOverriddenProject ? appletConfig.measurementId || '' : '');
+
 const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || appletConfig.apiKey,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain,
+  apiKey: envVal('VITE_FIREBASE_API_KEY') || appletConfig.apiKey,
+  authDomain: envVal('VITE_FIREBASE_AUTH_DOMAIN') || appletConfig.authDomain,
   projectId: explicitProjectId || appletConfig.projectId,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
-  appId: env.VITE_FIREBASE_APP_ID || appletConfig.appId,
-  ...(env.VITE_FIREBASE_MEASUREMENT_ID || (!isOverriddenProject && appletConfig.measurementId)
-    ? {
-        measurementId:
-          env.VITE_FIREBASE_MEASUREMENT_ID ||
-          (!isOverriddenProject ? appletConfig.measurementId : ''),
-      }
-    : {}),
+  storageBucket: envVal('VITE_FIREBASE_STORAGE_BUCKET') || appletConfig.storageBucket,
+  messagingSenderId: envVal('VITE_FIREBASE_MESSAGING_SENDER_ID') || appletConfig.messagingSenderId,
+  appId: envVal('VITE_FIREBASE_APP_ID') || appletConfig.appId,
+  ...(resolvedMeasurementId ? { measurementId: resolvedMeasurementId } : {}),
 };
 
 const app = initializeApp(firebaseConfig);

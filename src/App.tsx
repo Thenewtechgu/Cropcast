@@ -889,6 +889,7 @@ export default function App() {
               field={activeField}
               weather={weather}
               brief={ruleBrief}
+              feedbackHistory={feedbackHistory}
               onOpenExplanation={() => setExplanationOpen(true)}
               onOpenMap={() => {
                 setMapInitialCoords({ lat: activeField.lat, lon: activeField.lon });

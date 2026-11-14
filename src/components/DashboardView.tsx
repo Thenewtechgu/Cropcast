@@ -16,6 +16,7 @@ import {
   FieldProfile,
   WeatherObservation,
   DailyAgronomicBrief,
+  FeedbackRecord,
   FeedbackType,
   EarthEnvironmentSnapshot,
 } from '../types';
@@ -33,6 +34,7 @@ interface DashboardViewProps {
   field: FieldProfile;
   weather: WeatherObservation;
   brief: DailyAgronomicBrief;
+  feedbackHistory?: FeedbackRecord[];
   onOpenExplanation: () => void;
   onOpenMap: () => void;
   onNavigateTab: (tab: string) => void;
@@ -45,6 +47,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   field,
   weather,
   brief,
+  feedbackHistory = [],
   onOpenExplanation,
   onOpenMap,
   onNavigateTab,
@@ -84,6 +87,73 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const powerUpdatedLabel = earth?.nasaPowerLastUpdated
     ? new Date(earth.nasaPowerLastUpdated).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')
     : localizedObsDate;
+
+  // Combine weather soil moisture + recent farmer field feedback for calibrated visual gauge
+  const fieldFeedbacks = feedbackHistory
+    .filter((fb) => fb.fieldId === field.id)
+    .sort((a, b) => (b.timestamp > a.timestamp ? 1 : -1));
+
+  const rootPct = Math.round(Math.min(100, Math.max(0, weather.gwetroot * 100)));
+  const surfacePct = Math.round(
+    Math.min(100, Math.max(0, smap ? smap.smapSoilMoisturePct : weather.gwettop * 100))
+  );
+  const rainBoost = weather.rain >= 20 ? 8 : weather.rain >= 8 ? 4 : 0;
+  const weatherBaseMoisturePct = Math.min(
+    100,
+    Math.max(5, Math.round(rootPct * 0.68 + surfacePct * 0.32 + rainBoost))
+  );
+
+  const recentMoistureSignals = fieldFeedbacks.slice(0, 3);
+  let feedbackOffsetPct = 0;
+  let dryCount = 0;
+  let wetCount = 0;
+  let latestFeedbackSignal: 'dry' | 'wet' | 'optimal' | null = null;
+
+  recentMoistureSignals.forEach((fb, idx) => {
+    const weight = idx === 0 ? 1 : 0.5;
+    if (fb.feedbackType === 'soil_still_dry' || fb.observedMoisture === 'dry') {
+      dryCount += 1;
+      feedbackOffsetPct -= Math.round(13 * weight);
+      if (idx === 0) latestFeedbackSignal = 'dry';
+    } else if (fb.feedbackType === 'soil_too_wet' || fb.observedMoisture === 'wet') {
+      wetCount += 1;
+      feedbackOffsetPct += Math.round(13 * weight);
+      if (idx === 0) latestFeedbackSignal = 'wet';
+    } else if (idx === 0 && (fb.observedMoisture === 'balanced' || fb.feedbackType === 'helpful')) {
+      latestFeedbackSignal = 'optimal';
+    }
+  });
+
+  if (recentMoistureSignals.length === 0 && field.adaptiveMemory?.irrigationSensitivity) {
+    if (field.adaptiveMemory.irrigationSensitivity === 'higher') {
+      feedbackOffsetPct = -10;
+      latestFeedbackSignal = 'dry';
+    } else if (field.adaptiveMemory.irrigationSensitivity === 'lower') {
+      feedbackOffsetPct = 10;
+      latestFeedbackSignal = 'wet';
+    }
+  }
+
+  feedbackOffsetPct = Math.max(-24, Math.min(24, feedbackOffsetPct));
+  const calibratedMoisturePct = Math.max(
+    4,
+    Math.min(98, Math.round(weatherBaseMoisturePct + feedbackOffsetPct))
+  );
+
+  const moistureZone: 'dry' | 'optimal' | 'wet' =
+    calibratedMoisturePct < 35 ? 'dry' : calibratedMoisturePct > 75 ? 'wet' : 'optimal';
+  const moistureStatusLabel =
+    moistureZone === 'dry'
+      ? t('Khô · Cần bổ sung nước', 'Dry · Needs Watering')
+      : moistureZone === 'wet'
+      ? t('Quá ẩm · Lưu ý thoát nước', 'Saturated · Check Drainage')
+      : t('Lý tưởng · Hấp thu tốt', 'Optimal · Healthy Uptake');
+  const moistureBadgeColor =
+    moistureZone === 'dry'
+      ? 'text-amber-800 bg-amber-50 border-amber-200'
+      : moistureZone === 'wet'
+      ? 'text-sky-800 bg-sky-50 border-sky-200'
+      : 'text-emerald-800 bg-emerald-50 border-emerald-200';
 
   return (
     <div className="space-y-6">
@@ -404,50 +474,143 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        {/* Card 2: Soil Moisture */}
+        {/* Card 2: Soil Moisture (Weather + Feedback Visual Gauge) */}
         <div className="bg-white rounded-2xl p-5 border border-stone-200 flex flex-col justify-between space-y-4">
           <div className="flex items-center justify-between text-xs text-stone-500">
             <span className="font-semibold text-stone-800">
-              {t('Độ ẩm đất', 'Soil Moisture')}
+              {t('Độ ẩm đất tổng hợp', 'Calibrated Soil Moisture')}
             </span>
             <span>{getWaterLabel(field.waterSource.type, lang)}</span>
           </div>
 
           <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-stone-600">{t('Vùng rễ (0–100 cm)', 'Root zone (0–100 cm)')}</span>
-                <span className="font-bold text-emerald-700 font-mono tabular-nums">
-                  {(weather.gwetroot * 100).toFixed(0)}%
+            {/* Primary Weather + Feedback Visual Spectrum Bar */}
+            <div className="p-3 bg-stone-50/80 rounded-xl border border-stone-200/80 space-y-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-stone-900 font-mono tabular-nums">
+                    {calibratedMoisturePct}%
+                  </span>
+                  {feedbackOffsetPct !== 0 && (
+                    <span className="text-[11px] font-mono tabular-nums text-stone-500">
+                      ({t('Thời tiết', 'Weather')} {weatherBaseMoisturePct}%{' '}
+                      <strong className={feedbackOffsetPct < 0 ? 'text-amber-700' : 'text-sky-700'}>
+                        {feedbackOffsetPct > 0 ? `+${feedbackOffsetPct}%` : `${feedbackOffsetPct}%`}
+                      </strong>
+                      )
+                    </span>
+                  )}
+                </div>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap ${moistureBadgeColor}`}
+                >
+                  {moistureStatusLabel}
                 </span>
               </div>
-              <div className="w-full bg-stone-100 rounded-full h-2.5 overflow-hidden">
+
+              {/* 3-Zone Segmented Spectrum Gauge + Position Needle */}
+              <div className="relative pt-1 pb-1">
+                <div className="w-full h-3.5 rounded-full overflow-hidden flex border border-stone-200">
+                  <div
+                    className="h-full bg-amber-300/90"
+                    style={{ width: '35%' }}
+                    title={t('Vùng khô (0–35%)', 'Dry Zone (0–35%)')}
+                  />
+                  <div
+                    className="h-full bg-emerald-400/90"
+                    style={{ width: '40%' }}
+                    title={t('Vùng lý tưởng (35–75%)', 'Optimal Zone (35–75%)')}
+                  />
+                  <div
+                    className="h-full bg-sky-400/90"
+                    style={{ width: '25%' }}
+                    title={t('Vùng bão hòa / úng (75–100%)', 'Saturated Zone (75–100%)')}
+                  />
+                </div>
+
+                {/* Weather-only ghost tick when feedback shifted estimate */}
+                {feedbackOffsetPct !== 0 && (
+                  <div
+                    className="absolute top-0.5 w-0.5 h-4 bg-stone-500/70 -translate-x-1/2 pointer-events-none"
+                    style={{ left: `${weatherBaseMoisturePct}%` }}
+                    title={t(
+                      `Ước tính thời tiết gốc: ${weatherBaseMoisturePct}%`,
+                      `Raw weather estimate: ${weatherBaseMoisturePct}%`
+                    )}
+                  />
+                )}
+
+                {/* Active Combined Moisture Indicator */}
                 <div
-                  className="bg-emerald-600 h-full rounded-full"
-                  style={{ width: `${Math.min(100, Math.max(5, weather.gwetroot * 100))}%` }}
+                  className="absolute top-0 w-3.5 h-5 rounded-full bg-stone-900 border-2 border-white shadow-sm -translate-x-1/2 transition-all duration-300"
+                  style={{ left: `${calibratedMoisturePct}%` }}
+                  aria-label={`${calibratedMoisturePct}%`}
                 />
+              </div>
+
+              <div className="flex justify-between text-[10px] font-medium text-stone-500 tabular-nums">
+                <span>0% {t('Khô', 'Dry')}</span>
+                <span>35% – 75% {t('Lý tưởng', 'Optimal')}</span>
+                <span>100% {t('Úng', 'Wet')}</span>
+              </div>
+
+              <div className="text-[11px] text-stone-600 leading-snug pt-1 border-t border-stone-200/70">
+                {latestFeedbackSignal === 'dry'
+                  ? t(
+                      `Đã hiệu chỉnh giảm ${Math.abs(feedbackOffsetPct)}% theo ${Math.max(1, dryCount)} phản hồi thực địa ("Đất vẫn khô") kết hợp mưa ${weather.rain} mm.`,
+                      `Calibrated ${feedbackOffsetPct}% from ${Math.max(1, dryCount)} field report(s) ("Soil dry") plus ${weather.rain} mm rain.`
+                    )
+                  : latestFeedbackSignal === 'wet'
+                  ? t(
+                      `Đã hiệu chỉnh tăng +${feedbackOffsetPct}% theo ${Math.max(1, wetCount)} phản hồi thực địa ("Đất quá ẩm") kết hợp mưa ${weather.rain} mm.`,
+                      `Calibrated +${feedbackOffsetPct}% from ${Math.max(1, wetCount)} field report(s) ("Soil too wet") plus ${weather.rain} mm rain.`
+                    )
+                  : latestFeedbackSignal === 'optimal'
+                  ? t(
+                      'Phản hồi thực địa gần nhất xác nhận độ ẩm đất khớp với dữ liệu thời tiết.',
+                      'Latest field check-in confirmed soil moisture matches live weather.'
+                    )
+                  : t(
+                      'Tính từ ẩm vùng rễ, tầng mặt & lượng mưa; nhấn nút phản hồi trên để hiệu chỉnh theo đất thực tế.',
+                      'Blended from root moisture, surface moisture & rain; tap feedback above to calibrate to field reality.'
+                    )}
               </div>
             </div>
 
-            <div>
-              <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-stone-600">
-                  {t('Tầng mặt (0–5 cm)', 'Surface (0–5 cm)')}
-                </span>
-                <span className="font-bold text-sky-700 font-mono tabular-nums">
-                  {smap ? `${smap.smapSoilMoisturePct}%` : `${(weather.gwettop * 100).toFixed(0)}%`}
-                </span>
+            {/* Sub-bars: Root Zone & Surface */}
+            <div className="space-y-2.5">
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-stone-600">{t('Vùng rễ (0–100 cm)', 'Root zone (0–100 cm)')}</span>
+                  <span className="font-bold text-emerald-700 font-mono tabular-nums">
+                    {rootPct}%
+                  </span>
+                </div>
+                <div className="w-full bg-stone-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-emerald-600 h-full rounded-full"
+                    style={{ width: `${Math.min(100, Math.max(5, rootPct))}%` }}
+                  />
+                </div>
               </div>
-              <div className="w-full bg-stone-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-sky-500 h-full rounded-full"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      Math.max(5, smap ? smap.smapSoilMoisturePct : weather.gwettop * 100)
-                    )}%`,
-                  }}
-                />
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-stone-600">
+                    {t('Tầng mặt (0–5 cm)', 'Surface (0–5 cm)')}
+                  </span>
+                  <span className="font-bold text-sky-700 font-mono tabular-nums">
+                    {surfacePct}%
+                  </span>
+                </div>
+                <div className="w-full bg-stone-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-sky-500 h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, Math.max(5, surfacePct))}%`,
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -457,22 +620,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {t('Mưa 7 ngày:', '7-day rain:')} {smap.gpmPrecipitation7dMm} mm
               </div>
             )}
-            <p className="text-[11px] text-stone-600 leading-snug">
-              {weather.gwetroot < 0.4
-                ? t(
-                    `Ẩm vùng rễ dưới 40% trên ${getSoilLabel(field.soilType, 'vi').toLowerCase()} — cần bổ sung ẩm để rễ không bị khô.`,
-                    `Root moisture below 40% in ${getSoilLabel(field.soilType, 'en').toLowerCase()} — plan morning watering.`
-                  )
-                : weather.gwetroot > 0.78
-                ? t(
-                    `Đất đang rất ẩm (${(weather.gwetroot * 100).toFixed(0)}%) — tạm ngừng tưới và kiểm tra rãnh thoát nước.`,
-                    `Soil is very wet (${(weather.gwetroot * 100).toFixed(0)}%) — pause irrigation and check drainage.`
-                  )
-                : t(
-                    `Độ ẩm vùng rễ ${(weather.gwetroot * 100).toFixed(0)}% nằm trong ngưỡng an toàn cho bộ rễ hấp thu dinh dưỡng.`,
-                    `Root moisture at ${(weather.gwetroot * 100).toFixed(0)}% is in the healthy range for nutrient uptake.`
-                  )}
-            </p>
           </div>
 
           <button

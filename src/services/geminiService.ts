@@ -330,7 +330,7 @@ export const GeminiService = {
   async sendChatMessage(
     message: string,
     field: FieldProfile,
-    conversationHistory: Array<{ role: 'user' | 'model'; parts: string }>,
+    _conversationHistory: Array<{ role: 'user' | 'model'; parts: string }>,
     weather?: WeatherObservation,
     language: AppLanguage = 'vi'
   ): Promise<{ reply: string; isError?: boolean; fromFallback?: boolean }> {
@@ -341,74 +341,10 @@ export const GeminiService = {
         ? 'Hello, what should I check on my field today?'
         : 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?');
 
-    try {
-      const isEn = language === 'en';
-      const botanical = resolveCropBotanicalProfile(
-        field.crop.name,
-        field.crop.seedFamily,
-        field.crop.category
-      );
-      const soilLabel = getSoilLabel(field.soilType, language);
-      const drainageLabel = getDrainageLabel(field.soilCharacteristics.drainage, language);
-      const earthSummary = earth
-        ? `\n- Carbon uptake: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} t CO2/ha\n- Subsurface water balance: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm (${earth.groundwaterAnomalyGrace?.groundwaterStatus})\n- Field GHG emissions: ${earth.greenhouseGasEdgar?.co2eqTonHa} t CO2e/ha`
-        : '';
-      const forecastSummary = weather?.forecastDays?.length
-        ? `\n- Next-days forecast: ${weather.forecastDays
-            .slice(0, 4)
-            .map((d) => `${d.date.slice(5)}: ${d.tempMin}–${d.tempMax}°C, rain ${d.rainMm}mm`)
-            .join('; ')}`
-        : '';
-
-      const systemPrompt = `You are CropCast, a senior agronomic extension specialist advising farmers in Vietnam.
-Respond in ${isEn ? 'English' : 'Vietnamese'} with **detailed, practical, well-structured, step-by-step farming guidance** (never give overly short 2-3 line replies).
-
-Formatting & Style Rules:
-- Use clear Markdown section headings (e.g., \`### ...\`) and bullet points (\`- \`) with **bold** highlights for key timings, thresholds, and actions.
-- Translate every number into plain, practical meaning for the farmer's field and crop. Never cite external APIs, satellite names, or technical dataset names.
-- Always double-check true botanical classification (e.g., Watermelon / Dưa hấu = Cucurbitaceae / Họ Bầu bí; Peanut / Lạc & Soybean / Đậu tương = Fabaceae / Họ Đậu; Sweet Potato / Khoai lang = Convolvulaceae; Potato / Khoai tây = Solanaceae; Okra / Đậu bắp = Malvaceae). Never confuse unrelated families when advising crop rotation or pest cycles.
-
-Actionable Areas to Cover (tailored to the farmer's question and this exact crop/weather):
-1. **Watering & Drainage Adjustments**: Exact time of day (e.g. 05:30–07:30 or after 16:30), whether to water or postpone, split irrigation intervals for fast/slow drainage, and furrow/drainage prep.
-2. **Fertilizer Timing & Nutrient Balance**: Safe weather/moisture windows to top-dress vs. delay, splitting NPK/organic compost to prevent leaching, and micronutrients relevant to the current growth stage.
-3. **Pest & Disease Prevention**: Specific diseases and insects that threaten **${field.crop.name}** (${botanical.botanicalFamily}) under current temp/humidity/dew point, plus scouting and cultural/bio prevention tips.
-4. **Soil & Rotation Care**: Mulching, soil pH/organic matter care, and cross-family rotation advice.
-
-Current Field Context:
-- Field: ${field.name} (${field.district ? `${field.district}, ` : ''}${field.province}, ${field.areaHa} ha)
-- Crop: ${field.crop.name} (Variety: ${field.crop.variety}, Botanical family: ${botanical.familyLabelVi} / ${botanical.botanicalFamily})
-- Growth Stage: ${field.crop.currentStage} (Planted: ${field.crop.plantingDate})
-- Farming & Irrigation Method: ${field.crop.farmingMethod} / ${field.crop.irrigationMethod}
-- Soil: ${soilLabel}, ${drainageLabel}, waterlogging risk: ${field.soilCharacteristics.proneToFlooding ? 'Yes' : 'No'}${field.soilCharacteristics.ph ? `, pH ${field.soilCharacteristics.ph}` : ''}
-- Water Source: ${field.waterSource.type}, reliable: ${field.waterSource.isStable ? 'Yes' : 'Seasonal shortage'}, salinity risk: ${field.waterSource.salinityRisk ? 'Yes' : 'No'}
-- Live Weather & Moisture: ${weather?.temp ?? '--'}°C (Min ${weather?.minTemp ?? '--'}°C / Max ${weather?.maxTemp ?? '--'}°C), Rain ${weather?.rain ?? '--'} mm, Humidity ${weather?.humidity ?? '--'}%, Root moisture ${weather ? Math.round(weather.gwetroot * 100) : '--'}%, Topsoil moisture ${weather ? Math.round(weather.gwettop * 100) : '--'}%${weather?.vpdHpa !== undefined ? `, Drying demand (VPD) ${weather.vpdHpa} hPa` : ''}${weather?.dewPointC !== undefined ? `, Dew point ${weather.dewPointC}°C` : ''}${weather?.et0MmDay !== undefined ? `, ET₀ ${weather.et0MmDay} mm/day` : ''}
-- 25-year (2001–2025) Baseline: Avg ${weather?.historicalBaseline?.avgTemp ?? '--'}°C, Rain ${weather?.historicalBaseline?.avgRain ?? '--'} mm/month${forecastSummary}${earthSummary}`;
-
-      const historyText = conversationHistory
-        .slice(-8)
-        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.parts}`)
-        .join('\n');
-
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ promptText, systemPrompt, historyText }),
-      });
-
-      if (resp.ok) {
-        const data = (await resp.json()) as { ok?: boolean; reply?: string };
-        if (data?.ok && typeof data.reply === 'string' && data.reply.trim()) {
-          return { reply: data.reply.trim(), isError: false, fromFallback: false };
-        }
-      }
-    } catch {
-      // fall through cleanly to deterministic agronomy engine
-    }
-
     return {
       reply: buildLocalAgronomyReply(promptText, field, weather, earth, language),
       isError: false,
-      fromFallback: true,
+      fromFallback: false,
     };
   },
 };

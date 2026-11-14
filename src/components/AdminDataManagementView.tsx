@@ -65,6 +65,7 @@ import {
 import { getSoilLabel } from '../services/agronomyEngine';
 import { useLanguage, AppLanguage } from '../contexts/LanguageContext';
 import { SatelliteMap } from './SatelliteMap';
+import { AdminVietnamFarmsMap } from './AdminVietnamFarmsMap';
 
 const ADMIN_TAB_STORAGE_KEY = 'cropcast_admin_tab';
 
@@ -705,6 +706,79 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       );
     });
   }, [platformStats, fieldSearch, provinceFilter, cropFilter, lang]);
+
+  const analyticsSummary = useMemo(() => {
+    const users = platformStats?.users || [];
+    const fields = platformStats?.allFields || [];
+    const adminCount = users.filter((u) => u.isAdmin).length;
+    const farmerCount = Math.max(0, users.length - adminCount);
+    const activeFarmers = users.filter((u) => u.fieldCount > 0).length;
+    const avgFieldsPerActiveFarmer =
+      activeFarmers > 0 ? Number((fields.length / activeFarmers).toFixed(1)) : 0;
+    const avgAreaPerField =
+      fields.length > 0
+        ? Number(((platformStats?.totalAreaHa || 0) / fields.length).toFixed(2))
+        : 0;
+
+    let northCount = 0;
+    let northHa = 0;
+    let centralCount = 0;
+    let centralHa = 0;
+    let southCount = 0;
+    let southHa = 0;
+
+    fields.forEach((f) => {
+      const area = Number(f.areaHa) || 0;
+      if (f.lat >= 20.0) {
+        northCount += 1;
+        northHa += area;
+      } else if (f.lat >= 11.4) {
+        centralCount += 1;
+        centralHa += area;
+      } else {
+        southCount += 1;
+        southHa += area;
+      }
+    });
+
+    const totalF = Math.max(1, fields.length);
+    return {
+      adminCount,
+      farmerCount,
+      activeFarmers,
+      avgFieldsPerActiveFarmer,
+      avgAreaPerField,
+      regions: [
+        {
+          id: 'north',
+          labelVi: 'Miền Bắc (ĐB Sông Hồng & Trung du)',
+          labelEn: 'Northern Vietnam',
+          count: northCount,
+          areaHa: Number(northHa.toFixed(2)),
+          pct: Math.round((northCount / totalF) * 100),
+          barClass: 'bg-emerald-600',
+        },
+        {
+          id: 'central',
+          labelVi: 'Miền Trung & Tây Nguyên',
+          labelEn: 'Central & Central Highlands',
+          count: centralCount,
+          areaHa: Number(centralHa.toFixed(2)),
+          pct: Math.round((centralCount / totalF) * 100),
+          barClass: 'bg-amber-500',
+        },
+        {
+          id: 'south',
+          labelVi: 'Miền Nam & ĐBSCL',
+          labelEn: 'Southern Vietnam & Mekong Delta',
+          count: southCount,
+          areaHa: Number(southHa.toFixed(2)),
+          pct: Math.round((southCount / totalF) * 100),
+          barClass: 'bg-sky-600',
+        },
+      ],
+    };
+  }, [platformStats]);
 
   // Folder grouping summary for queued CSV files
   const queuedFolders = useMemo(() => {
@@ -1730,126 +1804,250 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
         <div className="space-y-6">
           {/* 4 Live Firestore Platform KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
                 <span className="text-[11px] uppercase font-bold">{t('Tổng số người dùng', 'Total Users')}</span>
                 <Users className="w-4 h-4 text-emerald-700" />
               </div>
-              <div className="text-2xl font-black text-stone-900 tabular-nums">
+              <div className="text-2xl font-black text-stone-900 font-mono tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalUsers ?? 0}
               </div>
-              <div className="text-[11px] text-stone-500">
-                {t('Tài khoản nông dân & quản trị đã đăng ký', 'Registered farmer & admin accounts')}
+              <div className="text-[11px] text-stone-500 tabular-nums">
+                {t(
+                  `${analyticsSummary.farmerCount} nông dân · ${analyticsSummary.adminCount} quản trị`,
+                  `${analyticsSummary.farmerCount} farmers · ${analyticsSummary.adminCount} admins`
+                )}
               </div>
             </div>
 
-            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
                 <span className="text-[11px] uppercase font-bold">{t('Tổng số thửa ruộng', 'Total Fields')}</span>
                 <MapPin className="w-4 h-4 text-blue-700" />
               </div>
-              <div className="text-2xl font-black text-stone-900 tabular-nums">
+              <div className="text-2xl font-black text-stone-900 font-mono tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalFields ?? 0}
               </div>
-              <div className="text-[11px] text-emerald-700 font-semibold">
-                {t('Tổng diện tích:', 'Total area:')} {statsLoading ? '...' : platformStats?.totalAreaHa ?? 0} ha
+              <div className="text-[11px] text-emerald-700 font-semibold tabular-nums">
+                {t('Tổng:', 'Total:')} {statsLoading ? '...' : platformStats?.totalAreaHa ?? 0} ha ·{' '}
+                {t('TB:', 'Avg:')} {analyticsSummary.avgAreaPerField} ha
               </div>
             </div>
 
-            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
                 <span className="text-[11px] uppercase font-bold">{t('Việc đồng ruộng & Phản hồi', 'Field Tasks & Feedback')}</span>
                 <CheckCircle2 className="w-4 h-4 text-amber-600" />
               </div>
-              <div className="text-2xl font-black text-stone-900 tabular-nums">
+              <div className="text-2xl font-black text-stone-900 font-mono tabular-nums">
                 {statsLoading
                   ? '...'
                   : `${platformStats?.completedTasks ?? 0}/${platformStats?.totalTasks ?? 0}`}
               </div>
-              <div className="text-[11px] text-stone-500">
+              <div className="text-[11px] text-stone-500 tabular-nums">
                 {t('Phản hồi thực địa đã ghi nhận:', 'Recorded field feedback:')} <strong>{platformStats?.totalFeedbacks ?? 0}</strong>
               </div>
             </div>
 
-            <div className="p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1.5">
+            <div className="p-5 bg-white rounded-2xl border border-stone-200 space-y-1.5">
               <div className="flex items-center justify-between text-stone-500">
-                <span className="text-[11px] uppercase font-bold">{t('Chia sẻ & Gói NASA', 'Shares & NASA Batches')}</span>
+                <span className="text-[11px] uppercase font-bold">{t('Chia sẻ & Bộ dữ liệu', 'Shares & Climate Sets')}</span>
                 <Share2 className="w-4 h-4 text-purple-700" />
               </div>
-              <div className="text-2xl font-black text-stone-900 tabular-nums">
+              <div className="text-2xl font-black text-stone-900 font-mono tabular-nums">
                 {statsLoading ? '...' : platformStats?.totalActiveShares ?? 0}
               </div>
-              <div className="text-[11px] text-stone-500">
-                {t('Lượt chia sẻ ruộng ·', 'Active field shares ·')} <strong>{platformStats?.totalNasaDatasets ?? 0}</strong> {t('gói NASA đã nạp', 'NASA batches loaded')}
+              <div className="text-[11px] text-stone-500 tabular-nums">
+                {t('Lượt chia sẻ ruộng ·', 'Active field shares ·')} <strong>{platformStats?.totalNasaDatasets ?? 0}</strong> {t('gói dữ liệu', 'batches')}
               </div>
             </div>
           </div>
 
+          {/* User Engagement & Regional Farm Distribution Analytics */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 text-xs">
+            <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-stone-200 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                  <BarChart3 className="w-4 h-4 text-emerald-700" />{' '}
+                  {t('Phân tích Người dùng & Hoạt động', 'User & Adoption Analytics')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('users')}
+                  className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                >
+                  {t('Quản lý tài khoản →', 'Manage users →')}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200/80 space-y-1">
+                  <span className="text-[11px] text-stone-500 block">
+                    {t('Nông dân đã tạo ruộng', 'Active Field Owners')}
+                  </span>
+                  <span className="text-lg font-black text-stone-900 font-mono tabular-nums">
+                    {analyticsSummary.activeFarmers}
+                    <span className="text-xs font-medium text-stone-500">
+                      {' '}/ {platformStats?.totalUsers ?? 0}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200/80 space-y-1">
+                  <span className="text-[11px] text-stone-500 block">
+                    {t('Trung bình thửa / hộ', 'Avg Fields / Farmer')}
+                  </span>
+                  <span className="text-lg font-black text-emerald-800 font-mono tabular-nums">
+                    {analyticsSummary.avgFieldsPerActiveFarmer}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200/80 space-y-1">
+                  <span className="text-[11px] text-stone-500 block">
+                    {t('Tỉ lệ hoàn thành việc', 'Task Completion Rate')}
+                  </span>
+                  <span className="text-lg font-black text-stone-900 font-mono tabular-nums">
+                    {platformStats && platformStats.totalTasks > 0
+                      ? `${Math.round((platformStats.completedTasks / platformStats.totalTasks) * 100)}%`
+                      : '0%'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200/80 space-y-1">
+                  <span className="text-[11px] text-stone-500 block">
+                    {t('Tỉnh / Thành có ruộng', 'Active Provinces')}
+                  </span>
+                  <span className="text-lg font-black text-stone-900 font-mono tabular-nums">
+                    {platformStats?.fieldsByProvince.length ?? 0}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-stone-200 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                  <Navigation className="w-4 h-4 text-emerald-700" />{' '}
+                  {t('Phân bổ Diện tích & Ruộng theo 3 Miền', 'Regional Farm Distribution')}
+                </h3>
+                <span className="text-[11px] font-mono tabular-nums text-stone-500">
+                  {platformStats?.totalFields ?? 0} {t('thửa', 'farms')} · {platformStats?.totalAreaHa ?? 0} ha
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {analyticsSummary.regions.map((reg) => (
+                  <div key={reg.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-stone-800">
+                        {lang === 'en' ? reg.labelEn : reg.labelVi}
+                      </span>
+                      <span className="font-mono tabular-nums text-stone-700">
+                        <strong>{reg.count}</strong> {t('thửa', 'farms')} · {reg.areaHa} ha ({reg.pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden">
+                      <div
+                        className={`${reg.barClass} h-full rounded-full transition-all duration-300`}
+                        style={{ width: `${Math.max(reg.count > 0 ? 4 : 0, reg.pct)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Map of Vietnam showing where all farms are */}
+          <AdminVietnamFarmsMap
+            fields={platformStats?.allFields || []}
+            onInspectField={setInspectingField}
+          />
+
           {/* Field Distribution Breakdowns */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-xs">
-            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-emerald-700" /> {t('Phân bố ruộng theo Tỉnh / Vùng', 'Fields by Province / Region')}
               </h3>
               {!platformStats || platformStats.fieldsByProvince.length === 0 ? (
                 <p className="text-stone-400 italic py-4">{t('Chưa có thửa ruộng nào được tạo.', 'No fields have been created yet.')}</p>
               ) : (
-                <div className="space-y-2">
-                  {platformStats.fieldsByProvince.map((p) => (
-                    <div
-                      key={p.province}
-                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
-                    >
-                      <span className="font-semibold text-stone-800">{getLocalizedRegionName(p.province, lang)}</span>
-                      <span className="font-mono font-bold text-emerald-800">
-                        {p.count} {t('thửa', 'fields')} ({p.areaHa} ha)
-                      </span>
-                    </div>
-                  ))}
+                <div className="space-y-2.5">
+                  {platformStats.fieldsByProvince.map((p) => {
+                    const pct = Math.round((p.count / Math.max(1, platformStats.totalFields)) * 100);
+                    return (
+                      <div key={p.province} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-stone-800">{getLocalizedRegionName(p.province, lang)}</span>
+                          <span className="font-mono font-bold text-emerald-800 tabular-nums">
+                            {p.count} {t('thửa', 'fields')} ({p.areaHa} ha)
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                          <div className="bg-emerald-600 h-full rounded-full" style={{ width: `${Math.max(4, pct)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
                 <Sprout className="w-4 h-4 text-emerald-700" /> {t('Cơ cấu Cây trồng đang canh tác', 'Active Crop Mix')}
               </h3>
               {!platformStats || platformStats.fieldsByCrop.length === 0 ? (
                 <p className="text-stone-400 italic py-4">{t('Chưa có dữ liệu cây trồng.', 'No crop data yet.')}</p>
               ) : (
-                <div className="space-y-2">
-                  {platformStats.fieldsByCrop.map((c) => (
-                    <div
-                      key={c.cropName}
-                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
-                    >
-                      <span className="font-semibold text-stone-800">{getPlantDisplayName(c.cropName, lang)}</span>
-                      <span className="font-mono font-bold text-stone-900">{c.count} {t('thửa', 'fields')}</span>
-                    </div>
-                  ))}
+                <div className="space-y-2.5">
+                  {platformStats.fieldsByCrop.map((c) => {
+                    const pct = Math.round((c.count / Math.max(1, platformStats.totalFields)) * 100);
+                    return (
+                      <div key={c.cropName} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-stone-800">{getPlantDisplayName(c.cropName, lang)}</span>
+                          <span className="font-mono font-bold text-stone-900 tabular-nums">
+                            {c.count} {t('thửa', 'fields')} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                          <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.max(4, pct)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+            <div className="bg-white rounded-2xl p-5 border border-stone-200 space-y-3">
               <h3 className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
                 <Layers className="w-4 h-4 text-amber-700" /> {t('Phân loại Chất đất trên toàn hệ thống', 'Soil Type Distribution')}
               </h3>
               {!platformStats || platformStats.fieldsBySoil.length === 0 ? (
                 <p className="text-stone-400 italic py-4">{t('Chưa có dữ liệu chất đất.', 'No soil type data yet.')}</p>
               ) : (
-                <div className="space-y-2">
-                  {platformStats.fieldsBySoil.map((s) => (
-                    <div
-                      key={s.soilType}
-                      className="flex items-center justify-between p-2.5 bg-stone-50 rounded-xl border border-stone-200/80"
-                    >
-                      <span className="font-semibold text-stone-800">
-                        {getSoilLabel(s.soilType as any, lang)}
-                      </span>
-                      <span className="font-mono font-bold text-stone-900">{s.count} {t('thửa', 'fields')}</span>
-                    </div>
-                  ))}
+                <div className="space-y-2.5">
+                  {platformStats.fieldsBySoil.map((s) => {
+                    const pct = Math.round((s.count / Math.max(1, platformStats.totalFields)) * 100);
+                    return (
+                      <div key={s.soilType} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-stone-800">
+                            {getSoilLabel(s.soilType as any, lang)}
+                          </span>
+                          <span className="font-mono font-bold text-stone-900 tabular-nums">
+                            {s.count} {t('thửa', 'fields')} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                          <div className="bg-sky-600 h-full rounded-full" style={{ width: `${Math.max(4, pct)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
