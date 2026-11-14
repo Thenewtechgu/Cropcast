@@ -14,6 +14,13 @@ import {
   getLocalizedRegionName,
   isWithinVietnamTerritory,
 } from '../data/nasaVietnamGrid';
+import {
+  VIETNAM_PROVINCES,
+  findDistrictInProvince,
+  findNearestAdminLocation,
+  findProvinceByName,
+  getDistrictsForProvince,
+} from '../data/vietnamLocations';
 import { SatelliteMap } from './SatelliteMap';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -35,20 +42,56 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
   const { lang, t } = useLanguage();
   const [currentLat, setCurrentLat] = useState(selectedLat || 21.03);
   const [currentLon, setCurrentLon] = useState(selectedLon || 105.85);
+  const [selectedProvince, setSelectedProvince] = useState('Hà Nội');
+  const [selectedDistrict, setSelectedDistrict] = useState('');
+  const [mapZoom, setMapZoom] = useState(13);
+  const [flyToTrigger, setFlyToTrigger] = useState(0);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setCurrentLat(selectedLat || 21.03);
-      setCurrentLon(selectedLon || 105.85);
+      const nextLat = selectedLat || 21.03;
+      const nextLon = selectedLon || 105.85;
+      setCurrentLat(nextLat);
+      setCurrentLon(nextLon);
+      const nearestAdmin = findNearestAdminLocation(nextLat, nextLon);
+      setSelectedProvince(nearestAdmin.province.name);
+      setSelectedDistrict(nearestAdmin.district?.name || '');
+      setMapZoom(13);
+      setFlyToTrigger((v) => v + 1);
       setGpsMessage(null);
       setLocationError(null);
     }
   }, [isOpen, selectedLat, selectedLon]);
 
   if (!isOpen) return null;
+
+  const districtOptions = getDistrictsForProvince(selectedProvince);
+  const handleProvinceChange = (provName: string) => {
+    setSelectedProvince(provName);
+    setSelectedDistrict('');
+    setLocationError(null);
+    const prov = findProvinceByName(provName);
+    if (prov) {
+      setCurrentLat(prov.lat);
+      setCurrentLon(prov.lon);
+      setMapZoom(11);
+      setFlyToTrigger((v) => v + 1);
+    }
+  };
+  const handleDistrictChange = (distName: string) => {
+    setSelectedDistrict(distName);
+    setLocationError(null);
+    const dist = findDistrictInProvince(selectedProvince, distName);
+    if (dist) {
+      setCurrentLat(dist.lat);
+      setCurrentLon(dist.lon);
+      setMapZoom(13);
+      setFlyToTrigger((v) => v + 1);
+    }
+  };
 
   const { cell: nearestCell, distanceKm } = findNearestNasaGrid(currentLat, currentLon);
 
@@ -83,6 +126,11 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
 
         setCurrentLat(nextLat);
         setCurrentLon(nextLon);
+        const nearestAdmin = findNearestAdminLocation(nextLat, nextLon);
+        setSelectedProvince(nearestAdmin.province.name);
+        setSelectedDistrict(nearestAdmin.district?.name || '');
+        setMapZoom(14);
+        setFlyToTrigger((v) => v + 1);
         setGpsMessage(
           t(
             `Đã lấy vị trí GPS của thiết bị (độ chính xác ~${Math.round(pos.coords.accuracy)} m) và tự động khớp vùng khí hậu gần nhất.`,
@@ -173,13 +221,17 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
             <SatelliteMap
               lat={currentLat}
               lon={currentLon}
-              zoom={13}
+              zoom={mapZoom}
+              flyToTrigger={flyToTrigger}
               heightClass="h-[260px] sm:h-[440px]"
               interactive={true}
               showNasaGrid={true}
               onLocationChange={(lat, lon) => {
                 setCurrentLat(lat);
                 setCurrentLon(lon);
+                const nearestAdmin = findNearestAdminLocation(lat, lon);
+                setSelectedProvince(nearestAdmin.province.name);
+                setSelectedDistrict(nearestAdmin.district?.name || '');
                 setLocationError(null);
               }}
               onInvalidLocation={(reason) => {
@@ -220,6 +272,43 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
           {/* Right: Coordinates & Nearest Climate Info */}
           <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
             <div className="space-y-4">
+              {/* Cascading Province & District selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+                <div>
+                  <label className="text-stone-700 font-bold block mb-1">
+                    {t('Tỉnh / Thành phố:', 'Province / City:')}
+                  </label>
+                  <select
+                    value={selectedProvince}
+                    onChange={(e) => handleProvinceChange(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-lg border border-stone-300 bg-white text-stone-900 font-semibold text-base sm:text-xs"
+                  >
+                    {VIETNAM_PROVINCES.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {lang === 'en' ? p.nameEn : p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-stone-700 font-bold block mb-1">
+                    {t('Quận / Huyện / Thị xã:', 'District / Town:')}
+                  </label>
+                  <select
+                    value={selectedDistrict}
+                    onChange={(e) => handleDistrictChange(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-lg border border-stone-300 bg-white text-stone-900 font-semibold text-base sm:text-xs"
+                  >
+                    <option value="">{t('-- Chọn Quận/Huyện --', '-- Select District --')}</option>
+                    {districtOptions.map((d) => (
+                      <option key={d.name} value={d.name}>
+                        {lang === 'en' ? d.nameEn : d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* Coordinates manual input */}
               <div className="grid grid-cols-2 gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
                 <div>
@@ -258,7 +347,7 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-900">
-                    {t('Hồ sơ Khí hậu Vùng (2001–2025)', 'Regional Climate Profile (2001–2025)')}
+                    {t('Hồ sơ Khí hậu Vùng (2001–2026)', 'Regional Climate Profile (2001–2026)')}
                   </span>
                   <span className="text-xs font-mono text-emerald-800 font-bold">
                     {distanceKm} km
@@ -272,7 +361,7 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
                     <div className="text-stone-500 text-[11px]">
-                      {t('Nhiệt độ TB 25 năm:', '25-yr mean temp:')}
+                      {t('Nhiệt độ TB 26 năm:', '26-yr mean temp:')}
                     </div>
                     <div className="font-bold text-stone-800 font-mono tabular-nums">
                       {nearestCell.climatology21Yr.avgTemp}°C
@@ -308,8 +397,8 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                   <Info className="w-4 h-4 shrink-0 mt-0.5 text-emerald-700" />
                   <span>
                     {t(
-                      'Ảnh vệ tinh giúp bạn nhận diện đúng bờ thửa, mương nước tại Việt Nam. Tọa độ ruộng tự động liên kết dữ liệu thời tiết hiện tại và chuỗi khí hậu 25 năm (2001–2025) để tư vấn tưới và lịch gieo trồng.',
-                      'Satellite imagery helps pinpoint field borders and canals in Vietnam. Coordinates automatically pair live weather with 25-year (2001–2025) climate trends for irrigation and planting guidance.'
+                      'Ảnh vệ tinh giúp bạn nhận diện đúng bờ thửa, mương nước tại Việt Nam. Tọa độ ruộng tự động liên kết dữ liệu thời tiết hiện tại và chuỗi khí hậu 26 năm (2001–2026) để tư vấn tưới và lịch gieo trồng.',
+                      'Satellite imagery helps pinpoint field borders and canals in Vietnam. Coordinates automatically pair live weather with 26-year (2001–2026) climate trends for irrigation and planting guidance.'
                     )}
                   </span>
                 </div>

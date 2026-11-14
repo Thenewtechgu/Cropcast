@@ -97,9 +97,10 @@ async function fetchAndNormalizeOco2(
 
   const granuleEntry = cmrJson?.feed?.entry?.[0];
   const granuleTitle = granuleEntry?.title ? String(granuleEntry.title) : '';
-  const rawGranuleDate = granuleEntry?.time_start
-    ? String(granuleEntry.time_start).slice(0, 10)
-    : '';
+  const rawGranuleDate =
+    granuleEntry?.time_end || granuleEntry?.time_start
+      ? String(granuleEntry.time_end || granuleEntry.time_start).slice(0, 10)
+      : '';
   const fallbackDateStr = endDate.toISOString().slice(0, 10);
   const isFreshGranule =
     rawGranuleDate &&
@@ -142,7 +143,7 @@ async function fetchAndNormalizeOco2(
 
   return {
     fieldId,
-    rotationId,
+    ...(rotationId ? { rotationId } : {}),
     lat,
     lon,
     observationDate: granuleDate,
@@ -183,9 +184,10 @@ async function fetchAndNormalizeGrace(
   ]);
 
   const granuleEntry = cmrJson?.feed?.entry?.[0];
-  const rawGraceDate = granuleEntry?.time_start
-    ? String(granuleEntry.time_start).slice(0, 10)
-    : '';
+  const rawGraceDate =
+    granuleEntry?.time_end || granuleEntry?.time_start
+      ? String(granuleEntry.time_end || granuleEntry.time_start).slice(0, 10)
+      : '';
   const graceFallbackDate = endDate.toISOString().slice(0, 10);
   const isFreshGrace =
     rawGraceDate &&
@@ -238,7 +240,7 @@ async function fetchAndNormalizeGrace(
 
   return {
     fieldId,
-    rotationId,
+    ...(rotationId ? { rotationId } : {}),
     lat,
     lon,
     observationDate: obsDate,
@@ -292,7 +294,7 @@ async function fetchAndNormalizeGhgeEdgar(
 
   return {
     fieldId,
-    rotationId,
+    ...(rotationId ? { rotationId } : {}),
     lat,
     lon,
     observationDate: new Date().toISOString().slice(0, 10),

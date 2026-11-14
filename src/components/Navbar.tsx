@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import { AppUser, FieldProfile } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useViewMode } from '../contexts/ViewModeContext';
+import { getPlantDisplayName } from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface NavbarProps {
   activeTab: string;
@@ -40,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [fieldDropdownOpen, setFieldDropdownOpen] = useState(false);
   const { lang, setLang, t } = useLanguage();
+  const { viewMode, setViewMode } = useViewMode();
 
   const navItems = authUser?.isAdmin
     ? [{ id: 'admin', label: t('Quản trị', 'Admin'), matchTabs: ['admin'] }]
@@ -110,7 +115,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <div>
                             <div className="text-xs font-semibold text-stone-900">{f.name}</div>
                             <div className="text-[11px] text-stone-500">
-                              {f.crop.name} · {f.province}
+                              {getPlantDisplayName(f.crop.name, lang)} · {getLocalizedRegionName(f.province, lang)}
                             </div>
                           </div>
                           {f.id === activeField?.id && (
@@ -171,8 +176,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Zone 3: Language Switcher + Account Action */}
+          {/* Zone 3: View Mode Toggle + PWA Install + Language Switcher + Account Action */}
           <div className="flex items-center gap-2 shrink-0">
+            {!authUser?.isAdmin && (
+              <div
+                role="group"
+                aria-label={t('Chế độ hiển thị', 'Display mode')}
+                className="hidden md:inline-flex items-center bg-stone-100 border border-stone-200 rounded-lg p-0.5 text-[11px] font-bold"
+              >
+                <button
+                  type="button"
+                  onClick={() => setViewMode('simple')}
+                  className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                    viewMode === 'simple'
+                      ? 'bg-emerald-800 text-white shadow-2xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  {t('Đơn giản', 'Simple')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('detailed')}
+                  className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                    viewMode === 'detailed'
+                      ? 'bg-emerald-800 text-white shadow-2xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  {t('Chi tiết', 'Detailed')}
+                </button>
+              </div>
+            )}
+
+            <PWAInstallButton />
+
             {/* Bilingual Language Toggle right on Navbar */}
             <div
               role="group"
@@ -277,6 +315,32 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {!authUser?.isAdmin && (
+            <div className="md:hidden pb-2 border-b border-stone-100 flex items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-stone-600">{t('Chế độ xem:', 'Display Mode:')}</span>
+              <div className="inline-flex items-center bg-stone-100 border border-stone-200 rounded-lg p-0.5 font-bold">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('simple')}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    viewMode === 'simple' ? 'bg-emerald-800 text-white' : 'text-stone-600'
+                  }`}
+                >
+                  {t('Đơn giản', 'Simple')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('detailed')}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    viewMode === 'detailed' ? 'bg-emerald-800 text-white' : 'text-stone-600'
+                  }`}
+                >
+                  {t('Chi tiết', 'Detailed')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!authUser?.isAdmin && (
             <div className="sm:hidden pb-2 border-b border-stone-100 space-y-1.5">
               <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400 px-1">
                 {t('Thửa ruộng đang theo dõi', 'Active Field')} ({fields.length})
@@ -300,7 +364,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <div className="min-w-0 pr-2">
                         <div className="truncate">{f.name}</div>
                         <div className="text-[10px] text-stone-500 truncate">
-                          {f.crop.name} · {f.province}
+                          {getPlantDisplayName(f.crop.name, lang)} · {getLocalizedRegionName(f.province, lang)}
                         </div>
                       </div>
                       {f.id === activeField?.id && (

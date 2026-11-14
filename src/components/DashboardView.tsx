@@ -29,6 +29,7 @@ import {
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { EarthSustainabilityPanel } from './EarthSustainabilityPanel';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useViewMode } from '../contexts/ViewModeContext';
 
 interface DashboardViewProps {
   field: FieldProfile;
@@ -56,6 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSaveEarthMetrics,
 }) => {
   const { lang, t } = useLanguage();
+  const { isSimpleMode, setViewMode } = useViewMode();
   const [feedbackSubmitted, setFeedbackSubmitted] = useState<string | null>(null);
   const [completedActions, setCompletedActions] = useState<Record<string, boolean>>({});
 
@@ -78,11 +80,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const healthScore =
     brief.riskLevel === 'CRITICAL' ? 68 : brief.riskLevel === 'WARNING' ? 82 : 95;
 
+  const simpleStatusMeta =
+    brief.riskLevel === 'CRITICAL'
+      ? {
+          badge: t('🔴 Cảnh báo gấp', '🔴 Urgent Alert'),
+          cls: 'bg-rose-100 text-rose-900 border-rose-300',
+        }
+      : brief.riskLevel === 'WARNING'
+      ? {
+          badge: t('🟡 Cần chú ý', '🟡 Needs Attention'),
+          cls: 'bg-amber-100 text-amber-900 border-amber-300',
+        }
+      : {
+          badge: t('🟢 Ruộng tốt', '🟢 Good Condition'),
+          cls: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+        };
+
   const earth = field.adaptiveMemory?.earthMetrics;
   const smap = earth?.smapModis;
+  const baselineMonthMatch = weather.observationDate.match(
+    /Nền khí hậu tháng\s+(\d+)\s*\(([^)]+)\)/i
+  );
   const localizedObsDate =
     weather.observationDate === 'Hôm nay (Cập nhật 07:00)'
       ? t('Hôm nay (Cập nhật 07:00)', 'Today (Updated 07:00)')
+      : baselineMonthMatch
+      ? t(
+          weather.observationDate,
+          `Month ${baselineMonthMatch[1]} Climate Baseline (${baselineMonthMatch[2]})`
+        )
       : weather.observationDate;
   const powerUpdatedLabel = earth?.nasaPowerLastUpdated
     ? new Date(earth.nasaPowerLastUpdated).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')
@@ -174,9 +200,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>·</span>
             <span className="font-mono tabular-nums">{field.areaHa} ha</span>
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
-            {field.name}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
+              {field.name}
+            </h1>
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${simpleStatusMeta.cls}`}
+            >
+              {simpleStatusMeta.badge}
+            </span>
+          </div>
           <p className="text-xs text-stone-600">
             {t('Đất', 'Soil')} {getSoilLabel(field.soilType, lang)} (
             {getDrainageLabel(field.soilCharacteristics.drainage, lang)}) ·{' '}
@@ -188,28 +221,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
+            onClick={() => setViewMode(isSimpleMode ? 'detailed' : 'simple')}
+            className="px-3.5 py-2.5 sm:py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap"
+          >
+            {isSimpleMode
+              ? t('Xem số liệu chi tiết', 'Switch to Detailed')
+              : t('Về chế độ Đơn giản', 'Simple View')}
+          </button>
+          <button
+            type="button"
             onClick={() => onNavigateTab('rotation')}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="px-4 py-2.5 sm:py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <RefreshCw className="w-3.5 h-3.5" /> {t('Luân canh tối ưu', 'Optimal Rotation')}
           </button>
           <button
             type="button"
             onClick={onOpenMap}
-            className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="px-4 py-2.5 sm:py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <Satellite className="w-3.5 h-3.5" /> {t('Bản đồ vệ tinh', 'Satellite Map')}
           </button>
         </div>
       </div>
 
-      {/* Environmental Sustainability Panel */}
-      <EarthSustainabilityPanel
-        field={field}
-        weatherObservationDate={weather.observationDate}
-        onSaveToField={onSaveEarthMetrics}
-        onNavigateRotation={() => onNavigateTab('rotation')}
-      />
+      {/* Environmental Sustainability Panel — Detailed Mode only so Simple Mode stays clear for farmers */}
+      {!isSimpleMode && (
+        <EarthSustainabilityPanel
+          field={field}
+          weatherObservationDate={weather.observationDate}
+          onSaveToField={onSaveEarthMetrics}
+          onNavigateRotation={() => onNavigateTab('rotation')}
+        />
+      )}
 
       {/* Core Daily Action Section */}
       <div className="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 space-y-5">
@@ -409,8 +453,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {weather.temp}°C
             </div>
             <div className="text-xs text-stone-500 mt-1 font-mono tabular-nums">
-              {weather.minTemp}°C – {weather.maxTemp}°C · {t('Nền 25 năm:', '25-yr avg:')}{' '}
-              {weather.historicalBaseline.avgTemp}°C
+              {weather.minTemp}°C – {weather.maxTemp}°C
+              {!isSimpleMode &&
+                ` · ${t('Nền khí hậu:', 'Climate norm:')} ${weather.historicalBaseline.avgTemp}°C`}
             </div>
             <div className="text-[11px] text-stone-400 mt-1">
               {t('Cập nhật:', 'Updated:')} {powerUpdatedLabel}
@@ -430,37 +475,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {weather.humidity}%
               </span>
             </div>
-            <div>
-              <span className="text-stone-400 block">
-                {weather.vpdHpa !== undefined
-                  ? t('Sức hút bốc hơi', 'Drying demand')
-                  : t('Bức xạ', 'Solar')}
-              </span>
-              <span className="font-bold text-stone-800 font-mono tabular-nums">
-                {weather.vpdHpa !== undefined
-                  ? `${weather.vpdHpa} hPa`
-                  : `${weather.solarRadiation} MJ/m²`}
-              </span>
-            </div>
-            <div>
-              <span className="text-stone-400 block flex items-center gap-1">
-                <Wind className="w-3 h-3" />{' '}
-                {weather.dewPointC !== undefined
-                  ? t('Điểm sương', 'Dew point')
-                  : t('Gió', 'Wind')}
-              </span>
-              <span className="font-bold text-stone-800 font-mono tabular-nums">
-                {weather.dewPointC !== undefined
-                  ? `${weather.dewPointC}°C`
-                  : `${weather.windSpeed} m/s`}
-              </span>
-            </div>
+            {!isSimpleMode && (
+              <>
+                <div>
+                  <span className="text-stone-400 block">
+                    {weather.vpdHpa !== undefined
+                      ? t('Sức hút bốc hơi', 'Drying demand')
+                      : t('Bức xạ', 'Solar')}
+                  </span>
+                  <span className="font-bold text-stone-800 font-mono tabular-nums">
+                    {weather.vpdHpa !== undefined
+                      ? `${weather.vpdHpa} hPa`
+                      : `${weather.solarRadiation} MJ/m²`}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-stone-400 block flex items-center gap-1">
+                    <Wind className="w-3 h-3" />{' '}
+                    {weather.dewPointC !== undefined
+                      ? t('Điểm sương', 'Dew point')
+                      : t('Gió', 'Wind')}
+                  </span>
+                  <span className="font-bold text-stone-800 font-mono tabular-nums">
+                    {weather.dewPointC !== undefined
+                      ? `${weather.dewPointC}°C`
+                      : `${weather.windSpeed} m/s`}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
           <p className="text-[11px] text-stone-600 leading-snug pt-2 border-t border-stone-100">
             {weather.vpdHpa !== undefined && weather.vpdHpa >= 18
               ? t(
-                  `Không khí khô (sức hút ${weather.vpdHpa} hPa) làm lá ${getPlantDisplayName(field.crop.name, 'vi')} mất nước nhanh — ưu tiên tưới sáng sớm.`,
-                  `Dry air (${weather.vpdHpa} hPa) speeds up water loss in ${getPlantDisplayName(field.crop.name, 'en')} — water early morning.`
+                  `Trời hanh khô khiến lá ${getPlantDisplayName(field.crop.name, 'vi')} mất nước nhanh — ưu tiên tưới sáng sớm.`,
+                  `Dry air speeds up water loss in ${getPlantDisplayName(field.crop.name, 'en')} — water early morning.`
                 )
               : weather.humidity >= 85
               ? t(
@@ -468,8 +517,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   `High ${weather.humidity}% humidity keeps ${getPlantDisplayName(field.crop.name, 'en')} leaves wet — scout for fungal spots.`
                 )
               : t(
-                  `Mức bốc hơi${weather.et0MmDay !== undefined ? ` ~${weather.et0MmDay} mm/ngày` : ''} ôn hòa, phù hợp cho ${getPlantDisplayName(field.crop.name, 'vi')} phát triển.`,
-                  `Moderate water loss${weather.et0MmDay !== undefined ? ` (~${weather.et0MmDay} mm/day)` : ''} supports steady ${getPlantDisplayName(field.crop.name, 'en')} growth.`
+                  `Thời tiết ôn hòa, thuận lợi cho ${getPlantDisplayName(field.crop.name, 'vi')} sinh trưởng đều.`,
+                  `Mild weather supports steady ${getPlantDisplayName(field.crop.name, 'en')} growth.`
                 )}
           </p>
         </div>
@@ -614,7 +663,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
 
-            {smap && (
+            {!isSimpleMode && smap && (
               <div className="text-[11px] text-stone-500 font-mono">
                 {t('Độ xanh tán lá:', 'Canopy greenness:')} {smap.modisNdvi} ·{' '}
                 {t('Mưa 7 ngày:', '7-day rain:')} {smap.gpmPrecipitation7dMm} mm

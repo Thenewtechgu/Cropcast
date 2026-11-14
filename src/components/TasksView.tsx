@@ -10,7 +10,66 @@ import {
   Circle,
 } from 'lucide-react';
 import { FarmTask, FieldProfile } from '../types';
-import { useLanguage } from '../contexts/LanguageContext';
+import { AppLanguage, useLanguage } from '../contexts/LanguageContext';
+
+function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
+  const cleanTriggerVi = (raw: string) =>
+    raw
+      .replace(/GWETROOT\s*(\d+%)/gi, 'Ẩm tầng rễ $1')
+      .replace(/GWETTOP\s*(\d+%)/gi, 'Ẩm tầng mặt $1');
+
+  if (lang === 'vi') {
+    return {
+      title: task.title,
+      scheduledTime: task.scheduledTime,
+      reason: task.reason,
+      triggerData: cleanTriggerVi(task.triggerData),
+    };
+  }
+
+  let title = task.titleEn || task.title;
+  if (!task.titleEn) {
+    title = title
+      .replace('Thăm đồng định kỳ vào buổi sáng', 'Routine morning field inspection')
+      .replace('Thăm đồng định kỳ vào buổi chiều', 'Routine afternoon field inspection')
+      .replace('Duy trì chế độ tưới tiết kiệm theo nhu cầu thực', 'Maintain precision water-saving schedule')
+      .replace('Khơi thông rãnh thoát nước ngay đầu bờ', 'Clear edge drainage furrows immediately')
+      .replace('Quan sát mặt dưới lá và gốc để phát hiện đốm nấm ẩm', 'Scout undersides of leaves for fungal spots')
+      .replace('Tưới nước bổ sung vào sáng sớm (05:30 - 07:00)', 'Water lightly early morning (05:30–07:00)')
+      .replace('Tủ ẩm gốc hoặc phủ rơm rạ giữ nước quanh luống', 'Apply organic straw mulch to cut evaporation');
+  }
+
+  let scheduledTime = task.scheduledTimeEn || task.scheduledTime;
+  if (!task.scheduledTimeEn) {
+    scheduledTime = scheduledTime
+      .replace('Sáng mai lúc 06:30', 'Tomorrow 06:30 AM')
+      .replace('Sáng sớm mai lúc 06:00', 'Tomorrow 06:00 AM')
+      .replace('Chiều nay lúc 16:30', 'Today 04:30 PM')
+      .replace('Chiều mai lúc 16:30', 'Tomorrow 04:30 PM')
+      .replace('Trong 24 giờ tới', 'Within 24 hours');
+  }
+
+  let reason = task.reasonEn || task.reason;
+  if (!task.reasonEn) {
+    reason = reason
+      .replace('Theo dõi sinh trưởng cây và nhổ cỏ dại cạnh tranh dinh dưỡng', 'Monitor canopy growth, weeds, and basal moisture')
+      .replace(/^Độ ẩm rễ đạt (\d+%), chưa cần tưới ồ ạt$/, 'Root moisture at $1%; avoid over-irrigation')
+      .replace(/^Khắc phục sai lệch thực địa \(đất: ([^·]+) · cây: ([^)]+)\)$/, 'Corrective step from field update ($1 soil · $2 crop)');
+  }
+
+  let triggerData = task.triggerDataEn || task.triggerData;
+  if (!task.triggerDataEn) {
+    triggerData = triggerData
+      .replace(/Lịch người dùng:\s*Buổi sáng/gi, 'Schedule: Morning')
+      .replace(/Lịch người dùng:\s*Buổi chiều/gi, 'Schedule: Afternoon')
+      .replace(/GWETROOT\s*(\d+%)/gi, 'Root-zone moisture $1')
+      .replace(/GWETTOP\s*(\d+%)/gi, 'Topsoil moisture $1')
+      .replace(/Ẩm vùng rễ\s*(\d+%)/gi, 'Root-zone moisture $1')
+      .replace(/Ẩm tầng rễ\s*(\d+%)/gi, 'Root-zone moisture $1');
+  }
+
+  return { title, scheduledTime, reason, triggerData };
+}
 
 interface TasksViewProps {
   tasks: FarmTask[];
@@ -178,6 +237,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             const isCompleted = task.status === 'completed';
             const isPostponed = task.status === 'postponed';
             const isIncomplete = task.status === 'pending' || task.status === 'skipped';
+            const localized = localizeTaskFields(task, lang);
 
             return (
               <div
@@ -230,7 +290,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       </span>
                       <span className="text-xs text-stone-400 flex items-center gap-1">
                         <Clock className="w-3 h-3" /> {t('Dự kiến:', 'Schedule:')}{' '}
-                        <strong>{task.scheduledTime}</strong>
+                        <strong>{localized.scheduledTime}</strong>
                       </span>
                     </div>
 
@@ -239,16 +299,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         isCompleted ? 'line-through text-stone-500' : ''
                       }`}
                     >
-                      {task.title}
+                      {localized.title}
                     </h3>
 
                     <p className="text-xs text-stone-600 leading-relaxed font-normal">
-                      {task.reason}
+                      {localized.reason}
                     </p>
 
                     <div className="flex flex-wrap items-center gap-3 text-[11px] text-stone-400 font-mono pt-1">
                       <span>
-                        {t('Dữ liệu kích hoạt:', 'Trigger:')} <strong>{task.triggerData}</strong>
+                        {t('Dữ liệu kích hoạt:', 'Trigger:')} <strong>{localized.triggerData}</strong>
                       </span>
                       {task.farmerNote && (
                         <span className="text-amber-800 font-sans font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">

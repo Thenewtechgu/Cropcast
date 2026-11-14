@@ -40,8 +40,10 @@ import {
   EarthEnvironmentSnapshot,
   PlotPlanRecord,
 } from './types';
-import { Sprout, ShieldCheck, Plus, MapPin, LogIn, CheckCircle2, Layers, CalendarCheck, History, RefreshCw, CalendarDays, BarChart3 } from 'lucide-react';
+import { Sprout, ShieldCheck, Plus, MapPin, LogIn, CheckCircle2, Layers, CalendarCheck, History, RefreshCw, CalendarDays, BarChart3, Home, Globe, Bot } from 'lucide-react';
 import { useLanguage } from './contexts/LanguageContext';
+import { OfflineCacheService } from './services/offlineCacheService';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 const TAB_TO_PATH: Record<string, string> = {
   home: '/',
@@ -102,6 +104,7 @@ export default function App() {
   const [feedbackHistory, setFeedbackHistory] = useState<FeedbackRecord[]>([]);
   const [plansByPlotId, setPlansByPlotId] = useState<Record<string, PlotPlanRecord>>({});
   const [datasetRefreshTick, setDatasetRefreshTick] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   const setActiveFieldId = (nextIdOrUpdater: string | ((prev: string) => string)) => {
     setActiveFieldIdState((prev) => {
@@ -203,10 +206,26 @@ export default function App() {
   const activeFieldLat = activeField?.lat;
   const activeFieldLon = activeField?.lon;
 
-  // Fetch live field weather + 25-yr (2001-2025) baseline and merge any public admin dataset overrides
+  // Fetch live field weather + 26-yr (2001-2026) baseline and merge any public admin dataset overrides, with offline cache fallback
   useEffect(() => {
     let mounted = true;
     const loadWeather = async () => {
+      if (
+        typeof navigator !== 'undefined' &&
+        !navigator.onLine &&
+        authUser &&
+        !authUser.isAdmin &&
+        activeField?.id
+      ) {
+        const cached = await OfflineCacheService.loadSnapshot(authUser.uid);
+        const cachedWeather = cached?.weatherByFieldId?.[activeField.id];
+        if (mounted && cachedWeather) {
+          setWeather(cachedWeather);
+          if (cached?.lastSyncedAt) setLastSyncedAt(cached.lastSyncedAt);
+          return;
+        }
+      }
+
       const liveOrBaseline =
         activeFieldLat !== undefined && activeFieldLon !== undefined
           ? await fetchFieldLiveWeather(activeFieldLat, activeFieldLon, activeField)
@@ -214,38 +233,48 @@ export default function App() {
 
       if (!mounted) return;
 
+      let resolvedWeather = liveOrBaseline;
       try {
         const datasets = await FirestoreService.getPublicNasaDatasets();
         if (!mounted) return;
         const completed = datasets
           .filter((d) => d.status === 'COMPLETED' && d.sampleOverrides?.length)
           .reverse();
-        if (completed.length === 0) {
-          setWeather(liveOrBaseline);
-          return;
-        }
-        const next = { ...liveOrBaseline };
-        for (const ds of completed) {
-          const matchingRows = (ds.sampleOverrides || [])
-            .filter((row) => !activeFieldCellId || row.cell_id === activeFieldCellId)
-            .sort((a, b) => a.date.localeCompare(b.date));
-          for (const row of matchingRows) {
-            if (row.indicator_code === 'T2M') next.temp = row.value;
-            if (row.indicator_code === 'T2M_MIN') next.minTemp = row.value;
-            if (row.indicator_code === 'T2M_MAX') next.maxTemp = row.value;
-            if (row.indicator_code === 'PRECTOTCORR') next.rain = row.value;
-            if (row.indicator_code === 'GWETROOT') next.gwetroot = row.value;
-            if (row.indicator_code === 'GWETTOP') next.gwettop = row.value;
-            if (row.indicator_code === 'RH2M') next.humidity = row.value;
-            if (row.indicator_code === 'ALLSKY_SFC_SW_DWN') next.solarRadiation = row.value;
+        if (completed.length > 0) {
+          const next = { ...liveOrBaseline };
+          for (const ds of completed) {
+            const matchingRows = (ds.sampleOverrides || [])
+              .filter((row) => !activeFieldCellId || row.cell_id === activeFieldCellId)
+              .sort((a, b) => a.date.localeCompare(b.date));
+            for (const row of matchingRows) {
+              if (row.indicator_code === 'T2M') next.temp = row.value;
+              if (row.indicator_code === 'T2M_MIN') next.minTemp = row.value;
+              if (row.indicator_code === 'T2M_MAX') next.maxTemp = row.value;
+              if (row.indicator_code === 'PRECTOTCORR') next.rain = row.value;
+              if (row.indicator_code === 'GWETROOT') next.gwetroot = row.value;
+              if (row.indicator_code === 'GWETTOP') next.gwettop = row.value;
+              if (row.indicator_code === 'RH2M') next.humidity = row.value;
+              if (row.indicator_code === 'ALLSKY_SFC_SW_DWN') next.solarRadiation = row.value;
+            }
+            if (matchingRows.length > 0 && ds.endDate) {
+              next.observationDate = ds.endDate;
+            }
           }
-          if (matchingRows.length > 0 && ds.endDate) {
-            next.observationDate = ds.endDate;
-          }
+          resolvedWeather = next;
         }
-        setWeather(next);
       } catch {
-        if (mounted) setWeather(liveOrBaseline);
+        // fallback to liveOrBaseline
+      }
+
+      if (!mounted) return;
+      setWeather(resolvedWeather);
+
+      if (authUser && !authUser.isAdmin && activeField?.id) {
+        OfflineCacheService.saveWeatherForField(authUser.uid, activeField.id, resolvedWeather)
+          .then(() => {
+            if (mounted) setLastSyncedAt(new Date().toISOString());
+          })
+          .catch(() => {});
       }
     };
 
@@ -253,7 +282,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, [activeTab, datasetRefreshTick, activeFieldCellId, activeFieldLat, activeFieldLon]);
+  }, [activeTab, datasetRefreshTick, activeFieldCellId, activeFieldLat, activeFieldLon, authUser?.uid, authUser?.isAdmin, activeField?.id]);
 
   // Redeem pending share link (?share=...) once user is signed in, or prompt login
   useEffect(() => {
@@ -306,7 +335,7 @@ export default function App() {
       });
   }, [authReady, authUser, pendingShareToken]);
 
-  // Subscribe strictly to authenticated farmer's own & shared fields; preserve sub-website route on reload!
+  // Subscribe strictly to authenticated farmer's own & shared fields; hydrate & persist offline cache
   useEffect(() => {
     if (!authReady) return;
 
@@ -315,6 +344,7 @@ export default function App() {
       setTasks([]);
       setFeedbackHistory([]);
       setPlansByPlotId({});
+      setLastSyncedAt(null);
       if (activeTab === 'admin') {
         navigateToTab('home', true);
       }
@@ -326,9 +356,32 @@ export default function App() {
       setTasks([]);
       setFeedbackHistory([]);
       setPlansByPlotId({});
+      setLastSyncedAt(null);
       navigateToTab('admin', true);
       return;
     }
+
+    let isMounted = true;
+    OfflineCacheService.loadSnapshot(authUser.uid)
+      .then((cached) => {
+        if (!isMounted || !cached) return;
+        setFields((prev) => (prev.length === 0 && cached.fields.length > 0 ? cached.fields : prev));
+        setTasks((prev) => (prev.length === 0 && cached.tasks.length > 0 ? cached.tasks : prev));
+        setFeedbackHistory((prev) =>
+          prev.length === 0 && cached.feedbacks.length > 0 ? cached.feedbacks : prev
+        );
+        setPlansByPlotId((prev) =>
+          Object.keys(prev).length === 0 && Object.keys(cached.plans || {}).length > 0
+            ? cached.plans
+            : prev
+        );
+        if (cached.lastSyncedAt) setLastSyncedAt(cached.lastSyncedAt);
+        setActiveFieldId((prev) => {
+          if (prev) return prev;
+          return cached.fields[0]?.id || '';
+        });
+      })
+      .catch(() => {});
 
     const unsubFields = FirestoreService.subscribeUserFields(
       authUser.uid,
@@ -359,12 +412,49 @@ export default function App() {
     }
 
     return () => {
+      isMounted = false;
       unsubFields();
       unsubTasks();
       unsubFeedbacks();
       unsubPlans();
     };
   }, [authReady, authUser]);
+
+  // Persist synchronized farmer records into IndexedDB + localStorage snapshot while online
+  useEffect(() => {
+    if (!authUser || authUser.isAdmin) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    if (
+      fields.length === 0 &&
+      tasks.length === 0 &&
+      feedbackHistory.length === 0 &&
+      Object.keys(plansByPlotId).length === 0
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const syncCache = async () => {
+      const existing = await OfflineCacheService.loadSnapshot(authUser.uid);
+      if (cancelled) return;
+      const nowIso = new Date().toISOString();
+      await OfflineCacheService.saveSnapshot({
+        uid: authUser.uid,
+        fields,
+        tasks,
+        feedbacks: feedbackHistory,
+        plans: plansByPlotId,
+        weatherByFieldId: existing?.weatherByFieldId || {},
+        lastSyncedAt: nowIso,
+      });
+      if (!cancelled) setLastSyncedAt(nowIso);
+    };
+
+    syncCache().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.uid, authUser?.isAdmin, fields, tasks, feedbackHistory, plansByPlotId]);
 
 
   const ruleBrief: DailyAgronomicBrief | null = activeField
@@ -452,7 +542,7 @@ export default function App() {
     }
     const created = await FirestoreService.createField(authUser.uid, newFieldData);
     const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
-    const newTasks = generateTasksFromBrief(brief, created);
+    const newTasks = generateTasksFromBrief(brief, created, weather, feedbackHistory);
     try {
       await FirestoreService.createTasks(authUser.uid, newTasks);
     } catch {
@@ -799,7 +889,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-6 space-y-5">
         {/* Clean Sub-Website Navigation Strip for Care Hub */}
         {!authUser?.isAdmin && ['dashboard', 'tasks', 'feedback'].includes(activeTab) && (
           <div className="bg-white rounded-2xl p-1.5 border border-stone-200 shadow-2xs flex items-center gap-1.5 overflow-x-auto no-scrollbar">
@@ -1048,14 +1138,77 @@ export default function App() {
         />
       )}
 
+      <OfflineIndicator lastSyncedAt={lastSyncedAt} />
+
+      {/* Mobile Bottom Navigation Bar (5 primary farmer tabs) */}
+      {!authUser?.isAdmin && (
+        <nav
+          aria-label={t('Điều hướng nhanh trên điện thoại', 'Mobile quick navigation')}
+          className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]"
+        >
+          <div className="grid grid-cols-5 h-16 max-w-lg mx-auto">
+            {[
+              {
+                id: 'home',
+                label: t('Trang chủ', 'Home'),
+                icon: Home,
+                matchTabs: ['home'],
+              },
+              {
+                id: 'fields',
+                label: t('Ruộng', 'Fields'),
+                icon: Sprout,
+                matchTabs: ['fields', 'dashboard', 'tasks', 'feedback'],
+              },
+              {
+                id: 'calendar',
+                label: t('Mùa vụ', 'Season'),
+                icon: CalendarDays,
+                matchTabs: ['calendar', 'rotation'],
+              },
+              {
+                id: 'analytics',
+                label: t('Khí hậu', 'Climate'),
+                icon: Globe,
+                matchTabs: ['analytics'],
+              },
+              {
+                id: 'assistant',
+                label: 'AI',
+                icon: Bot,
+                matchTabs: ['assistant'],
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isActive = item.matchTabs.includes(activeTab);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => navigateToTab(item.id)}
+                  className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold transition cursor-pointer ${
+                    isActive
+                      ? 'text-emerald-800 bg-emerald-50/70'
+                      : 'text-stone-500 hover:text-stone-900'
+                  }`}
+                >
+                  <Icon className={`w-5 h-5 ${isActive ? 'text-emerald-700' : 'text-stone-500'}`} />
+                  <span className="truncate max-w-full px-1">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
+
       {/* Minimal Footer */}
-      <footer className="bg-white border-t border-stone-200 py-5 px-4 text-xs text-stone-500 mt-10">
+      <footer className="bg-white border-t border-stone-200 py-5 pb-24 lg:pb-5 px-4 text-xs text-stone-500 mt-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <span className="font-semibold text-stone-700">CropCast</span>
           <span>
             {t(
-              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 25 năm (2001–2025) & thời tiết thực địa',
-              'Sustainable farming & crop rotation powered by 25-year (2001–2025) climate & field weather data'
+              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 26 năm (2001–2026) & thời tiết thực địa',
+              'Sustainable farming & crop rotation powered by 26-year (2001–2026) climate & field weather data'
             )}
           </span>
         </div>

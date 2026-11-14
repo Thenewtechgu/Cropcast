@@ -110,15 +110,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                         `If an account exists for ${sentToEmail}, Firebase has sent a password reset email.`
                       )}
                     </p>
-                    <div className="p-2.5 bg-white/80 rounded-lg border border-emerald-200 space-y-1 text-[11px]">
-                      <p className="font-semibold text-emerald-900">
-                        VI: Vui lòng kiểm tra <strong>Hộp thư đến (Inbox)</strong> và cả thư mục{' '}
-                        <strong>Thư rác / Spam</strong>, sau đó bấm vào liên kết để tạo mật khẩu mới.
-                      </p>
-                      <p className="text-stone-600">
-                        EN: Please check your <strong>Inbox</strong> as well as your{' '}
-                        <strong>Spam / Junk</strong> folder and click the link to set a new password.
-                      </p>
+                    <div className="p-2.5 bg-white/80 rounded-lg border border-emerald-200 text-[11px] font-medium text-emerald-900">
+                      {t(
+                        'Vui lòng kiểm tra Hộp thư đến (Inbox) và cả thư mục Thư rác / Spam, sau đó bấm vào liên kết để tạo mật khẩu mới.',
+                        'Please check your Inbox as well as your Spam / Junk folder, then click the link to set a new password.'
+                      )}
                     </div>
                   </div>
                 </div>

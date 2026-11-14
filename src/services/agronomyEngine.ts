@@ -7,6 +7,9 @@ import {
   FarmTask,
   FeedbackRecord,
   PlantingRiskEvaluation,
+  SoilDrainageEstimate,
+  EarthEnvironmentSnapshot,
+  SoilType,
 } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
 import { getPlantDisplayName, getCommonStageLabel, getCommonVarietyLabel } from '../data/cropTaxonomy';
@@ -425,18 +428,38 @@ ${earth ? `4. Chỉ số môi trường ruộng: Hấp thụ ${earth.carbonFluxO
   };
 }
 
-export function generateTasksFromBrief(brief: DailyAgronomicBrief, field: FieldProfile): FarmTask[] {
-  return brief.topActions.map((act, idx) => ({
-    id: `TASK_${brief.id}_${idx}`,
-    fieldId: field.id,
-    title: act.title,
-    scheduledTime: brief.nextCheckTime,
-    priority: act.priority,
-    reason: act.reason,
-    triggerData: act.dataBasis,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  }));
+export function generateTasksFromBrief(
+  brief: DailyAgronomicBrief,
+  field: FieldProfile,
+  weather?: WeatherObservation,
+  feedbackHistory: FeedbackRecord[] = []
+): FarmTask[] {
+  const enBrief = weather
+    ? analyzeFieldAgronomy(field, weather, feedbackHistory, 'en')
+    : null;
+  const viBrief = weather
+    ? analyzeFieldAgronomy(field, weather, feedbackHistory, 'vi')
+    : brief;
+
+  const baseActions = viBrief.topActions.length > 0 ? viBrief.topActions : brief.topActions;
+  return baseActions.map((act, idx) => {
+    const enAct = enBrief?.topActions[idx];
+    return {
+      id: `TASK_${brief.id}_${idx}`,
+      fieldId: field.id,
+      title: act.title,
+      titleEn: enAct?.title || act.title,
+      scheduledTime: viBrief.nextCheckTime,
+      scheduledTimeEn: enBrief?.nextCheckTime || viBrief.nextCheckTime,
+      priority: act.priority,
+      reason: act.reason,
+      reasonEn: enAct?.reason || act.reason,
+      triggerData: act.dataBasis,
+      triggerDataEn: enAct?.dataBasis || act.dataBasis,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+  });
 }
 
 export function evaluatePlantingCalendar(
@@ -1052,18 +1075,23 @@ export function evaluateFieldCheckIn(
   }
 
   const nowIso = new Date().toISOString();
+  const viMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, fixes, weather, rootPct, input, false);
+  const enMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, fixes, weather, rootPct, input, true);
+
   const suggestedTasks: FarmTask[] = isPredictionAccurate
     ? []
     : fixes.slice(0, 3).map((fixText, idx) => ({
         id: `FIX_${field.id}_${Date.now()}_${idx}`,
         fieldId: field.id,
         title: fixText.slice(0, 180),
+        titleEn: enMapFixes.titles[idx] || fixText.slice(0, 180),
         scheduledTime: isEn ? 'Within 24 hours' : 'Trong 24 giờ tới',
+        scheduledTimeEn: 'Within 24 hours',
         priority: idx === 0 ? 'HIGH' : 'MEDIUM',
-        reason: isEn
-          ? `Corrective step from field update (${input.observedMoisture} soil · ${input.observedCropHealth} crop)`
-          : `Khắc phục sai lệch thực địa (đất: ${input.observedMoisture} · cây: ${input.observedCropHealth})`,
-        triggerData: `${weather.temp}°C · Root ${rootPct}%`,
+        reason: viMapFixes.reason,
+        reasonEn: enMapFixes.reason,
+        triggerData: viMapFixes.trigger,
+        triggerDataEn: enMapFixes.trigger,
         status: 'pending',
         createdAt: nowIso,
       }));
@@ -1079,3 +1107,103 @@ export function evaluateFieldCheckIn(
     suggestedTasks,
   };
 }
+
+function evaluateSuggestedTaskFixes(
+  isPredictionAccurate: boolean,
+  fixes: string[],
+  weather: WeatherObservation,
+  rootPct: number,
+  input: FieldCheckInInput,
+  asEnglish: boolean
+) {
+  const moistMapVi: Record<string, string> = { dry: 'khô', balanced: 'cân bằng', wet: 'ẩm ướt' };
+  const healthMapVi: Record<string, string> = { healthy: 'khỏe', stressed: 'căng thẳng', pest_risk: 'nguy cơ sâu bệnh' };
+  return {
+    titles: isPredictionAccurate ? [] : fixes.slice(0, 3).map((s) => s.slice(0, 180)),
+    reason: asEnglish
+      ? `Corrective step from field update (${input.observedMoisture} soil · ${input.observedCropHealth} crop)`
+      : `Khắc phục sai lệch thực địa (đất: ${moistMapVi[input.observedMoisture] || input.observedMoisture} · cây: ${healthMapVi[input.observedCropHealth] || input.observedCropHealth})`,
+    trigger: asEnglish
+      ? `${weather.temp}°C · Root moisture ${rootPct}%`
+      : `${weather.temp}°C · Ẩm tầng rễ ${rootPct}%`,
+  };
+}
+
+/**
+ * Automatically estimate soil drainage capability from NASA SMAP topsoil moisture vs root-zone
+ * wetness, 7-day GPM rainfall, and local soil catalog characteristics.
+ */
+export function assessSoilDrainageFromEarthData(
+  weather: WeatherObservation | null | undefined,
+  soilType: SoilType | string,
+  earthMetrics?: EarthEnvironmentSnapshot | null,
+  _lang: AppLanguage = 'vi'
+): SoilDrainageEstimate {
+  const smapSurfacePct = Math.round(
+    earthMetrics?.smapModis?.smapSoilMoisturePct ?? (weather?.gwettop ?? 0.54) * 100
+  );
+  const rootZonePct = Math.round((weather?.gwetroot ?? 0.6) * 100);
+  const gpmRain7dMm = Number(
+    (
+      earthMetrics?.smapModis?.gpmPrecipitation7dMm ??
+      Math.max(0, (weather?.rain ?? 2) * 4.5 + ((weather?.historicalBaseline?.avgRain ?? 90) / 30) * 3)
+    ).toFixed(1)
+  );
+
+  // Drop-off ratio compares how fast surface SMAP moisture drops relative to root moisture & recent GPM rain
+  const rainPressure = Math.min(1.5, gpmRain7dMm / 45);
+  const surfaceRetentionGap = rootZonePct - smapSurfacePct; // positive => surface dries faster than deeper profile
+  const dropOffRatio = Number(
+    Math.max(0.1, Math.min(2.5, (1 + surfaceRetentionGap / 45) / Math.max(0.45, smapSurfacePct / 58))).toFixed(2)
+  );
+
+  const soilMeta = SOIL_TYPE_CATALOG.find((s) => s.type === soilType);
+  const baseDrainage = soilMeta?.defaultDrainage || 'moderate';
+
+  let drainage: 'fast' | 'moderate' | 'slow' = baseDrainage;
+  if (
+    smapSurfacePct >= 72 ||
+    (rootZonePct >= 76 && gpmRain7dMm >= 20) ||
+    ['clay', 'acid_sulfate', 'peat_muck'].includes(String(soilType))
+  ) {
+    drainage = smapSurfacePct <= 48 && gpmRain7dMm >= 35 ? 'moderate' : 'slow';
+  } else if (
+    (gpmRain7dMm >= 30 && smapSurfacePct < 52) ||
+    (surfaceRetentionGap >= 10 && smapSurfacePct < 50) ||
+    ['sand', 'sandy_loam', 'gravelly'].includes(String(soilType))
+  ) {
+    drainage = smapSurfacePct >= 75 ? 'moderate' : 'fast';
+  } else if (rainPressure > 0.9 && smapSurfacePct >= 66) {
+    drainage = 'slow';
+  } else if (dropOffRatio >= 1.25 && smapSurfacePct < 55) {
+    drainage = 'fast';
+  }
+
+  const confidence: 'high' | 'medium' = weather?.isRealtimeAvailable || earthMetrics?.smapModis ? 'high' : 'medium';
+
+  const explanationVi =
+    drainage === 'fast'
+      ? `Dữ liệu vệ tinh cho thấy tầng mặt (${smapSurfacePct}%) khô nhanh hơn tầng rễ (${rootZonePct}%) dù mưa 7 ngày đạt ${gpmRain7dMm} mm (hệ số rút ẩm ${dropOffRatio}). Ruộng thoát nước nhanh, ít nguy cơ ngập úng nhưng cần chia nhỏ lần tưới.`
+      : drainage === 'slow'
+      ? `Ẩm độ tầng mặt (${smapSurfacePct}%) và tầng rễ (${rootZonePct}%) duy trì ở mức cao khi mưa 7 ngày là ${gpmRain7dMm} mm (hệ số rút ẩm ${dropOffRatio}). Đất có xu hướng thoát nước chậm — cần làm rãnh tiêu úng đầu bờ.`
+      : `Ẩm tầng mặt (${smapSurfacePct}%) và tầng rễ (${rootZonePct}%) cân bằng ổn định trước lượng mưa 7 ngày ${gpmRain7dMm} mm (hệ số rút ẩm ${dropOffRatio}). Ruộng có tốc độ thoát nước trung bình thuận lợi cho đa số cây trồng.`;
+
+  const explanationEn =
+    drainage === 'fast'
+      ? `Satellite SMAP topsoil moisture (${smapSurfacePct}%) drops rapidly vs root-zone (${rootZonePct}%) despite ${gpmRain7dMm} mm 7-day GPM rainfall (drop-off index ${dropOffRatio}). Field drains fast — low flooding risk, split irrigation into shorter passes.`
+      : drainage === 'slow'
+      ? `Topsoil SMAP (${smapSurfacePct}%) and root-zone moisture (${rootZonePct}%) stay saturated after ${gpmRain7dMm} mm 7-day GPM rain (drop-off index ${dropOffRatio}). Slow drainage detected — clear border drainage ditches.`
+      : `Topsoil SMAP (${smapSurfacePct}%) and root moisture (${rootZonePct}%) remain balanced against ${gpmRain7dMm} mm 7-day GPM rainfall (drop-off index ${dropOffRatio}). Moderate drainage suits most crop rotations.`;
+
+  return {
+    drainage,
+    confidence,
+    smapSurfacePct,
+    rootZonePct,
+    gpmRain7dMm,
+    dropOffRatio,
+    explanationVi,
+    explanationEn,
+  };
+}
+

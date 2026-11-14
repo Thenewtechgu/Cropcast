@@ -10,6 +10,8 @@ import {
   Satellite,
   AlertTriangle,
   Clock,
+  TrendingUp,
+  CheckCircle2,
 } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
 import {
@@ -22,6 +24,7 @@ import { getPlantDisplayName } from '../data/cropTaxonomy';
 import { SatelliteMap } from './SatelliteMap';
 import { computeHarmonizedIndicators } from '../services/rotationEngine';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useViewMode } from '../contexts/ViewModeContext';
 
 interface NasaAnalyticsViewProps {
   field: FieldProfile;
@@ -37,6 +40,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   onOpenMap,
 }) => {
   const { lang, t } = useLanguage();
+  const { isSimpleMode, setViewMode } = useViewMode();
   const [selectedIndicator, setSelectedIndicator] = useState<
     'T2M' | 'PRECTOTCORR' | 'GWETROOT' | 'ALLSKY_SFC_SW_DWN' | 'RH2M'
   >('T2M');
@@ -46,6 +50,19 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthlyData = getCellMonthlyProfile(cell, lang);
   const annualSeries = getCellAnnualSeries2001to2025(cell);
+  const earlyDecade = annualSeries.slice(0, 10);
+  const recentDecade = annualSeries.slice(-10);
+  const earlyAvgTemp =
+    earlyDecade.reduce((sum, pt) => sum + pt.tmeanC, 0) / Math.max(1, earlyDecade.length);
+  const recentAvgTemp =
+    recentDecade.reduce((sum, pt) => sum + pt.tmeanC, 0) / Math.max(1, recentDecade.length);
+  const warmingDeltaC = Number((recentAvgTemp - earlyAvgTemp).toFixed(2));
+  const earlyAvgRain =
+    earlyDecade.reduce((sum, pt) => sum + pt.pptMm, 0) / Math.max(1, earlyDecade.length);
+  const recentAvgRain =
+    recentDecade.reduce((sum, pt) => sum + pt.pptMm, 0) / Math.max(1, recentDecade.length);
+  const rainShiftPct = Math.round(((recentAvgRain - earlyAvgRain) / Math.max(1, earlyAvgRain)) * 100);
+
   const harmonized = computeHarmonizedIndicators(
     field,
     weather,
@@ -244,7 +261,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-0.5 rounded-full">
-              {t('Chuỗi khí hậu 25 năm (2001–2025)', '25-Year Climatology (2001–2025)')}
+              {t('Chuỗi khí hậu 2001–2026', '2001–2026 Climatology')}
             </span>
             <span className="text-xs text-stone-500">
               {t('Vùng', 'Region')} {getLocalizedRegionName(cell.region, lang)}
@@ -265,13 +282,103 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onOpenMap}
-          className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0 self-start md:self-auto"
-        >
-          <Compass className="w-4 h-4" />{' '}
-          {t('Chỉnh vị trí ruộng trên bản đồ', 'Adjust Field on Map')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode(isSimpleMode ? 'detailed' : 'simple')}
+            className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            {isSimpleMode
+              ? t('Mở Biểu đồ Chi tiết NASA', 'Open Detailed NASA Charts')
+              : t('Thu gọn (Đơn giản)', 'Simple View')}
+          </button>
+          <button
+            onClick={onOpenMap}
+            className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+          >
+            <Compass className="w-4 h-4" />{' '}
+            {t('Chỉnh vị trí ruộng trên bản đồ', 'Adjust Field on Map')}
+          </button>
+        </div>
+      </div>
+
+      {/* Climate Change Multi-Year Anomaly & NASA Insights Feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="lg:col-span-6 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-amber-600" />
+              {t('Xu hướng Biến đổi Khí hậu Tại Ruộng (2001–2026)', 'Local Climate Change Trend (2001–2026)')}
+            </h2>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">
+              {warmingDeltaC >= 0 ? `+${warmingDeltaC}°C` : `${warmingDeltaC}°C`}
+            </span>
+          </div>
+          <p className="text-xs text-stone-600 leading-relaxed">
+            {t(
+              `So sánh thập niên gần đây với giai đoạn 2001–2010 tại ${getLocalizedRegionName(cell.region, 'vi')}: nhiệt độ trung bình tăng khoảng ${warmingDeltaC >= 0 ? `+${warmingDeltaC}` : warmingDeltaC}°C và tổng lượng mưa biến động ${rainShiftPct >= 0 ? `+${rainShiftPct}` : rainShiftPct}%. Cần ưu tiên giống chịu nhiệt, tủ gốc giữ ẩm và luân canh cắt sâu bệnh.`,
+              `Comparing recent years against 2001–2010 in ${getLocalizedRegionName(cell.region, 'en')}: mean temperature shifted by ${warmingDeltaC >= 0 ? `+${warmingDeltaC}` : warmingDeltaC}°C and annual precipitation shifted by ${rainShiftPct >= 0 ? `+${rainShiftPct}` : rainShiftPct}%. Heat-tolerant varieties and mulching help buffer extremes.`
+            )}
+          </p>
+          <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[11px] text-stone-500 block">
+                {t('Nhiệt độ TB 2001–2010 → Gần đây', 'Mean Temp 2001–2010 → Recent')}
+              </span>
+              <span className="font-black text-stone-900 font-mono tabular-nums">
+                {earlyAvgTemp.toFixed(1)}°C → {recentAvgTemp.toFixed(1)}°C
+              </span>
+            </div>
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[11px] text-stone-500 block">
+                {t('Biến động mưa theo thập niên', 'Decadal Rainfall Shift')}
+              </span>
+              <span className="font-black text-sky-800 font-mono tabular-nums">
+                {Math.round(earlyAvgRain)} → {Math.round(recentAvgRain)} mm/yr ({rainShiftPct >= 0 ? `+${rainShiftPct}%` : `${rainShiftPct}%`})
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-6 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
+              <Satellite className="w-4 h-4 text-emerald-700" />
+              {t('Nguồn Dữ liệu Vệ tinh & Khí hậu Tích hợp', 'Integrated NASA & Earth Telemetry Feed')}
+            </h2>
+            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              2001–2026
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            {[
+              {
+                name: 'NASA POWER Daily',
+                role: t('Nhiệt độ, bức xạ, gió hằng ngày (2001–2026)', 'Daily meteorology & radiation (2001–2026)'),
+              },
+              {
+                name: 'NASA GPM & SMAP',
+                role: t('Mưa vệ tinh & ẩm tầng mặt ước tính thoát nước', 'Satellite rainfall & topsoil drainage check'),
+              },
+              {
+                name: 'PRISM Climate',
+                role: t('Điểm sương & sức hút bốc hơi (VPD)', 'Dew point & vapor pressure deficit (VPD)'),
+              },
+              {
+                name: 'OCO-2 & GRACE-FO',
+                role: t('Quang hợp tán lá & trữ lượng nước ngầm', 'Canopy photosynthesis & groundwater trend'),
+              },
+            ].map((src) => (
+              <div key={src.name} className="p-2.5 bg-stone-50 rounded-xl border border-stone-200 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-stone-900">{src.name}</div>
+                  <div className="text-[11px] text-stone-500">{src.role}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Geospatial Satellite Map + Layer Overlays */}
@@ -340,34 +447,36 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         </div>
       </div>
 
-      {/* 25-Year Historical Climate & Crop Yield Summary (2001–2025) */}
+      {/* Historical Climate & Crop Yield Summary (Detailed Mode) */}
+      {!isSimpleMode && (
+      <>
       <div className="bg-white rounded-2xl border border-stone-200 p-5 space-y-4 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
           <div>
             <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
               <Clock className="w-4 h-4 text-emerald-700" />
               {t(
-                'Chuỗi khí hậu & Năng suất cây trồng 25 năm (2001–2025)',
-                '25-Year Climate & Crop Yield Record (2001–2025)'
+                'Chuỗi khí hậu & Năng suất cây trồng (2001–2026)',
+                'Historical Climate & Crop Yield Record (2001–2026)'
               )}
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
               {t(
                 `Chỉ số khí hậu thực tế và năng suất tham chiếu cho ruộng ${field.name} (${getPlantDisplayName(field.crop.name, 'vi')}).`,
-                `25-year historical metrics and yield baseline tailored for ${field.name} (${getPlantDisplayName(field.crop.name, 'en')}).`
+                `Historical metrics and yield baseline tailored for ${field.name} (${getPlantDisplayName(field.crop.name, 'en')}).`
               )}
             </p>
           </div>
           <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 self-start sm:self-auto">
-            2001–2025 ({annualSeries.length} {t('năm', 'yrs')})
+            2001–2026 ({annualSeries.length} {t('năm', 'yrs')})
           </span>
         </div>
 
-        {/* Key 25-year numerical indicators + practical field impact */}
+        {/* Key 26-year numerical indicators + practical field impact */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-1">
             <span className="text-[11px] font-semibold text-stone-500 block">
-              {t('Điểm sương TB (25 năm)', 'Mean Dew Point (25-yr)')}
+              {t('Điểm sương TB (26 năm)', 'Mean Dew Point (26-yr)')}
             </span>
             <div className="text-lg font-black text-stone-900 font-mono tabular-nums">
               {cell.climatology21Yr.avgDewPointC ?? 20.5}°C
@@ -397,7 +506,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 
           <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-1">
             <span className="text-[11px] font-semibold text-emerald-900 block">
-              {t('Năng suất TB 25 năm', '25-Year Baseline Yield')}
+              {t('Năng suất TB 26 năm', '26-Year Baseline Yield')}
             </span>
             <div className="text-lg font-black text-emerald-950 font-mono tabular-nums">
               {cell.climatology21Yr.avgRiceYieldTonHa ?? 5.6} {t('tấn/ha', 't/ha')}
@@ -412,7 +521,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 
           <div className="p-3.5 rounded-xl bg-sky-50/60 border border-sky-200 space-y-1">
             <span className="text-[11px] font-semibold text-sky-900 block">
-              {t('Hiện tại vs Nền 25 năm', 'Today vs. 25-Yr Avg')}
+              {t('Hiện tại vs Nền 26 năm', 'Today vs. 26-Yr Avg')}
             </span>
             <div className="text-lg font-black text-sky-950 font-mono tabular-nums">
               {weather.temp}°C / {cell.climatology21Yr.avgTemp}°C
@@ -421,26 +530,29 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               {weather.temp - cell.climatology21Yr.avgTemp >= 2
                 ? t(
                     'Đang ấm hơn trung bình nhiều năm — chú ý bổ sung ẩm độ vùng rễ.',
-                    'Warmer than 25-yr norm — monitor root-zone moisture closely.'
+                    'Warmer than 26-yr norm — monitor root-zone moisture closely.'
                   )
                 : t(
-                    'Nhiệt độ sát mức trung bình 25 năm, thuận lợi cho sinh trưởng ổn định.',
-                    'Near the 25-yr norm, supporting steady crop development.'
+                    'Nhiệt độ sát mức trung bình 26 năm, thuận lợi cho sinh trưởng ổn định.',
+                    'Near the 26-yr norm, supporting steady crop development.'
                   )}
             </p>
           </div>
         </div>
 
-        {/* Compact 2001-2025 Annual Trend Strip */}
+        {/* Compact 2001-2026 Annual Trend Strip */}
         <div className="pt-2">
           <div className="flex items-center justify-between text-[11px] text-stone-500 mb-2">
             <span className="font-semibold text-stone-700">
-              {t('Biến động nhiệt độ TB & Năng suất từng năm (2001–2025)', 'Annual Mean Temp & Yield Index (2001–2025)')}
+              {t('Biến động nhiệt độ TB & Năng suất từng năm (2001–2026)', 'Annual Mean Temp & Yield Index (2001–2026)')}
             </span>
             <span>{t('Rê chuột vào từng năm để xem số liệu', 'Hover each year for exact metrics')}</span>
           </div>
           <div className="overflow-x-auto pb-1">
-            <div className="min-w-[620px] grid grid-cols-[repeat(25,minmax(0,1fr))] gap-1 h-24 items-end border-b border-stone-200 pb-1">
+            <div
+              className="min-w-[620px] grid gap-1 h-24 items-end border-b border-stone-200 pb-1"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, annualSeries.length)}, minmax(0, 1fr))` }}
+            >
               {annualSeries.map((pt) => {
                 const hPct = Math.min(100, Math.max(20, Math.round((pt.yieldIndexPct / 120) * 100)));
                 return (
@@ -463,7 +575,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               <span>2007</span>
               <span>2013</span>
               <span>2019</span>
-              <span>2025</span>
+              <span>{annualSeries[annualSeries.length - 1]?.year ?? 2026}</span>
             </div>
           </div>
         </div>
@@ -518,8 +630,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500">
               {t(
-                'Số liệu khí hậu trung bình 25 năm (2001–2025) tại điểm lưới gần thửa ruộng nhất',
-                '25-year mean climate series (2001–2025) at the nearest climate grid point'
+                'Số liệu khí hậu trung bình 26 năm (2001–2026) tại điểm lưới gần thửa ruộng nhất',
+                '26-year mean climate series (2001–2026) at the nearest climate grid point'
               )}
             </p>
           </div>
@@ -678,6 +790,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

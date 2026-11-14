@@ -41,8 +41,21 @@ export type SeedFamilyId =
   | 'cucurbitaceae'
   | 'other_perennial';
 
+export type ViewMode = 'simple' | 'detailed';
+
+export interface SoilDrainageEstimate {
+  drainage: 'fast' | 'moderate' | 'slow';
+  confidence: 'high' | 'medium';
+  smapSurfacePct: number;
+  rootZonePct: number;
+  gpmRain7dMm: number;
+  dropOffRatio: number;
+  explanationVi: string;
+  explanationEn: string;
+}
+
 export interface AnnualClimatePoint {
-  year: number; // 2001..2025
+  year: number; // 2001..2026
   tmeanC: number;
   tminC: number;
   tmaxC: number;
@@ -303,10 +316,14 @@ export interface FarmTask {
   ownerId?: string;
   fieldId: string;
   title: string;
+  titleEn?: string;
   scheduledTime: string;
+  scheduledTimeEn?: string;
   priority: 'HIGH' | 'MEDIUM' | 'LOW';
   reason: string;
+  reasonEn?: string;
   triggerData: string;
+  triggerDataEn?: string;
   status: 'pending' | 'completed' | 'postponed' | 'skipped';
   createdAt: string;
   farmerNote?: string;

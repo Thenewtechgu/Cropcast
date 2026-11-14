@@ -8,7 +8,12 @@ import {
   EarthEnvironmentSnapshot,
 } from '../types';
 import { pickBestRotationStrategy } from './rotationEngine';
-import { analyzeFieldAgronomy, getSoilLabel, getDrainageLabel } from './agronomyEngine';
+import {
+  analyzeFieldAgronomy,
+  assessSoilDrainageFromEarthData,
+  getSoilLabel,
+  getDrainageLabel,
+} from './agronomyEngine';
 import { resolveCropBotanicalProfile } from '../data/cropTaxonomy';
 import type { AppLanguage } from '../contexts/LanguageContext';
 
@@ -32,6 +37,21 @@ export interface AdvisorApiResponse {
   message?: string;
 }
 
+const OFF_TOPIC_PATTERNS = [
+  /\b(bitcoin|crypto|ethereum|forex|chứng khoán|cổ phiếu|stock market|xổ số|lô đề|cá độ|casino)\b/i,
+  /\b(python|javascript|react code|html code|c\+\+|java code|lập trình|viết code|sql query)\b/i,
+  /\b(bóng đá|world cup|chính trị|bầu cử|bạn là ai|who are you|ca sĩ|phim ảnh|bói toán|tử vi|nấu ăn|công thức nấu)\b/i,
+  /\b(bài tập toán|giải phương trình|solve x|write a poem|viết thơ tình)\b/i,
+];
+
+const AGRI_DOMAIN_HINTS = [
+  'ruộng', 'đất', 'cây', 'tưới', 'phân', 'bón', 'lúa', 'ngô', 'rau', 'dưa', 'lạc', 'đậu',
+  'cà chua', 'nước', 'ẩm', 'mưa', 'nắng', 'lạnh', 'rét', 'sâu', 'bệnh', 'nấm', 'lá', 'rễ',
+  'luân canh', 'mùa vụ', 'thoát nước', 'ngập', 'úng', 'mặn', 'phèn', 'nasa', 'smap', 'gpm',
+  'crop', 'field', 'soil', 'water', 'irrigat', 'fertiliz', 'rice', 'maize', 'leaf', 'leaves',
+  'pest', 'fung', 'rotat', 'drain', 'rain', 'weather', 'climate', 'plant', 'harvest', 'seed',
+];
+
 function buildLocalAgronomyReply(
   userMessage: string,
   field: FieldProfile,
@@ -39,7 +59,7 @@ function buildLocalAgronomyReply(
   earthMetrics?: EarthEnvironmentSnapshot,
   language: AppLanguage = 'vi'
 ): string {
-  const q = userMessage.toLowerCase();
+  const q = userMessage.toLowerCase().trim();
   const isEn = language === 'en';
   const fieldName = field?.name || (isEn ? 'your field' : 'thửa ruộng của bạn');
   const cropName = field?.crop?.name || (isEn ? 'current crop' : 'cây trồng hiện tại');
@@ -61,6 +81,110 @@ function buildLocalAgronomyReply(
   const grace = earthMetrics?.groundwaterAnomalyGrace;
   const oco2 = earthMetrics?.carbonFluxOco2;
   const ghg = earthMetrics?.greenhouseGasEdgar;
+
+  // 1. Strict Agricultural Domain Guardrail (reject off-topic prompts without hallucination)
+  const hasAgriKeyword = AGRI_DOMAIN_HINTS.some((kw) => q.includes(kw));
+  const isOffTopic = OFF_TOPIC_PATTERNS.some((rx) => rx.test(q)) && !hasAgriKeyword;
+  if (isOffTopic) {
+    if (isEn) {
+      return [
+        `### Agricultural Assistant Scope Notice`,
+        `I specialize strictly in **agronomy, field care for "${fieldName}" (${cropName}), soil & water diagnostics, and NASA Earth climate data**.`,
+        `- **What I can help with right now:** Watering timing, soil drainage assessment, leaf yellowing/reddening or pest troubleshooting, fertilizer scheduling, and cross-family crop rotation.`,
+        `- **Why:** Keeping advice focused on your live field profile (**${soilLabel}**, root moisture **${rootPct}%**) prevents off-topic errors.`,
+      ].join('\n');
+    }
+    return [
+      `### Phạm vi Hỗ trợ Nông nghiệp của CropCast`,
+      `Tôi chỉ hỗ trợ chuyên sâu về **kỹ thuật canh tác cho "${fieldName}" (${cropName}), dinh dưỡng đất–nước, phòng trừ sâu bệnh và dữ liệu khí hậu NASA**.`,
+      `- **Bà con có thể hỏi ngay về:** Hôm nay có nên tưới hay bón phân không, cách xử lý vàng/đỏ lá, ước tính độ thoát nước đất, hoặc chọn cây luân canh vụ sau.`,
+      `- **Lý do:** Tập trung đúng dữ liệu thực địa (**${soilLabel}**, ẩm tầng rễ **${rootPct}%**) giúp đưa ra hành động chính xác và an toàn cho mùa vụ.`,
+    ].join('\n');
+  }
+
+  // 2. Greeting / initial prompt response
+  if (/^(xin\s*chào|chào|hello|hi|hey|alo|good\s*(morning|afternoon|evening))\b/i.test(q) && q.length < 48) {
+    if (isEn) {
+      return [
+        `### Field Assistant Ready — "${fieldName}" (${cropName})`,
+        `- **Live snapshot:** Temp **${temp}°C**, Root moisture **${rootPct}%**, Topsoil **${topPct}%**, Rain **${rain} mm**, Soil **${soilLabel}** (${drainageLabel}).`,
+        `- **What to ask next:** Tap any quick chip above — e.g. irrigation timing, why leaves turn red/yellow, soil drainage capability, or next-season rotation.`,
+      ].join('\n');
+    }
+    return [
+      `### Trợ lý Canh tác Sẵn sàng — "${fieldName}" (${cropName})`,
+      `- **Tình trạng hiện tại:** Nhiệt độ **${temp}°C**, Ẩm tầng rễ **${rootPct}%**, Tầng mặt **${topPct}%**, Mưa **${rain} mm**, **${soilLabel}** (${drainageLabel}).`,
+      `- **Gợi ý câu hỏi:** Bà con có thể bấm nút gợi ý bên trên để hỏi lịch tưới hôm nay, nguyên nhân **lá bị đỏ/vàng**, ước tính **thoát nước đất**, hoặc kế hoạch **luân canh vụ tới**.`,
+    ].join('\n');
+  }
+
+  // 3. Specific leaf symptom / disease diagnostics (red leaf, yellowing, leaf curl, wilt)
+  if (
+    q.includes('đỏ lá') ||
+    q.includes('lá đỏ') ||
+    q.includes('vàng lá') ||
+    q.includes('lá vàng') ||
+    q.includes('xoăn lá') ||
+    q.includes('cháy lá') ||
+    q.includes('héo') ||
+    q.includes('thối rễ') ||
+    q.includes('red leaf') ||
+    q.includes('leaves turn red') ||
+    q.includes('yellow') ||
+    q.includes('wilt') ||
+    q.includes('curl')
+  ) {
+    const isRedLeaf = q.includes('đỏ') || q.includes('tím') || q.includes('red') || q.includes('purple');
+    if (isEn) {
+      return [
+        `### Leaf Symptom Diagnosis for "${fieldName}" (${cropName} — ${familyLabel})`,
+        isRedLeaf
+          ? `- **Why leaves turn red/purplish:** At **${temp}°C** with root moisture **${rootPct}%** on **${soilLabel}**, leaf reddening (anthocyanin buildup) is commonly triggered by **(1) cool weather or wet compacted roots blocking Phosphorus (P) uptake**, **(2) low soil pH (${field.soilCharacteristics?.ph ?? 'untested'})**, or **(3) early sap-sucking mite/leafhopper stress**.`
+          : `- **Why leaves turn yellow or wilt:** With **${rootPct}%** root wetness and **${humidity}%** air humidity, yellowing lower leaves usually mean root hypoxia or nitrogen leaching, whereas pale young shoots indicate iron/zinc lock-up or heat stress.`,
+        `- **What to do right now (Step-by-step):**`,
+        `  1. **Check roots first:** Gently lift 1 affected **${cropName}** plant. If roots are dark/brown with **${rootPct}%** moisture, open drainage furrows immediately and hold Urea.`,
+        `  2. **Restore nutrient uptake:** ${isRedLeaf ? 'Apply warm-weather foliar **Phosphorus + Potassium + humic acid** in late afternoon (16:30–17:30) and lime/bio-compost if soil is acidic.' : 'Drain excess standing water first, then apply balanced foliar micronutrients + split N/K only once soil drains.'}`,
+        `  3. **Inspect undersides:** Check under leaves for spider mites, thrips, or aphids and treat early with biological neem/abamectin if present.`,
+      ].join('\n');
+    }
+    return [
+      `### Chẩn đoán Triệu chứng Lá trên "${fieldName}" (${cropName} — ${familyLabel})`,
+      isRedLeaf
+        ? `- **Vì sao cây bị đỏ/tím lá:** Với nền nhiệt **${temp}°C** và ẩm tầng rễ **${rootPct}%** trên **${soilLabel}**, hiện tượng đỏ lá (tích tụ sắc tố anthocyanin) thường do **(1) đất lạnh/bí rễ hoặc rễ yếu làm cây không hút được Lân (P)**, **(2) đất bị chua/phèn (pH hiện tại: ${field.soilCharacteristics?.ph ?? 'chưa đo'})**, hoặc **(3) nhện đỏ / rầy chích hút sớm**.`
+        : `- **Vì sao lá bị vàng hoặc héo:** Với ẩm tầng rễ **${rootPct}%** và ẩm không khí **${humidity}%**, vàng từ lá già thường do rễ úng thiếu oxy hoặc rửa trôi đạm; còn vàng từ đọt non thường do thiếu vi lượng sắt/kẽm hoặc sốc nắng.`,
+      `- **Việc cần làm ngay (Kèm lý do):**`,
+      `  1. **Kiểm tra bộ rễ trước:** Nhổ nhẹ 1 cây **${cropName}** bị nặng xem rễ trắng hay thâm đen. Nếu ẩm rễ cao (**${rootPct}%**) hoặc **${drainageLabel}**, khơi rãnh thoát nước ngay để rễ thở lại bình thường.`,
+      `  2. **Khắc phục hấp thu dinh dưỡng:** ${isRedLeaf ? 'Phun nhẹ qua lá **phân giàu Lân dễ tiêu + Kali + Axit Humic** vào chiều mát (16:30–17:30) để lá quang hợp lại; nếu đất phèn/chua, rải bổ sung vôi nông nghiệp hoặc lân nung chảy quanh rãnh.' : 'Chỉ bón phân khi đất đã ráo nước; ưu tiên phân hữu cơ vi sinh + NPK cân đối chia nhỏ đợt.'}`,
+      `  3. **Soi mặt dưới lá:** Dùng mắt thường kiểm tra xem có nhện đỏ li ti hoặc bọ trĩ gây xoăn/cháy mép lá hay không để xử lý sớm theo ngưỡng.`,
+    ].join('\n');
+  }
+
+  // 4. Soil drainage estimation query (NASA SMAP + GPM assessment)
+  if (
+    q.includes('thoát nước') ||
+    q.includes('úng') ||
+    q.includes('ngập') ||
+    q.includes('smap') ||
+    q.includes('gpm') ||
+    q.includes('drainage') ||
+    q.includes('waterlog')
+  ) {
+    const est = assessSoilDrainageFromEarthData(weather, field.soilType, earthMetrics, language);
+    if (isEn) {
+      return [
+        `### NASA SMAP & GPM Soil Drainage Assessment — "${fieldName}"`,
+        `- **Estimated drainage class:** **${getDrainageLabel(est.drainage, 'en')}** (confidence: **${est.confidence}**).`,
+        `- **Satellite readings:** SMAP topsoil moisture **${est.smapSurfacePct}%**, root-zone **${est.rootZonePct}%**, 7-day GPM rainfall **${est.gpmRain7dMm} mm**, drop-off index **${est.dropOffRatio}**.`,
+        `- **Why & what to do:** ${est.explanationEn}`,
+      ].join('\n');
+    }
+    return [
+      `### Đánh giá Khả năng Thoát nước Đất từ NASA (SMAP & GPM) — "${fieldName}"`,
+      `- **Mức thoát nước ước tính:** **${getDrainageLabel(est.drainage, 'vi')}** (độ tin cậy: **${est.confidence === 'high' ? 'Cao' : 'Trung bình'}**).`,
+      `- **Chỉ số vệ tinh:** Ẩm tầng mặt SMAP **${est.smapSurfacePct}%**, ẩm vùng rễ **${est.rootZonePct}%**, lượng mưa 7 ngày GPM **${est.gpmRain7dMm} mm**, hệ số rút ẩm **${est.dropOffRatio}**.`,
+      `- **Lý do & hành động:** ${est.explanationVi}`,
+    ].join('\n');
+  }
 
   const cropSpecificPestTipVi =
     botanical.botanicalFamily === 'Cucurbitaceae'

@@ -41,7 +41,7 @@ export function buildClimaticBaselineWeather(lat: number, lon: number): WeatherO
     vpdMinHpa: m.VPDMIN,
     vpdMaxHpa: m.VPDMAX,
     et0MmDay: et0Base,
-    observationDate: `Nền khí hậu tháng ${currentMonthIdx + 1} (2001–2025)`,
+    observationDate: `Nền khí hậu tháng ${currentMonthIdx + 1} (2001–2026)`,
     isRealtimeAvailable: false,
     source: 'ESTIMATED_CLIMATE',
     historicalBaseline: {

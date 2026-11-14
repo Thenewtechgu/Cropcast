@@ -107,8 +107,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-4 h-4 text-emerald-600" />
             {t(
-              'Đánh giá xác suất rủi ro lịch sử 25 năm (2001–2025)',
-              '25-Year Historical Risk Assessment (2001–2025)'
+              'Đánh giá rủi ro thời vụ theo dữ liệu lịch sử (2001–2026)',
+              'Historical Seasonal Risk Assessment (2001–2026)'
             )}
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
@@ -119,8 +119,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
             {t(
-              `Dựa trên 25 năm quan trắc (2001–2025) tại khu vực ${getLocalizedRegionName(activeField.province, 'vi')}. Đánh giá số năm xuất hiện điều kiện bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
-              `Based on 25 years of historical climate observations (2001–2025) in ${getLocalizedRegionName(activeField.province, 'en')}, counting adverse years in sensitive crop growth windows.`
+              `Tổng hợp dữ liệu quan trắc từ 2001–2026 tại khu vực ${getLocalizedRegionName(activeField.province, 'vi')} để ước tính tỷ lệ thuận lợi hay gặp bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
+              `Based on 2001–2026 climate records in ${getLocalizedRegionName(activeField.province, 'en')}, evaluating favorable odds across sensitive crop growth windows.`
             )}
           </p>
         </div>
@@ -193,10 +193,10 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           </div>
         </div>
         <p className="text-[11px] text-stone-600 border-t border-stone-200/80 pt-2">
-          <strong>{t('Ý nghĩa chỉ số "X/25 năm bất lợi":', 'Meaning of "X/25 adverse yrs":')}</strong>{' '}
+          <strong>{t('Cách đọc chỉ số thuận lợi:', 'How favorability % works:')}</strong>{' '}
           {t(
-            'Đếm số năm trong chuỗi 25 năm (2001–2025) xuất hiện rét đậm, nắng nóng hoặc úng/hạn rơi đúng giai đoạn nhạy cảm nếu gieo vào tháng đó.',
-            'Counts how many years out of 2001–2025 experienced cold snaps, heatwaves, or floods/drought during sensitive growth stages when planted in that month.'
+            'Tỷ lệ phần trăm phản ánh mức độ an toàn qua các mùa vụ lịch sử (2001–2026) dựa trên tần suất rét đậm, nắng nóng hoặc úng/hạn rơi đúng giai đoạn nhạy cảm.',
+            'Percentage reflects historical seasonal safety (2001–2026) based on how rarely cold snaps, heatwaves, or flood/drought hit sensitive growth stages.'
           )}
         </p>
       </div>
@@ -252,8 +252,9 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
                     ? t('Cần theo dõi', 'Caution')
                     : t('Rủi ro cao', 'High Risk')}
                 </div>
-                <div className="text-[10px] text-stone-500">
-                  {ev.adverseYearsCount}/25 {t('năm bất lợi', 'adverse yrs')}
+                <div className="text-[10px] font-medium text-stone-600">
+                  {Math.max(5, Math.min(99, Math.round(((25 - ev.adverseYearsCount) / 25) * 100)))}%{' '}
+                  {t('thuận lợi', 'favorable')}
                 </div>
               </button>
             );
@@ -269,8 +270,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
               <CalendarDays className="w-5 h-5 text-emerald-700" />
               <h3 className="font-bold text-base text-stone-900">
                 {t(
-                  `Thống kê 25 năm (2001–2025): Xuống giống vào Tháng ${activeDetail.month}`,
-                  `25-Year Climate Stats (2001–2025): Planting in Month ${activeDetail.month}`
+                  `Phân tích thời vụ (2001–2026): Xuống giống vào Tháng ${activeDetail.month}`,
+                  `Seasonal Climate Stats (2001–2026): Planting in Month ${activeDetail.month}`
                 )}
               </h3>
             </div>
@@ -290,10 +291,14 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
 
           <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs text-stone-800">
             <div className="font-bold text-emerald-950 text-sm">
-              {t(
-                `"Trong 25 năm (2001–2025), có ${activeDetail.adverseYearsCount} năm xuất hiện trung bình ${activeDetail.adverseDaysAvg} ngày có ${activeDetail.thresholdCondition}."`,
-                `"Across 25 years (2001–2025), ${activeDetail.adverseYearsCount} years averaged ${activeDetail.adverseDaysAvg} days with ${activeDetail.thresholdCondition}."`
-              )}
+              {(() => {
+                const riskPct = Math.round((activeDetail.adverseYearsCount / 25) * 100);
+                const favorablePct = Math.max(5, Math.min(99, 100 - riskPct));
+                return t(
+                  `Mức độ thuận lợi ~${favorablePct}% (rủi ro thời tiết ~${riskPct}%, trung bình ${activeDetail.adverseDaysAvg} ngày/vụ cần lưu ý: ${activeDetail.thresholdCondition}).`,
+                  `~${favorablePct}% seasonal favorability (~${riskPct}% weather risk, averaging ${activeDetail.adverseDaysAvg} sensitive days with ${activeDetail.thresholdCondition}).`
+                );
+              })()}
             </div>
             <p className="text-stone-700 leading-relaxed font-normal">
               {activeDetail.summaryExplanation}
@@ -303,19 +308,22 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
               <span className="text-stone-400 text-[10px] block">
-                {t('Mẫu dữ liệu khảo sát:', 'Sample window:')}
+                {t('Chuỗi dữ liệu khảo sát:', 'Historical baseline:')}
               </span>
               <span className="font-bold text-stone-800">
-                {t('25 năm liên tục (2001 – 2025)', '25 continuous years (2001–2025)')}
+                {t('Liên tục 2001 – 2026', 'Continuous 2001 – 2026')}
               </span>
             </div>
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
               <span className="text-stone-400 text-[10px] block">
-                {t('Số năm gặp sự cố bất lợi:', 'Adverse years:')}
+                {t('Xác suất thuận lợi / rủi ro:', 'Favorable vs. Risk odds:')}
               </span>
-              <span className="font-bold text-amber-700">
-                {activeDetail.adverseYearsCount} / 25 {t('năm', 'yrs')} (
-                {((activeDetail.adverseYearsCount / 25) * 100).toFixed(0)}%)
+              <span className="font-bold text-emerald-800">
+                {Math.max(5, Math.min(99, 100 - Math.round((activeDetail.adverseYearsCount / 25) * 100)))}%{' '}
+                {t('thuận lợi', 'favorable')} ·{' '}
+                <span className="text-amber-700">
+                  {Math.round((activeDetail.adverseYearsCount / 25) * 100)}% {t('rủi ro', 'risk')}
+                </span>
               </span>
             </div>
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
@@ -328,8 +336,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
 
           <div className="text-[11px] text-stone-400 italic">
             {t(
-              '* Lưu ý thực địa: Lịch gieo trồng phản ánh xác suất rủi ro khí hậu lịch sử 25 năm, cần kết hợp quan sát thực tế tại ruộng.',
-              '* Agronomic note: Planting calendar reflects 25-year historical climate probability and should be paired with local field checks.'
+              '* Lưu ý thực địa: Lịch gieo trồng phản ánh xác suất khí hậu lịch sử 2001–2026, cần kết hợp quan sát thực tế tại ruộng.',
+              '* Agronomic note: Planting calendar reflects 2001–2026 climate probability and should be paired with local field checks.'
             )}
           </div>
         </div>

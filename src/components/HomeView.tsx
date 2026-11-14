@@ -16,6 +16,13 @@ import {
   isWithinVietnamTerritory,
 } from '../data/nasaVietnamGrid';
 import {
+  VIETNAM_PROVINCES,
+  findDistrictInProvince,
+  findNearestAdminLocation,
+  findProvinceByName,
+  getDistrictsForProvince,
+} from '../data/vietnamLocations';
+import {
   SEED_FAMILIES,
   getFamilyDisplayName,
   getFamilyShortTag,
@@ -54,8 +61,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
   weather,
 }) => {
   const { lang, t } = useLanguage();
+  const [sandboxProvince, setSandboxProvince] = useState('Hà Nội');
+  const [sandboxDistrict, setSandboxDistrict] = useState('');
   const [sandboxLat, setSandboxLat] = useState(21.03);
   const [sandboxLon, setSandboxLon] = useState(105.85);
+  const [mapZoom, setMapZoom] = useState(12);
+  const [flyToTrigger, setFlyToTrigger] = useState(0);
   const [sandboxFamily, setSandboxFamily] = useState<SeedFamilyId>('poaceae');
   const [sandboxPlantIdx, setSandboxPlantIdx] = useState(0);
   const [sandboxPriorities, setSandboxPriorities] = useState<FarmerPriorityId[]>([
@@ -207,6 +218,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
         }
         setSandboxLat(nextLat);
         setSandboxLon(nextLon);
+        const nearestAdmin = findNearestAdminLocation(nextLat, nextLon);
+        setSandboxProvince(nearestAdmin.province.name);
+        setSandboxDistrict(nearestAdmin.district?.name || '');
+        setMapZoom(14);
+        setFlyToTrigger((v) => v + 1);
         setGpsStatus(
           t(
             'Đã định vị theo GPS thiết bị và tự động ghép dữ liệu khí hậu vùng gần nhất.',
@@ -318,18 +334,81 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Interactive Satellite Map */}
+          {/* Left: Province/District Cascade + Interactive Satellite Map */}
           <div className="lg:col-span-6 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+              <div>
+                <label className="text-stone-700 font-bold block mb-1">
+                  {t('Tỉnh / Thành phố', 'Province / City')}
+                </label>
+                <select
+                  value={sandboxProvince}
+                  onChange={(e) => {
+                    const nextProv = e.target.value;
+                    setSandboxProvince(nextProv);
+                    setSandboxDistrict('');
+                    setLocationAlert(null);
+                    const provObj = findProvinceByName(nextProv);
+                    if (provObj) {
+                      setSandboxLat(provObj.lat);
+                      setSandboxLon(provObj.lon);
+                      setMapZoom(11);
+                      setFlyToTrigger((v) => v + 1);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-semibold text-base sm:text-xs"
+                >
+                  {VIETNAM_PROVINCES.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {lang === 'en' ? p.nameEn : p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-stone-700 font-bold block mb-1">
+                  {t('Quận / Huyện / Thị xã', 'District / Town')}
+                </label>
+                <select
+                  value={sandboxDistrict}
+                  onChange={(e) => {
+                    const nextDist = e.target.value;
+                    setSandboxDistrict(nextDist);
+                    setLocationAlert(null);
+                    const distObj = findDistrictInProvince(sandboxProvince, nextDist);
+                    if (distObj) {
+                      setSandboxLat(distObj.lat);
+                      setSandboxLon(distObj.lon);
+                      setMapZoom(13);
+                      setFlyToTrigger((v) => v + 1);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-semibold text-base sm:text-xs"
+                >
+                  <option value="">{t('-- Chọn Quận/Huyện --', '-- Select District --')}</option>
+                  {getDistrictsForProvince(sandboxProvince).map((d) => (
+                    <option key={d.name} value={d.name}>
+                      {lang === 'en' ? d.nameEn : d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <SatelliteMap
               lat={sandboxLat}
               lon={sandboxLon}
-              zoom={13}
+              zoom={mapZoom}
+              flyToTrigger={flyToTrigger}
               heightClass="h-72"
               interactive={true}
               showNasaGrid={true}
               onLocationChange={(lat, lon) => {
                 setSandboxLat(lat);
                 setSandboxLon(lon);
+                const nearestAdmin = findNearestAdminLocation(lat, lon);
+                setSandboxProvince(nearestAdmin.province.name);
+                setSandboxDistrict(nearestAdmin.district?.name || '');
                 setLocationAlert(null);
               }}
               onInvalidLocation={(reason) => {

@@ -513,8 +513,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
               {t(
-                `Tính toán từ chuỗi khí hậu 25 năm (2001–2025), cân bằng nước và đặc điểm đất của thửa ruộng.`,
-                `Computed from the 25-year climate baseline (2001–2025), water balance, and field soil profile.`
+                `Tính toán từ chuỗi khí hậu 26 năm (2001–2026), cân bằng nước và đặc điểm đất của thửa ruộng.`,
+                `Computed from the 26-year climate baseline (2001–2026), water balance, and field soil profile.`
               )}
             </p>
           </div>

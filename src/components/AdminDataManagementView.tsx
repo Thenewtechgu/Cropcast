@@ -32,6 +32,7 @@ import {
   X,
   Droplets,
   Navigation,
+  Activity,
 } from 'lucide-react';
 import {
   AdminFieldSummary,
@@ -46,14 +47,21 @@ import { auth, BOOTSTRAP_ADMIN_EMAILS, isBootstrapAdminEmail } from '../firebase
 import { FirestoreService } from '../services/firestoreService';
 import {
   AllSourcesSyncSummary,
+  ApiProbeCheckItem,
   executeAllSourcesDataSync,
+  fetchAll233CellsDailyCsv,
+  fetchNasaDailyRange2001ToPresent,
+  generateNasaDailyCsv,
   getWarehouseStatus,
   loadLastAllSourcesSummary,
+  NasaDailyExtractProgress,
+  NasaDailyHistoricalRow,
   NasaSyncProgress,
   previewBatchCsvFilesClient,
   runClientBatchImport,
   setWarehouseActiveVersion,
   setWarehouseAutoSyncEnabled,
+  verifyLiveNasaApis,
 } from '../services/nasaWarehouseService';
 import { CsvQueueStorage, StoredCsvSessionState } from '../services/csvQueueStorage';
 import { ALL_NASA_CELLS, getLocalizedRegionName } from '../data/nasaVietnamGrid';
@@ -468,6 +476,115 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
 
   // Firestore architecture reference copy state
   const [copiedSql, setCopiedSql] = useState(false);
+
+  // Daily Historical Extractor (2001-2026) & Live API Probe state
+  const [extractScope, setExtractScope] = useState<'single' | 'all233'>('single');
+  const [extractCellId, setExtractCellId] = useState(ALL_NASA_CELLS[0]?.cellId || 'NASA_VN_001');
+  const [extractStartDate, setExtractStartDate] = useState('2001-01-01');
+  const [extractEndDate, setExtractEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [extractingDaily, setExtractingDaily] = useState(false);
+  const [extractProgress, setExtractProgress] = useState<NasaDailyExtractProgress | null>(null);
+  const [extractSummary, setExtractSummary] = useState<string | null>(null);
+  const [extractSampleRows, setExtractSampleRows] = useState<NasaDailyHistoricalRow[]>([]);
+  const [probingApis, setProbingApis] = useState(false);
+  const [apiProbeResult, setApiProbeResult] = useState<{
+    checkedAt: string;
+    cellId: string;
+    region: string;
+    items: ApiProbeCheckItem[];
+  } | null>(null);
+
+  const handleRunApiProbe = async () => {
+    const selectedCell = ALL_NASA_CELLS.find((c) => c.cellId === extractCellId) || ALL_NASA_CELLS[0];
+    if (!selectedCell || probingApis) return;
+    setProbingApis(true);
+    setActionErrorMsg(null);
+    try {
+      const res = await verifyLiveNasaApis(selectedCell.lat, selectedCell.lon);
+      setApiProbeResult(res);
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || t('Không thể kiểm tra kết nối API trực tiếp.', 'Unable to probe live APIs.'));
+    } finally {
+      setProbingApis(false);
+    }
+  };
+
+  const handleExtractDaily2001ToPresent = async () => {
+    const selectedCell = ALL_NASA_CELLS.find((c) => c.cellId === extractCellId) || ALL_NASA_CELLS[0];
+    if (!selectedCell || extractingDaily) return;
+    setExtractingDaily(true);
+    setExtractSummary(null);
+    setExtractSampleRows([]);
+    setActionErrorMsg(null);
+    try {
+      const sDate = extractStartDate || '2001-01-01';
+      const eDate = extractEndDate || new Date().toISOString().slice(0, 10);
+
+      if (extractScope === 'all233') {
+        const bulk = await fetchAll233CellsDailyCsv({
+          startDate: sDate,
+          endDate: eDate,
+          onProgress: (p) =>
+            setExtractProgress({
+              percent: p.percent,
+              completedChunks: p.processedCells,
+              totalChunks: p.totalCells,
+              rowsCollected: p.rowsCollected,
+              statusLabel: `${p.currentCellId} (${p.processedCells}/${p.totalCells} ô · Live: ${p.liveApiChunks}, Fallback: ${p.fallbackChunks})`,
+            }),
+        });
+        const blob = new Blob([bulk.csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nasa_daily_ALL_${bulk.totalCells}cells_${sDate}_to_${bulk.actualEndDate}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        const sec = (bulk.elapsedMs / 1000).toFixed(1);
+        setExtractSummary(
+          t(
+            `Đã trích xuất thật ${bulk.rowsCount.toLocaleString('vi-VN')} dòng dữ liệu ngày qua toàn bộ ${bulk.totalCells} ô lưới (${sDate} → ${bulk.actualEndDate}, thời gian ${sec}s · ${bulk.liveApiChunks} cụm API trực tiếp, ${bulk.fallbackChunks} cụm dự phòng) và tải CSV.`,
+            `Extracted ${bulk.rowsCount.toLocaleString('en-US')} daily records across all ${bulk.totalCells} cells (${sDate} → ${bulk.actualEndDate}, ${sec}s · ${bulk.liveApiChunks} live chunks, ${bulk.fallbackChunks} fallback chunks) and downloaded CSV.`
+          )
+        );
+      } else {
+        const res = await fetchNasaDailyRange2001ToPresent(selectedCell.lat, selectedCell.lon, {
+          startDate: sDate,
+          endDate: eDate,
+          onProgress: (p) => setExtractProgress(p),
+        });
+        const csv = generateNasaDailyCsv(res.rows);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nasa_daily_${res.cellId}_${res.actualStartDate}_to_${res.actualEndDate}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        const samples: NasaDailyHistoricalRow[] = [];
+        if (res.rows.length > 0) samples.push(res.rows[0]);
+        if (res.rows.length > 2) samples.push(res.rows[1]);
+        if (res.rows.length > 3) samples.push(res.rows[res.rows.length - 2]);
+        if (res.rows.length > 1) samples.push(res.rows[res.rows.length - 1]);
+        setExtractSampleRows(samples);
+        const sec = (res.elapsedMs / 1000).toFixed(1);
+        setExtractSummary(
+          t(
+            `Đã trích xuất ${res.rows.length.toLocaleString('vi-VN')} ngày dữ liệu thật (${res.actualStartDate} → ${res.actualEndDate}, ${sec}s · ${res.liveApiChunks}/${res.totalChunks} cụm API trực tiếp, ${res.fallbackChunks} cụm dự phòng, bỏ qua ${res.skippedLagDays} ngày -999 độ trễ vệ tinh) cho ô ${res.cellId}.`,
+            `Extracted ${res.rows.length.toLocaleString('en-US')} real daily records (${res.actualStartDate} → ${res.actualEndDate}, ${sec}s · ${res.liveApiChunks}/${res.totalChunks} live chunks, ${res.fallbackChunks} fallback, skipped ${res.skippedLagDays} -999 satellite lag days) for ${res.cellId}.`
+          )
+        );
+      }
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || t('Không thể trích xuất chuỗi dữ liệu ngày.', 'Daily extraction failed.'));
+    } finally {
+      setExtractingDaily(false);
+    }
+  };
 
   const fetchPlatformStats = async () => {
     try {
@@ -938,7 +1055,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
     }
   };
 
-  const handleTriggerSync = async () => {
+  const handleTriggerSync = async (forceRefresh = false) => {
     setSyncing(true);
     setActionErrorMsg(null);
     setSyncMessage(null);
@@ -946,7 +1063,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       active: true,
       phase: 'preparing',
       processedCells: 0,
-      totalCells: 14,
+      totalCells: ALL_NASA_CELLS.length,
       skippedExistingCells: 0,
       updatedCells: 0,
       currentCellId: '...',
@@ -957,10 +1074,15 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       liveApiCells: 0,
       fallbackCells: 0,
       percent: 4,
-      stepDetail: t(
-        'Đang khởi tạo đồng bộ đa nguồn (NASA POWER 2001–2025, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...',
-        'Initializing multi-source sync (NASA POWER 2001–2025, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...'
-      ),
+      stepDetail: forceRefresh
+        ? t(
+            `Đang ép gọi lại toàn bộ ${ALL_NASA_CELLS.length} điểm lưới Việt Nam (2001–2026) trực tiếp từ NASA (bỏ qua cache)...`,
+            `Force re-fetching all ${ALL_NASA_CELLS.length} Vietnam grid points (2001–2026) live from NASA (cache bypassed)...`
+          )
+        : t(
+            'Đang khởi tạo đồng bộ đa nguồn (NASA POWER 2001–2026, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...',
+            'Initializing multi-source sync (NASA POWER 2001–2026, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...'
+          ),
     });
 
     const activeFieldCellIds = Array.from(
@@ -971,7 +1093,8 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       const { syncLog, collectedOverrides, summary } = await executeAllSourcesDataSync(
         activeFieldCellIds,
         (progress) => setSyncProgress(progress),
-        lang
+        lang,
+        { forceRefresh }
       );
 
       setAllSourcesSummary(summary);
@@ -1034,9 +1157,10 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
 
       const liveCount = Number(syncLog.details?.liveApiCells ?? 0);
       const fallbackCount = Number(syncLog.details?.fallbackCells ?? 0);
+      const sec = summary.elapsedMs ? (summary.elapsedMs / 1000).toFixed(1) : '—';
       const doneText = t(
-        `Đã cập nhật toàn bộ dữ liệu! (${summary.powerDailyRecords} điểm POWER hằng ngày, ${summary.powerHistoryMonthlyPoints} điểm 2001–2025, ${summary.cmrGranulesMatched} granule OCO-2/3·GRACE·SMAP·MODIS, ${summary.stacCollectionsCount} GHGx STAC, ${summary.esriServicesOnline}/3 Esri Tile).`,
-        `All data sources updated! (${summary.powerDailyRecords} POWER daily pts, ${summary.powerHistoryMonthlyPoints} 2001–2025 pts, ${summary.cmrGranulesMatched} OCO-2/3·GRACE·SMAP·MODIS granules, ${summary.stacCollectionsCount} GHGx STAC collections, ${summary.esriServicesOnline}/3 Esri layers).`
+        `Đã đồng bộ 2001–2026 (${sec}s · ${liveCount} ô API live / ${fallbackCount} ô dự phòng · ${summary.gridCellsUpdated} ô vừa tải từ NASA, ${summary.gridCellsSkippedExisting} ô dùng cache)! (${summary.powerDailyRecords} điểm ngày gần nhất, ${summary.powerHistoryMonthlyPoints.toLocaleString('vi-VN')} điểm tháng 2001–2026, ${summary.cmrGranulesMatched} granule CMR, ${summary.stacCollectionsCount} GHGx STAC, ${summary.esriServicesOnline}/3 Esri).`,
+        `2001–2026 Sync complete (${sec}s · ${liveCount} live / ${fallbackCount} fallback · ${summary.gridCellsUpdated} freshly fetched, ${summary.gridCellsSkippedExisting} cached)! (${summary.powerDailyRecords} daily pts, ${summary.powerHistoryMonthlyPoints.toLocaleString('en-US')} monthly pts 2001–2026, ${summary.cmrGranulesMatched} CMR granules, ${summary.stacCollectionsCount} GHGx STAC, ${summary.esriServicesOnline}/3 Esri).`
       );
 
       setSyncProgress({
@@ -1501,12 +1625,22 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
           </button>
           <button
             type="button"
-            onClick={handleTriggerSync}
+            onClick={() => handleTriggerSync(false)}
             disabled={syncing}
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? t('Đang cập nhật tất cả nguồn...', 'Updating all data...') : t('Cập nhật toàn bộ dữ liệu', 'Update All Data')}
+            {syncing ? t('Đang đồng bộ...', 'Syncing...') : t('Cập nhật toàn bộ dữ liệu', 'Update All Data')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTriggerSync(true)}
+            disabled={syncing}
+            title={t('Bỏ qua bộ nhớ đệm IndexedDB và gọi lại trực tiếp toàn bộ 233 điểm lưới từ NASA API', 'Bypass IndexedDB cache and re-fetch all 233 grid cells live from NASA API')}
+            className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+          >
+            <Activity className="w-4 h-4" />
+            {t('Lấy lại 233 điểm (Bỏ qua cache)', 'Force Re-Fetch 233 (No Cache)')}
           </button>
         </div>
       </div>
@@ -2475,6 +2609,192 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 {t('Đồng bộ hàng ngày:', 'Daily sync:')} {status?.autoSyncEnabled ? t('ĐANG BẬT', 'ENABLED') : t('ĐANG TẮT', 'DISABLED')}
               </button>
             </div>
+          </div>
+
+          {/* SECTION 0: DAILY HISTORICAL NASA EXTRACTOR (2001 - PRESENT 2026) & API VERIFICATION */}
+          <div className="bg-white rounded-2xl p-5 sm:p-6 border border-emerald-200 shadow-xs space-y-4">
+            <div className="border-b border-stone-100 pb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                  <Download className="w-5 h-5 text-emerald-700" />
+                  {t('Trích xuất Chuỗi Ngày Liên tục NASA · GPM · SMAP · PRISM (2001–2026)', 'Daily Historical Extractor: NASA POWER · GPM · SMAP · PRISM (2001–2026)')}
+                </h2>
+                <p className="text-xs text-stone-500">
+                  {t(
+                    'Trích xuất dữ liệu từng ngày thật từ 01/01/2001 đến hiện tại (tự loại bỏ ngày -999 độ trễ vệ tinh 2–3 ngày gần nhất). Có thể chọn 1 ô lưới (~8 giây) hoặc toàn bộ 233 ô lưới Việt Nam.',
+                    'Extract real daily records from 2001-01-01 to present (automatically skipping -999 satellite lag days). Choose 1 cell (~8s) or all 233 Vietnam cells.'
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRunApiProbe}
+                disabled={probingApis}
+                className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {probingApis ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5 text-emerald-400" />}
+                {probingApis ? t('Đang kiểm tra API...', 'Probing APIs...') : t('Kiểm tra API thực tế ngay', 'Probe Live APIs Now')}
+              </button>
+            </div>
+
+            {apiProbeResult && (
+              <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-xl space-y-2.5 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-stone-900">
+                    {t('Kết quả kiểm tra trực tiếp (không cache) tại:', 'Live uncached API check at:')}{' '}
+                    <span className="font-mono text-emerald-800">{apiProbeResult.cellId}</span> ({getLocalizedRegionName(apiProbeResult.region, lang)})
+                  </span>
+                  <span className="text-[11px] font-mono text-stone-500">
+                    {new Date(apiProbeResult.checkedAt).toLocaleTimeString(locale)}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {apiProbeResult.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`p-2.5 rounded-lg border space-y-1 ${
+                        item.ok ? 'bg-white border-emerald-200' : 'bg-rose-50 border-rose-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-stone-900 text-[11px] truncate">{item.name}</span>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                            item.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          HTTP {item.httpStatus} · {item.latencyMs}ms
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-mono text-stone-500 truncate">{item.endpoint}</div>
+                      <div className="text-[11px] text-emerald-900 font-semibold">{item.dateCoverage}</div>
+                      <div className="text-[10px] font-mono text-stone-700 break-all">{item.sampleValues}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs items-end">
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  {t('Phạm vi trích xuất', 'Extraction Scope')}
+                </label>
+                <select
+                  value={extractScope}
+                  onChange={(e) => setExtractScope(e.target.value as 'single' | 'all233')}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-semibold text-xs"
+                >
+                  <option value="single">{t('1 ô lưới đang chọn (~8 giây)', '1 selected cell (~8s)')}</option>
+                  <option value="all233">{t(`Toàn bộ ${ALL_NASA_CELLS.length} ô lưới Việt Nam`, `All ${ALL_NASA_CELLS.length} Vietnam cells`)}</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  {t('Chọn ô lưới Việt Nam', 'Vietnam Grid Cell')}
+                </label>
+                <select
+                  value={extractCellId}
+                  disabled={extractScope === 'all233'}
+                  onChange={(e) => setExtractCellId(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-mono text-xs disabled:opacity-50"
+                >
+                  {ALL_NASA_CELLS.map((c) => (
+                    <option key={c.cellId} value={c.cellId}>
+                      {c.cellId} · {getLocalizedRegionName(c.region, lang)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  {t('Từ ngày', 'Start Date')}
+                </label>
+                <input
+                  type="date"
+                  min="2001-01-01"
+                  max={extractEndDate}
+                  value={extractStartDate}
+                  onChange={(e) => setExtractStartDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-stone-700 block mb-1">
+                  {t('Đến ngày', 'End Date')}
+                </label>
+                <input
+                  type="date"
+                  min={extractStartDate}
+                  value={extractEndDate}
+                  onChange={(e) => setExtractEndDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 text-xs"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExtractDaily2001ToPresent}
+                disabled={extractingDaily}
+                className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {extractingDaily ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {extractingDaily ? t('Đang tải API NASA...', 'Fetching NASA API...') : t('Trích xuất & Tải Daily CSV', 'Extract & Download CSV')}
+              </button>
+            </div>
+
+            {extractingDaily && extractProgress && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-1.5">
+                <div className="flex justify-between font-bold text-emerald-950 gap-2">
+                  <span className="truncate">{extractProgress.statusLabel}</span>
+                  <span className="shrink-0">{extractProgress.percent}% ({extractProgress.rowsCollected.toLocaleString(locale)} {t('ngày', 'days')})</span>
+                </div>
+                <div className="w-full h-2 bg-emerald-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-600 rounded-full transition-all" style={{ width: `${Math.max(4, extractProgress.percent)}%` }} />
+                </div>
+              </div>
+            )}
+
+            {extractSummary && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>{extractSummary}</span>
+              </div>
+            )}
+
+            {extractSampleRows.length > 0 && (
+              <div className="overflow-x-auto border border-stone-200 rounded-xl text-[11px]">
+                <table className="w-full text-left">
+                  <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-bold">
+                    <tr>
+                      <th className="p-2">{t('Ngày', 'Date')}</th>
+                      <th className="p-2">T2M (°C)</th>
+                      <th className="p-2">GPM Rain (mm)</th>
+                      <th className="p-2">SMAP Top (%)</th>
+                      <th className="p-2">Root (%)</th>
+                      <th className="p-2">VPD Max (hPa)</th>
+                      <th className="p-2">{t('Nguồn', 'Source')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 font-mono">
+                    {extractSampleRows.map((r) => (
+                      <tr key={r.date}>
+                        <td className="p-2 font-bold">{r.date}</td>
+                        <td className="p-2">{r.t2m}</td>
+                        <td className="p-2">{r.gpmPrecipMm}</td>
+                        <td className="p-2">{r.gwettopPct}%</td>
+                        <td className="p-2">{r.gwetrootPct}%</td>
+                        <td className="p-2">{r.prismVpdMaxHpa}</td>
+                        <td className="p-2 text-emerald-700 font-bold">{r.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* SECTION 1: MANUAL SINGLE NASA OBSERVATION ENTRY */}

@@ -24,6 +24,7 @@ import {
   LogIn,
   ShieldCheck,
   Users,
+  Droplets,
 } from 'lucide-react';
 import {
   FieldProfile,
@@ -31,13 +32,16 @@ import {
   WaterSourceType,
   CropCategory,
   SeedFamilyId,
+  SoilDrainageEstimate,
 } from '../types';
 import {
   SOIL_TYPE_CATALOG,
   getSoilLabel,
   getDrainageLabel,
   getWaterLabel,
+  assessSoilDrainageFromEarthData,
 } from '../services/agronomyEngine';
+import { fetchFieldLiveWeather } from '../services/weatherService';
 import {
   SEED_FAMILIES,
   getSeedFamilyById,
@@ -204,6 +208,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   const [holdsWater, setHoldsWater] = useState(true);
   const [proneToFlooding, setProneToFlooding] = useState(false);
   const [ph, setPh] = useState<number | undefined>(undefined);
+  const [estimatingDrainage, setEstimatingDrainage] = useState(false);
+  const [drainageEstimate, setDrainageEstimate] = useState<SoilDrainageEstimate | null>(null);
 
   // Step 3: Water
   const [waterSourceType, setWaterSourceType] = useState<WaterSourceType>('pond');
@@ -448,6 +454,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setHoldsWater(true);
     setProneToFlooding(false);
     setPh(undefined);
+    setDrainageEstimate(null);
     setWaterSourceType('pond');
     setWaterStable(true);
     setWaterObs('normal');
@@ -491,6 +498,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setHoldsWater(field.soilCharacteristics.holdsWater);
     setProneToFlooding(field.soilCharacteristics.proneToFlooding);
     setPh(field.soilCharacteristics.ph);
+    setDrainageEstimate(null);
     setWaterSourceType(field.waterSource.type);
     setWaterStable(field.waterSource.isStable);
     setWaterObs(field.waterSource.observation);
@@ -513,6 +521,25 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setInspectTime(field.inspectTime);
     setNotificationMethod(field.notificationMethod === 'push' ? 'push' : 'in_app');
     setWizardOpen(true);
+  };
+
+  const handleAutoEstimateDrainage = async () => {
+    setEstimatingDrainage(true);
+    try {
+      const liveWeather = await fetchFieldLiveWeather(lat, lon);
+      const estimate = assessSoilDrainageFromEarthData(
+        liveWeather,
+        soilType,
+        editingField?.adaptiveMemory?.earthMetrics || null,
+        lang
+      );
+      setDrainageEstimate(estimate);
+      setDrainage(estimate.drainage);
+      setHoldsWater(estimate.drainage !== 'fast');
+      setProneToFlooding(estimate.drainage === 'slow');
+    } finally {
+      setEstimatingDrainage(false);
+    }
   };
 
   const handleFinishWizard = async () => {
@@ -912,8 +939,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
       {/* 5-STEP FIELD PROFILE CREATION WIZARD MODAL */}
       {wizardOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col max-h-[92vh] overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 flex flex-col max-h-[92dvh] overflow-hidden">
             {/* Header */}
             <div className="px-6 py-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
@@ -1016,7 +1043,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                         setName(e.target.value);
                         setStepError(null);
                       }}
-                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 font-medium"
+                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 focus:outline-emerald-600 font-medium text-base sm:text-sm"
                     />
                   </div>
 
@@ -1098,6 +1125,9 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                         setLon(nextLon);
                         setLatText(nextLat.toFixed(5));
                         setLonText(nextLon.toFixed(5));
+                        const matchedAdmin = findNearestAdminLocation(nextLat, nextLon);
+                        setProvince(matchedAdmin.province.name);
+                        setDistrict(matchedAdmin.district.name);
                         setLocationConfirmed(true);
                         setStepError(null);
                       }}
@@ -1356,6 +1386,58 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     </div>
                   )}
 
+                  <div className="p-3.5 bg-sky-50/70 border border-sky-200 rounded-xl space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                          <Droplets className="w-4 h-4 text-sky-700" />
+                          {t(
+                            'Chưa rõ ruộng thoát nước nhanh hay chậm?',
+                            'Unsure about field drainage speed?'
+                          )}
+                        </div>
+                        <p className="text-[11px] text-sky-900/80">
+                          {t(
+                            'Hệ thống sẽ đối chiếu độ ẩm tầng mặt (SMAP), tầng rễ và lượng mưa 7 ngày (GPM) tại tọa độ ruộng để ước tính tự động.',
+                            'Compare topsoil moisture (SMAP), root moisture, and 7-day rain (GPM) at your field coordinates to auto-estimate drainage.'
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAutoEstimateDrainage}
+                        disabled={estimatingDrainage}
+                        className="px-3.5 py-2 bg-sky-700 hover:bg-sky-800 disabled:opacity-60 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                      >
+                        {estimatingDrainage ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        {estimatingDrainage
+                          ? t('Đang phân tích NASA SMAP/GPM...', 'Analyzing SMAP/GPM...')
+                          : t('Tự ước tính từ NASA SMAP/GPM', 'Auto-estimate via SMAP/GPM')}
+                      </button>
+                    </div>
+
+                    {drainageEstimate && (
+                      <div className="p-3 bg-white border border-sky-200 rounded-xl text-xs space-y-1.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-bold text-emerald-900">
+                            {t('Kết quả gợi ý:', 'Estimated drainage:')}{' '}
+                            {getDrainageLabel(drainageEstimate.drainage, lang)}
+                          </span>
+                          <span className="text-[11px] font-mono text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                            SMAP {drainageEstimate.smapSurfacePct}% · {t('Rễ', 'Root')} {drainageEstimate.rootZonePct}% · GPM {drainageEstimate.gpmRain7dMm} mm
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-stone-700 leading-relaxed">
+                          {lang === 'en' ? drainageEstimate.explanationEn : drainageEstimate.explanationVi}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
@@ -1364,7 +1446,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       <select
                         value={drainage}
                         onChange={e => setDrainage(e.target.value as any)}
-                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 text-base sm:text-xs"
                       >
                         <option value="fast">
                           {t('Thoát nước nhanh (khô ráo sau 2–4 giờ)', 'Fast drainage (dry within 2–4h)')}
@@ -1388,7 +1470,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                         placeholder={t('VD: 6.2 (Bỏ trống nếu chưa đo)', 'e.g. 6.2 (Leave blank if unknown)')}
                         value={ph || ''}
                         onChange={e => setPh(parseFloat(e.target.value) || undefined)}
-                        className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 text-base sm:text-xs"
                       />
                     </div>
                   </div>
@@ -1613,7 +1695,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                               }
                             }
                           }}
-                          className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 font-semibold text-xs"
+                          className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 font-semibold text-base sm:text-xs"
                         />
                         {cropName.trim() && (
                           <div className="text-[11px] text-emerald-800 font-medium mt-1">
@@ -1634,8 +1716,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           type="text"
                           value={variety}
                           onChange={e => setVariety(e.target.value)}
-                          className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 text-xs"
-                          placeholder={t('VD: ST25, ĐT84, NK7328...', 'e.g. ST25, DT84, NK7328...')}
+                          className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 text-base sm:text-xs"
+                          placeholder={t('VD: ST25, Hắc Mỹ Nhân, ĐT84...', 'e.g. ST25, Hac My Nhan, DT84...')}
                         />
                         {selectedPlantObj && selectedPlantObj.commonVarieties.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1.5">

@@ -214,6 +214,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
+                {mode === 'signin' && (
+                  <button
+                    type="button"
+                    onClick={() => setForgotModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:underline cursor-pointer"
+                  >
+                    {t('Quên mật khẩu? Đặt lại qua Email →', 'Forgot password? Reset via Email →')}
+                  </button>
+                )}
               </div>
             )}
 
@@ -342,6 +351,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   ? t('Đăng nhập', 'Sign In')
                   : t('Đăng ký tài khoản với Email', 'Create Account with Email')}
               </button>
+
+              {mode === 'signin' && (
+                <button
+                  type="button"
+                  onClick={() => setForgotModalOpen(true)}
+                  className="w-full py-2 text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50/70 hover:bg-emerald-100/70 border border-emerald-200 rounded-xl transition cursor-pointer"
+                >
+                  {t('Quên mật khẩu? Gửi email khôi phục', 'Forgot password? Send reset email')}
+                </button>
+              )}
             </form>
 
             <div className="relative flex items-center py-1">

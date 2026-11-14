@@ -9,8 +9,8 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
-  setDoc,
-  updateDoc,
+  setDoc as rawSetDoc,
+  updateDoc as rawUpdateDoc,
   where,
 } from 'firebase/firestore';
 import {
@@ -46,6 +46,41 @@ import {
   PlotPlanRecord,
 } from '../types';
 import { findNearestNasaGrid, isWithinVietnamTerritory } from '../data/nasaVietnamGrid';
+
+export function cleanUndefined<T>(value: T): T {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => cleanUndefined(item)) as unknown as T;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    // Preserve Firestore FieldValue sentinels (serverTimestamp, arrayUnion, arrayRemove, etc.)
+    return value;
+  }
+  const cleaned: Record<string, any> = {};
+  for (const [key, val] of Object.entries(value as Record<string, any>)) {
+    if (val !== undefined) {
+      cleaned[key] = cleanUndefined(val);
+    }
+  }
+  return cleaned as T;
+}
+
+function setDoc(ref: any, data: Record<string, any>, options?: any) {
+  const sanitized = cleanUndefined(data);
+  return options !== undefined ? rawSetDoc(ref, sanitized, options) : rawSetDoc(ref, sanitized);
+}
+
+function updateDoc(ref: any, data: Record<string, any>) {
+  return rawUpdateDoc(ref, cleanUndefined(data));
+}
 
 export function isSyntheticPlaceholderEmail(email?: string | null): boolean {
   if (!email) return true;
@@ -621,10 +656,14 @@ export const FirestoreService = {
             ownerId: data.ownerId,
             fieldId: data.fieldId,
             title: data.title,
+            titleEn: data.titleEn || undefined,
             scheduledTime: data.scheduledTime,
+            scheduledTimeEn: data.scheduledTimeEn || undefined,
             priority: data.priority,
             reason: data.reason,
+            reasonEn: data.reasonEn || undefined,
             triggerData: data.triggerData,
+            triggerDataEn: data.triggerDataEn || undefined,
             status: data.status,
             farmerNote: data.farmerNote,
             createdAt:
@@ -920,10 +959,14 @@ export const FirestoreService = {
           ownerId: uid,
           fieldId: t.fieldId,
           title: t.title.slice(0, 200),
+          titleEn: t.titleEn ? t.titleEn.slice(0, 200) : undefined,
           scheduledTime: t.scheduledTime.slice(0, 100),
+          scheduledTimeEn: t.scheduledTimeEn ? t.scheduledTimeEn.slice(0, 100) : undefined,
           priority: t.priority,
           reason: t.reason.slice(0, 600),
+          reasonEn: t.reasonEn ? t.reasonEn.slice(0, 600) : undefined,
           triggerData: t.triggerData.slice(0, 300),
+          triggerDataEn: t.triggerDataEn ? t.triggerDataEn.slice(0, 300) : undefined,
           status: t.status || 'pending',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

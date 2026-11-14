@@ -177,8 +177,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
     id: `msg-0-${field.id}-${lang}`,
     sender: 'ai',
     text: t(
-      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu 25 năm. Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
-      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 25-year climate data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu (2001–2026). Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
+      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 2001–2026 climate records. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
     ),
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
@@ -198,15 +198,15 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
     lang === 'en'
       ? [
           `My soil is ${getSoilLabel(activeField.soilType, 'en')}; should I irrigate today?`,
-          `With ${weather.temp}°C and ${weather.humidity}% humidity, what disease risks exist?`,
-          `How do my carbon, groundwater, and emissions metrics guide my next rotation?`,
-          `Does the 25-year climate history show cold or drought risk right now?`,
+          `Why are some leaves turning yellow or red, and how do I treat it?`,
+          `Does NASA soil & rain data show fast or slow drainage on this field?`,
+          `What crop should I rotate next season after ${getPlantDisplayName(activeField.crop.name, 'en')}?`,
         ]
       : [
-          `Đất ruộng của tôi là ${getSoilLabel(activeField.soilType, 'vi')}, hôm nay có nên tưới thêm không?`,
-          `Với nhiệt độ ${weather.temp}°C và ẩm ${weather.humidity}%, có nguy cơ nấm bệnh gì?`,
-          `Chỉ số carbon, nước ngầm và phát thải của ruộng gợi ý điều chỉnh phân bón và luân canh thế nào?`,
-          `Dữ liệu khí hậu 25 năm tại đây có hay gặp đợt rét/hạn vào thời điểm này không?`,
+          `Đất ruộng là ${getSoilLabel(activeField.soilType, 'vi')}, hôm nay có nên tưới thêm không?`,
+          `Tại sao lá cây bị vàng/đỏ và cách xử lý dứt điểm như thế nào?`,
+          `Dữ liệu đất & mưa NASA đánh giá ruộng tôi thoát nước nhanh hay chậm?`,
+          `Sau vụ ${activeField.crop.name} nên luân canh cây gì để giảm sâu bệnh?`,
         ];
 
   const scrollToBottom = () => {

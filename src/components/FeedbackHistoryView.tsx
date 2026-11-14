@@ -13,6 +13,7 @@ import {
   Bot,
   CalendarCheck,
   ShieldAlert,
+  Download,
 } from 'lucide-react';
 import {
   DailyAgronomicBrief,
@@ -254,6 +255,97 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
     return legacyMap[item.feedbackType] || item.feedbackType;
   };
 
+  const formatObservedMoisture = (val?: ObservedMoistureState) => {
+    if (!val) return '';
+    if (val === 'dry') return t('Khô', 'Dry');
+    if (val === 'wet') return t('Quá ướt / úng', 'Too wet');
+    return t('Đủ ẩm cân bằng', 'Balanced moisture');
+  };
+
+  const formatObservedHealth = (val?: ObservedCropHealthState) => {
+    if (!val) return '';
+    if (val === 'stressed') return t('Vàng lá / Sốc nhiệt', 'Stressed / Yellowing');
+    if (val === 'pest_risk') return t('Có sâu / Nấm bệnh', 'Pest / Fungal risk');
+    return t('Cây khỏe mạnh', 'Healthy');
+  };
+
+  const handleExportCsv = () => {
+    const csvEscape = (v: unknown) => {
+      const s = String(v ?? '').replace(/\r?\n/g, ' ').replace(/"/g, '""');
+      return `"${s}"`;
+    };
+
+    const headers = [
+      'timestamp',
+      'field_name',
+      'province',
+      'crop',
+      'feedback_status',
+      'observed_moisture',
+      'observed_crop_health',
+      'farmer_note',
+      'system_action',
+      'recommended_fixes',
+      'temp_c',
+      'rainfall_mm',
+      'root_moisture_pct',
+      'humidity_pct',
+    ];
+
+    const rows: string[][] = fieldFeedbacks.map((item) => [
+      item.timestamp,
+      activeField.name,
+      activeField.province,
+      getPlantDisplayName(activeField.crop.name, lang),
+      getFeedbackBadgeLabel(item),
+      formatObservedMoisture(item.observedMoisture) || '',
+      formatObservedHealth(item.observedCropHealth) || '',
+      item.userComment || '',
+      item.systemActionTaken || '',
+      (item.recommendedFixes || []).join(' | '),
+      weather ? String(weather.temp) : '',
+      weather ? String(weather.rain) : '',
+      weather ? String(Math.round(weather.gwetroot * 100)) : '',
+      weather ? String(weather.humidity) : '',
+    ]);
+
+    if (weather) {
+      rows.push([
+        new Date().toISOString(),
+        activeField.name,
+        activeField.province,
+        getPlantDisplayName(activeField.crop.name, lang),
+        t('Số liệu thời tiết ruộng hiện tại', 'Current Field Weather Snapshot'),
+        '',
+        '',
+        weather.observationDate,
+        brief?.headline || '',
+        (brief?.topActions || []).map((a) => a.title).join(' | '),
+        String(weather.temp),
+        String(weather.rain),
+        String(Math.round(weather.gwetroot * 100)),
+        String(weather.humidity),
+      ]);
+    }
+
+    const csvContent = `\uFEFF${headers.join(',')}\n${rows
+      .map((r) => r.map(csvEscape).join(','))
+      .join('\n')}`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = (activeField.name || 'field')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '');
+    a.href = url;
+    a.download = `cropcast-records-${slug || 'field'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner + Prediction Calibration Metrics */}
@@ -409,7 +501,9 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
               <p className="text-xs text-stone-500 mt-0.5">
                 {getPlantDisplayName(activeField.crop.name, lang)} ·{' '}
                 {getCommonStageLabel(activeField.crop.currentStage, lang)}
-                {weather ? ` · ${weather.temp}°C · ${(weather.gwetroot * 100).toFixed(0)}% root` : ''}
+                {weather
+                  ? ` · ${weather.temp}°C · ${t('Ẩm rễ', 'Root moisture')} ${(weather.gwetroot * 100).toFixed(0)}%`
+                  : ''}
               </p>
             </div>
           </div>
@@ -616,20 +710,30 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
 
         {/* Right: Field Update & Plan-Fix History */}
         <div className="lg:col-span-6 bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
-          <div className="border-b border-stone-100 pb-3">
-            <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
-              <History className="w-4 h-4 text-emerald-700" />
-              {t(
-                `Nhật ký Cập nhật & Hiệu chỉnh (${fieldFeedbacks.length})`,
-                `Field Update & Calibration Log (${fieldFeedbacks.length})`
-              )}
-            </h2>
-            <p className="text-xs text-stone-500">
-              {t(
-                'Theo dõi lịch sử đối chiếu dự báo thực tế và các bước đã đề xuất để giữ đúng kế hoạch',
-                'Timeline of field reality checks, prediction matches, and recommended corrective actions'
-              )}
-            </p>
+          <div className="border-b border-stone-100 pb-3 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                <History className="w-4 h-4 text-emerald-700" />
+                {t(
+                  `Nhật ký Cập nhật & Hiệu chỉnh (${fieldFeedbacks.length})`,
+                  `Field Update & Calibration Log (${fieldFeedbacks.length})`
+                )}
+              </h2>
+              <p className="text-xs text-stone-500">
+                {t(
+                  'Theo dõi lịch sử đối chiếu dự báo thực tế và xuất tệp CSV lưu trữ',
+                  'Timeline of field checks and exportable CSV records'
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              {t('Xuất CSV', 'Export CSV')}
+            </button>
           </div>
 
           {fieldFeedbacks.length === 0 ? (
@@ -689,12 +793,12 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
                       <div className="flex flex-wrap gap-1.5 text-[10px] text-stone-600">
                         {item.observedMoisture && (
                           <span className="px-2 py-0.5 bg-white border border-stone-200 rounded-md">
-                            {t('Đất:', 'Soil:')} {item.observedMoisture}
+                            {t('Đất:', 'Soil:')} {formatObservedMoisture(item.observedMoisture)}
                           </span>
                         )}
                         {item.observedCropHealth && (
                           <span className="px-2 py-0.5 bg-white border border-stone-200 rounded-md">
-                            {t('Cây:', 'Crop:')} {item.observedCropHealth}
+                            {t('Cây:', 'Crop:')} {formatObservedHealth(item.observedCropHealth)}
                           </span>
                         )}
                       </div>
