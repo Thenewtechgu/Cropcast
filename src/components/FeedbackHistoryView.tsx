@@ -301,8 +301,8 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
             <p className="text-[11px] leading-snug">
               {activeField.adaptiveMemory?.soilAdjustment ||
                 t(
-                  'Đang dùng thông số nền NASA & loại đất mặc định. Hãy gửi cập nhật sau khi thăm ruộng!',
-                  'Using baseline NASA & soil parameters. Submit an update after inspecting your field.'
+                  'Đang dùng thông số khí hậu nền & loại đất mặc định. Hãy gửi cập nhật sau khi thăm ruộng!',
+                  'Using baseline climate & soil parameters. Submit an update after inspecting your field.'
                 )}
             </p>
           </div>

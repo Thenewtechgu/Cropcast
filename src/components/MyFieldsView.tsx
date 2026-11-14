@@ -41,7 +41,7 @@ import {
 import {
   SEED_FAMILIES,
   getSeedFamilyById,
-  inferSeedFamilyFromCrop,
+  resolveCropBotanicalProfile,
   getFamilyDisplayName,
   getFamilyShortTag,
   getFamilySoilImpactNote,
@@ -49,7 +49,18 @@ import {
   getCommonStageLabel,
   getCommonVarietyLabel,
 } from '../data/cropTaxonomy';
-import { findNearestNasaGrid, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import {
+  findNearestNasaGrid,
+  getLocalizedRegionName,
+  isWithinVietnamTerritory,
+} from '../data/nasaVietnamGrid';
+import {
+  VIETNAM_PROVINCES,
+  findDistrictInProvince,
+  findNearestAdminLocation,
+  findProvinceByName,
+  getDistrictsForProvince,
+} from '../data/vietnamLocations';
 import { SatelliteMap } from './SatelliteMap';
 import { AppLanguage, useLanguage } from '../contexts/LanguageContext';
 
@@ -119,8 +130,8 @@ function extractReadableSaveError(err: any, lang: AppLanguage): { message: strin
       isPermissionError: true,
       message:
         lang === 'en'
-          ? 'Unable to save field because Cloud Firestore Security Rules have not been published to your Firebase project yet (permission-denied). Open Firebase Console → Firestore Database → Rules and Publish the rules from firestore.rules, or push the GitHub Actions deployment.'
-          : 'Không thể lưu thửa ruộng vì bộ Firestore Security Rules mới chưa được Publish lên dự án Firebase đang chạy (lỗi permission-denied). Hãy mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish (hoặc chạy GitHub Actions deploy).',
+          ? 'Unable to save field because Cloud Firestore Security Rules have not been published to your Firebase project yet (permission-denied). Open Firebase Console → Firestore Database → Rules and Publish the rules from firestore.rules.'
+          : 'Không thể lưu thửa ruộng vì bộ Firestore Security Rules mới chưa được Publish lên dự án Firebase đang chạy (lỗi permission-denied). Hãy mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish.',
     };
   }
   return {
@@ -170,9 +181,13 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   // Step 1: Location (Required)
   const [name, setName] = useState('');
   const [province, setProvince] = useState('Hà Nội');
-  const [district, setDistrict] = useState('');
-  const [lat, setLat] = useState<number>(21.03);
-  const [lon, setLon] = useState<number>(105.85);
+  const [district, setDistrict] = useState('Mê Linh');
+  const [lat, setLat] = useState<number>(21.1815);
+  const [lon, setLon] = useState<number>(105.7136);
+  const [latText, setLatText] = useState('21.1815');
+  const [lonText, setLonText] = useState('105.7136');
+  const [mapZoom, setMapZoom] = useState<number>(13);
+  const [flyToTrigger, setFlyToTrigger] = useState<number>(0);
   const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsNotice, setGpsNotice] = useState<string | null>(null);
@@ -238,33 +253,115 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     }
   };
 
+  const provinceOptions = VIETNAM_PROVINCES;
+  const districtOptions = getDistrictsForProvince(province);
+  const selectedProvinceObj = findProvinceByName(province);
+
+  const applyValidCoordinates = (nextLat: number, nextLon: number, nextZoom?: number) => {
+    setLat(nextLat);
+    setLon(nextLon);
+    setLatText(nextLat.toFixed(5));
+    setLonText(nextLon.toFixed(5));
+    if (nextZoom !== undefined) {
+      setMapZoom(nextZoom);
+    }
+    setFlyToTrigger(v => v + 1);
+    setLocationConfirmed(true);
+    setStepError(null);
+  };
+
+  const handleProvinceDropdownChange = (nextProvName: string) => {
+    setProvince(nextProvName);
+    setStepError(null);
+    const provObj = findProvinceByName(nextProvName);
+    if (provObj) {
+      const nextDistricts = provObj.districts;
+      setDistrict('');
+      applyValidCoordinates(provObj.lat, provObj.lon, 11);
+      if (nextDistricts.length > 0) {
+        setGpsNotice(
+          t(
+            `Bản đồ đã chuyển tới ${provObj.name}. Bạn có thể chọn thêm Quận/Huyện hoặc chạm trực tiếp vị trí ruộng trên bản đồ.`,
+            `Map centered on ${provObj.nameEn}. Pick a District or tap directly on your field plot.`
+          )
+        );
+      }
+    }
+  };
+
+  const handleDistrictDropdownChange = (nextDistName: string) => {
+    setDistrict(nextDistName);
+    setStepError(null);
+    const distObj = findDistrictInProvince(province, nextDistName);
+    if (distObj) {
+      applyValidCoordinates(distObj.lat, distObj.lon, 13);
+      setGpsNotice(
+        t(
+          `Đã phóng to bản đồ tới ${distObj.name}, ${province}. Hãy chạm đúng bờ ruộng nếu muốn tinh chỉnh thêm.`,
+          `Map zoomed to ${distObj.nameEn}, ${selectedProvinceObj?.nameEn || province}. Tap your exact plot if needed.`
+        )
+      );
+    }
+  };
+
+  const handleManualCoordCommit = (rawLatStr: string, rawLonStr: string) => {
+    const parsedLat = Number(rawLatStr.replace(',', '.').trim());
+    const parsedLon = Number(rawLonStr.replace(',', '.').trim());
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+      return;
+    }
+    const check = isWithinVietnamTerritory(parsedLat, parsedLon);
+    if (!check.valid) {
+      setStepError(
+        lang === 'en'
+          ? check.reasonEn || 'Coordinates are outside Vietnamese territory. Please choose a location in Vietnam and try again.'
+          : check.reasonVi || 'Vị trí bạn nhập nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí trong Việt Nam và thử lại.'
+      );
+      return;
+    }
+    const fixedLat = Number(parsedLat.toFixed(5));
+    const fixedLon = Number(parsedLon.toFixed(5));
+    applyValidCoordinates(fixedLat, fixedLon, 13);
+  };
+
   const handleUseDeviceGps = () => {
     if (!navigator.geolocation) {
       setGpsNotice(
         t(
-          'Trình duyệt không hỗ trợ GPS. Hãy chạm trực tiếp lên bản đồ vệ tinh bên dưới.',
-          'Your browser does not support GPS. Tap directly on the satellite map below.'
+          'Trình duyệt không hỗ trợ GPS. Hãy chọn Tỉnh/Huyện hoặc chạm trực tiếp lên bản đồ vệ tinh.',
+          'Your browser does not support GPS. Select Province/District or tap directly on the satellite map.'
         )
       );
       return;
     }
     setGpsLoading(true);
     setGpsNotice(null);
+    setStepError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const nextLat = Number(pos.coords.latitude.toFixed(5));
         const nextLon = Number(pos.coords.longitude.toFixed(5));
-        setLat(nextLat);
-        setLon(nextLon);
-        setLocationConfirmed(true);
-        setStepError(null);
         setGpsLoading(false);
+
+        const territoryCheck = isWithinVietnamTerritory(nextLat, nextLon);
+        if (!territoryCheck.valid) {
+          setStepError(
+            lang === 'en'
+              ? territoryCheck.reasonEn || 'Device GPS location is outside Vietnamese territory. Please select a location inside Vietnam.'
+              : territoryCheck.reasonVi || 'Vị trí GPS thiết bị nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí bên trong Việt Nam và thử lại.'
+          );
+          return;
+        }
+
+        const adminMatch = findNearestAdminLocation(nextLat, nextLon);
+        setProvince(adminMatch.province.name);
+        setDistrict(adminMatch.district.name);
+        applyValidCoordinates(nextLat, nextLon, 14);
         const gridMatch = findNearestNasaGrid(nextLat, nextLon);
-        setProvince(gridMatch.cell.region);
         setGpsNotice(
           t(
-            `Đã lấy vị trí GPS thiết bị (sai số ~${Math.round(pos.coords.accuracy)} m) và ghép điểm khí hậu ${gridMatch.cell.cellId} cách ${gridMatch.distanceKm} km.`,
-            `Located via device GPS (accuracy ~${Math.round(pos.coords.accuracy)} m) and matched climate grid ${gridMatch.cell.cellId} (${gridMatch.distanceKm} km away).`
+            `Đã lấy vị trí GPS thiết bị (sai số ~${Math.round(pos.coords.accuracy)} m) tại ${adminMatch.district.name}, ${adminMatch.province.name} (cách trạm khí hậu ${gridMatch.distanceKm} km).`,
+            `Located via device GPS (~${Math.round(pos.coords.accuracy)} m) near ${adminMatch.district.nameEn}, ${adminMatch.province.nameEn}.`
           )
         );
       },
@@ -272,8 +369,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         setGpsLoading(false);
         setGpsNotice(
           t(
-            'Không thể truy cập GPS (vui lòng cấp quyền vị trí hoặc chạm trực tiếp trên bản đồ vệ tinh để chọn vị trí ruộng).',
-            'Unable to access GPS (please allow location access or tap directly on the satellite map).'
+            'Không thể truy cập GPS (vui lòng cấp quyền vị trí hoặc chọn Tỉnh/Huyện rồi chạm trên bản đồ).',
+            'Unable to access GPS (allow location access or choose Province/District and tap the map).'
           )
         );
       },
@@ -290,17 +387,24 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         return;
       }
       if (!province.trim()) {
-        setStepError(t('Vui lòng nhập Tỉnh / Thành phố của thửa ruộng.', 'Please enter the Province / City.'));
+        setStepError(t('Vui lòng chọn Tỉnh / Thành phố của thửa ruộng.', 'Please select a Province / City.'));
         return;
       }
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < 7 || lat > 24.5 || lon < 101 || lon > 116) {
+      const parsedLat = Number(latText.replace(',', '.').trim());
+      const parsedLon = Number(lonText.replace(',', '.').trim());
+      const effectiveLat = Number.isFinite(parsedLat) ? parsedLat : lat;
+      const effectiveLon = Number.isFinite(parsedLon) ? parsedLon : lon;
+      const territoryCheck = isWithinVietnamTerritory(effectiveLat, effectiveLon);
+      if (!territoryCheck.valid) {
         setStepError(
-          t(
-            'Tọa độ ruộng chưa hợp lệ (Vĩ độ 7–24.5°B, Kinh độ 101–116°Đ). Hãy dùng GPS hoặc chạm bản đồ.',
-            'Invalid coordinates (Lat 7–24.5°N, Lon 101–116°E). Please use GPS or tap the map.'
-          )
+          lang === 'en'
+            ? territoryCheck.reasonEn || 'Field location must be inside Vietnamese territory. Please choose a valid Vietnam location.'
+            : territoryCheck.reasonVi || 'Vị trí thửa ruộng nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí trong Việt Nam và thử lại.'
         );
         return;
+      }
+      if (effectiveLat !== lat || effectiveLon !== lon) {
+        applyValidCoordinates(Number(effectiveLat.toFixed(5)), Number(effectiveLon.toFixed(5)), 13);
       }
       const computedHa = convertToHectares(areaValueInput, areaUnit);
       if (!Number.isFinite(computedHa) || computedHa < 0.001 || computedHa > 50000) {
@@ -328,9 +432,13 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setPermissionErrorHint(false);
     setName('');
     setProvince('Hà Nội');
-    setDistrict('');
-    setLat(21.03);
-    setLon(105.85);
+    setDistrict('Mê Linh');
+    setLat(21.1815);
+    setLon(105.7136);
+    setLatText('21.18150');
+    setLonText('105.71360');
+    setMapZoom(13);
+    setFlyToTrigger(v => v + 1);
     setLocationConfirmed(false);
     setGpsNotice(null);
     setAreaUnit('ha');
@@ -363,10 +471,16 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setCurrentStep(1);
     setStepError(null);
     setName(field.name);
-    setProvince(field.province);
-    setDistrict(field.district);
+    const matchedProv = findProvinceByName(field.province);
+    setProvince(matchedProv?.name || field.province);
+    const matchedDist = matchedProv ? findDistrictInProvince(matchedProv.name, field.district) : undefined;
+    setDistrict(matchedDist?.name || field.district);
     setLat(field.lat);
     setLon(field.lon);
+    setLatText(field.lat.toFixed(5));
+    setLonText(field.lon.toFixed(5));
+    setMapZoom(14);
+    setFlyToTrigger(v => v + 1);
     setLocationConfirmed(true);
     setGpsNotice(null);
     setPermissionErrorHint(false);
@@ -382,11 +496,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setWaterObs(field.waterSource.observation);
     setHasTest(field.waterSource.hasTestResult);
     setSalinityRisk(field.waterSource.salinityRisk);
-    setSeedFamily(
-      field.crop.seedFamily || inferSeedFamilyFromCrop(field.crop.name, field.crop.category)
+    const resolvedBotanical = resolveCropBotanicalProfile(
+      field.crop.name,
+      field.crop.seedFamily,
+      field.crop.category
     );
+    setSeedFamily(resolvedBotanical.seedFamilyId);
     setCropName(field.crop.name);
-    setCropCategory(field.crop.category);
+    setCropCategory(resolvedBotanical.matchedPlant?.category || field.crop.category);
     setVariety(field.crop.variety);
     setPlantingDate(field.crop.plantingDate);
     setCurrentStage(field.crop.currentStage);
@@ -403,6 +520,16 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setPermissionErrorHint(false);
     if (!name.trim()) {
       setStepError(t('Vui lòng nhập tên thửa ruộng.', 'Please enter a field name.'));
+      setCurrentStep(1);
+      return;
+    }
+    const territoryCheck = isWithinVietnamTerritory(lat, lon);
+    if (!territoryCheck.valid) {
+      setStepError(
+        lang === 'en'
+          ? territoryCheck.reasonEn || 'Field location must be inside Vietnamese territory.'
+          : territoryCheck.reasonVi || 'Vị trí thửa ruộng nằm ngoài lãnh thổ Việt Nam. Không thể lưu — vui lòng chọn lại vị trí trong Việt Nam.'
+      );
       setCurrentStep(1);
       return;
     }
@@ -423,7 +550,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     try {
       const payload = {
         name: name.trim(),
-        province: province.trim() || 'Việt Nam',
+        province: province.trim() || 'Hà Nội',
         district: district.trim() || (lang === 'en' ? 'Cultivation area' : 'Khu vực canh tác'),
         lat,
         lon,
@@ -443,7 +570,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
           salinityRisk,
         },
         crop: {
-          seedFamily,
+          seedFamily: resolveCropBotanicalProfile(cropName.trim(), seedFamily, cropCategory).seedFamilyId,
           name: cropName.trim(),
           category: cropCategory,
           variety: variety.trim() || 'Giống địa phương',
@@ -569,9 +696,16 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {fields.map(f => {
             const isActive = activeField?.id === f.id;
-            const fam = getSeedFamilyById(
-              f.crop.seedFamily || inferSeedFamilyFromCrop(f.crop.name, f.crop.category)
+            const resolvedCropFam = resolveCropBotanicalProfile(
+              f.crop.name,
+              f.crop.seedFamily,
+              f.crop.category
             );
+            const shortBotanicalLabel = (
+              lang === 'en' ? resolvedCropFam.familyLabelEn : resolvedCropFam.familyLabelVi
+            )
+              .split('(')[0]
+              .trim();
 
             return (
               <div
@@ -609,8 +743,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 truncate">
-                        {getFamilyDisplayName(fam, lang).split('(')[0].trim()} ·{' '}
-                        {getPlantDisplayName(f.crop.name, lang)}
+                        {shortBotanicalLabel} · {getPlantDisplayName(f.crop.name, lang)}
                       </span>
                       {isActive ? (
                         <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1 shrink-0">
@@ -675,17 +808,17 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       </span>
                     </div>
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
-                      <span className="text-stone-400 text-[10px] block">{t('Điểm khí hậu:', 'NASA grid:')}</span>
-                      <span className="font-semibold text-stone-800 font-mono">{f.nasaGrid.cellId}</span>
+                      <span className="text-stone-400 text-[10px] block">{t('Điểm khí hậu:', 'Climate zone:')}</span>
+                      <span className="font-semibold text-stone-800">{getLocalizedRegionName(f.province, lang)}</span>
                       <span className="text-[11px] text-emerald-700 font-medium block">
-                        {t(`Cách ${f.nasaGrid.distanceKm} km`, `${f.nasaGrid.distanceKm} km away`)}
+                        {t(`Tham chiếu cách ${f.nasaGrid.distanceKm} km`, `${f.nasaGrid.distanceKm} km reference`)}
                       </span>
                     </div>
                   </div>
 
                   {f.adaptiveMemory?.earthMetrics?.syncedAt && (
                     <div className="text-[11px] text-stone-500 font-mono">
-                      {t('Lần cuối cập nhật NASA:', 'NASA last updated:')}{' '}
+                      {t('Cập nhật môi trường gần nhất:', 'Last environmental sync:')}{' '}
                       {new Date(f.adaptiveMemory.earthMetrics.syncedAt).toLocaleString(
                         lang === 'en' ? 'en-US' : 'vi-VN',
                         { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
@@ -892,24 +1025,43 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       <label className="font-bold text-stone-800 block mb-1">
                         {t('Tỉnh / Thành phố *', 'Province / City *')}
                       </label>
-                      <input
-                        type="text"
-                        value={province}
-                        onChange={e => setProvince(e.target.value)}
-                        className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900"
-                      />
+                      <select
+                        value={selectedProvinceObj?.name || province}
+                        onChange={e => handleProvinceDropdownChange(e.target.value)}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 focus:outline-emerald-600 font-medium"
+                      >
+                        {!selectedProvinceObj && province && (
+                          <option value={province}>{province}</option>
+                        )}
+                        {provinceOptions.map(p => (
+                          <option key={p.name} value={p.name}>
+                            {lang === 'en' ? p.nameEn : p.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="font-bold text-stone-800 block mb-1">
-                        {t('Huyện / Xã / Thôn', 'District / Commune')}
+                        {t('Quận / Huyện / Thị xã', 'District / Town')}
                       </label>
-                      <input
-                        type="text"
-                        placeholder={t('VD: Xã Tiền Phong', 'e.g. Tien Phong Commune')}
+                      <select
                         value={district}
-                        onChange={e => setDistrict(e.target.value)}
-                        className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900"
-                      />
+                        onChange={e => handleDistrictDropdownChange(e.target.value)}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 focus:outline-emerald-600"
+                      >
+                        <option value="">
+                          {t('— Chọn Quận / Huyện / Thị xã —', '— Select District / Town —')}
+                        </option>
+                        {district &&
+                          !districtOptions.some(d => d.name === district) && (
+                            <option value={district}>{district}</option>
+                          )}
+                        {districtOptions.map(d => (
+                          <option key={d.name} value={d.name}>
+                            {lang === 'en' ? d.nameEn : d.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
@@ -918,7 +1070,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-bold text-stone-800 flex items-center gap-1.5">
                         <MapPin className="w-4 h-4 text-emerald-700" />{' '}
-                        {t('Vị trí thửa ruộng (Bắt buộc) *', 'Field Location (Required) *')}
+                        {t('Vị trí thửa ruộng tại Việt Nam (Bắt buộc) *', 'Field Location in Vietnam (Required) *')}
                       </span>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
@@ -936,15 +1088,21 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     <SatelliteMap
                       lat={lat}
                       lon={lon}
-                      zoom={13}
+                      zoom={mapZoom}
+                      flyToTrigger={flyToTrigger}
                       heightClass="h-56"
                       interactive={true}
                       showNasaGrid={true}
                       onLocationChange={(nextLat, nextLon) => {
                         setLat(nextLat);
                         setLon(nextLon);
+                        setLatText(nextLat.toFixed(5));
+                        setLonText(nextLon.toFixed(5));
                         setLocationConfirmed(true);
                         setStepError(null);
+                      }}
+                      onInvalidLocation={(reason) => {
+                        setStepError(reason);
                       }}
                       fieldLabel={name || t('Ruộng mới', 'New Field')}
                     />
@@ -955,13 +1113,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           {t('Vĩ độ (°Bắc):', 'Latitude (°N):')}
                         </span>
                         <input
-                          type="number"
-                          step="0.001"
-                          value={lat}
+                          type="text"
+                          inputMode="decimal"
+                          value={latText}
                           onChange={e => {
-                            setLat(parseFloat(e.target.value) || 0);
-                            setLocationConfirmed(true);
+                            setLatText(e.target.value);
+                            setStepError(null);
                           }}
+                          onBlur={() => handleManualCoordCommit(latText, lonText)}
                           className="w-full px-2.5 py-1.5 border border-stone-300 rounded-lg bg-white font-mono text-xs tabular-nums"
                         />
                       </div>
@@ -970,13 +1129,14 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           {t('Kinh độ (°Đông):', 'Longitude (°E):')}
                         </span>
                         <input
-                          type="number"
-                          step="0.001"
-                          value={lon}
+                          type="text"
+                          inputMode="decimal"
+                          value={lonText}
                           onChange={e => {
-                            setLon(parseFloat(e.target.value) || 0);
-                            setLocationConfirmed(true);
+                            setLonText(e.target.value);
+                            setStepError(null);
                           }}
+                          onBlur={() => handleManualCoordCommit(latText, lonText)}
                           className="w-full px-2.5 py-1.5 border border-stone-300 rounded-lg bg-white font-mono text-xs tabular-nums"
                         />
                       </div>
@@ -985,14 +1145,13 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <span className="text-emerald-900 font-semibold">
-                          {t('Điểm khí hậu gần nhất tự động ghép:', 'Auto-matched climate grid:')}{' '}
-                          <strong>{nearestGrid.cell.cellId}</strong> (
-                          {getLocalizedRegionName(nearestGrid.cell.region, lang)})
+                          {t('Vùng khí hậu tự động khớp:', 'Matched climate region:')}{' '}
+                          <strong>{getLocalizedRegionName(nearestGrid.cell.region, lang)}</strong>
                         </span>
                         <span className="text-[11px] text-emerald-700 block">
                           {t(
-                            `Cách vị trí ruộng ${nearestGrid.distanceKm} km • Nhiệt độ TB ${nearestGrid.cell.climatology21Yr.avgTemp}°C`,
-                            `${nearestGrid.distanceKm} km from field • Avg temp ${nearestGrid.cell.climatology21Yr.avgTemp}°C`
+                            `Nhiệt độ TB 25 năm ${nearestGrid.cell.climatology21Yr.avgTemp}°C • Mưa năm ${nearestGrid.cell.climatology21Yr.annualRainfallMm} mm`,
+                            `25-yr avg temp ${nearestGrid.cell.climatology21Yr.avgTemp}°C • Rain ${nearestGrid.cell.climatology21Yr.annualRainfallMm} mm/yr`
                           )}
                         </span>
                       </div>
@@ -1441,9 +1600,31 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                         <input
                           type="text"
                           value={cropName}
-                          onChange={e => setCropName(e.target.value)}
+                          onChange={e => {
+                            const nextVal = e.target.value;
+                            setCropName(nextVal);
+                            if (nextVal.trim().length >= 2) {
+                              const resolved = resolveCropBotanicalProfile(nextVal, seedFamily, cropCategory);
+                              if (resolved.seedFamilyId !== seedFamily) {
+                                setSeedFamily(resolved.seedFamilyId);
+                              }
+                              if (resolved.matchedPlant) {
+                                setCropCategory(resolved.matchedPlant.category);
+                              }
+                            }
+                          }}
                           className="w-full px-3 py-2 border border-stone-300 rounded-xl text-stone-900 font-semibold text-xs"
                         />
+                        {cropName.trim() && (
+                          <div className="text-[11px] text-emerald-800 font-medium mt-1">
+                            {t('Phân loại họ thực vật:', 'Botanical family:')}{' '}
+                            <strong>
+                              {lang === 'en'
+                                ? resolveCropBotanicalProfile(cropName, seedFamily, cropCategory).familyLabelEn
+                                : resolveCropBotanicalProfile(cropName, seedFamily, cropCategory).familyLabelVi}
+                            </strong>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label className="font-semibold text-stone-700 text-xs block mb-1">
@@ -1639,8 +1820,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     </div>
                     <p>
                       {t(
-                        `Vị trí (${lat.toFixed(4)}°B, ${lon.toFixed(4)}°Đ) sẽ ghép với điểm khí hậu ${nearestGrid.cell.cellId} (${getLocalizedRegionName(nearestGrid.cell.region, 'vi')}, cách ${nearestGrid.distanceKm} km) và xây dựng kế hoạch luân canh phù hợp cho ${getPlantDisplayName(cropName, 'vi')} (${getFamilyDisplayName(selectedFamilyObj, 'vi')}).`,
-                        `Coordinates (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E) will link to NASA grid ${nearestGrid.cell.cellId} (${getLocalizedRegionName(nearestGrid.cell.region, 'en')}, ${nearestGrid.distanceKm} km away) and tailor rotation advisories for ${getPlantDisplayName(cropName, 'en')} (${getFamilyDisplayName(selectedFamilyObj, 'en')}).`
+                        `Vị trí (${lat.toFixed(4)}°B, ${lon.toFixed(4)}°Đ) sẽ ghép với dữ liệu khí hậu vùng ${getLocalizedRegionName(nearestGrid.cell.region, 'vi')} (cách điểm tham chiếu ${nearestGrid.distanceKm} km) và xây dựng kế hoạch luân canh phù hợp cho ${getPlantDisplayName(cropName, 'vi')} (${getFamilyDisplayName(selectedFamilyObj, 'vi')}).`,
+                        `Coordinates (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E) will link to regional climate data for ${getLocalizedRegionName(nearestGrid.cell.region, 'en')} (${nearestGrid.distanceKm} km from reference point) and tailor rotation advisories for ${getPlantDisplayName(cropName, 'en')} (${getFamilyDisplayName(selectedFamilyObj, 'en')}).`
                       )}
                     </p>
                   </div>

@@ -49,9 +49,9 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
   const getProvenanceLabel = (type: string) => {
     switch (type) {
       case 'NASA_HISTORICAL':
-        return t('Khí hậu lịch sử 21 năm', '21-yr Historical Climate');
+        return t('Khí hậu lịch sử 25 năm', '25-yr Historical Climate');
       case 'NASA_CURRENT':
-        return t('Vệ tinh NASA / Môi trường', 'NASA / Satellite Observation');
+        return t('Thời tiết & Môi trường thực tế', 'Live Weather & Field Metrics');
       case 'USER_OBSERVATION':
         return t('Thông tin nông hộ', 'Farmer Observation');
       case 'AI_INFERENCE':
@@ -131,9 +131,11 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
                   {t('Chuỗi dữ liệu lịch sử:', 'Historical series:')}
                 </div>
                 <div className="font-semibold text-stone-800">
-                  {t('2005 – 2025 (21 năm)', '2005 – 2025 (21 years)')}
+                  {t('2001 – 2025 (25 năm)', '2001 – 2025 (25 years)')}
                 </div>
-                <div className="text-[11px] text-stone-400">NASA POWER (community=ag)</div>
+                <div className="text-[11px] text-stone-400">
+                  {t('Chuỗi khí hậu & ẩm độ vùng', 'Regional climate & moisture series')}
+                </div>
               </div>
               <div className="p-2.5 bg-stone-50 border border-stone-200 rounded-lg">
                 <div className="text-stone-500">
@@ -228,10 +230,10 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
                 )}
               </p>
               <p>
-                • <strong>{t('Tích hợp OCO-2, GRACE & GHGx:', 'OCO-2, GRACE & GHGx integration:')}</strong>{' '}
+                • <strong>{t('Cân bằng Carbon, Nước ngầm & Khí nhà kính:', 'Carbon, Groundwater & Emissions Balance:')}</strong>{' '}
                 {t(
-                  'Khi đồng bộ dữ liệu môi trường, hệ thống kết hợp SIF quang hợp, mực nước ngầm và phát thải CH₄/N₂O để cân chỉnh tưới, đạm và luân canh.',
-                  'When synced, SIF photosynthesis, GRACE groundwater trends, and CH₄/N₂O fluxes refine irrigation, nitrogen timing, and rotation choices.'
+                  'Khi cập nhật chỉ số môi trường, hệ thống kết hợp tốc độ quang hợp tán lá, trữ lượng nước ngầm và phát thải CH₄/N₂O để cân chỉnh tưới, đạm và luân canh.',
+                  'When refreshed, canopy photosynthesis, groundwater reserve trends, and CH₄/N₂O fluxes refine irrigation, nitrogen timing, and rotation choices.'
                 )}
               </p>
             </div>
@@ -270,8 +272,8 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
               </li>
               <li>
                 {t(
-                  'Khi bạn bấm "Đồng bộ dữ liệu NASA", OCO-2/GRACE/GHGx/SMAP mới được đưa thẳng vào chẩn đoán.',
-                  'Clicking "Sync NASA Data" feeds fresh OCO-2, GRACE, GHGx, and SMAP telemetry straight into diagnostics.'
+                  'Khi bạn bấm "Cập nhật chỉ số môi trường", chỉ số quang hợp, nước ngầm và ẩm đất mới được đưa thẳng vào chẩn đoán.',
+                  'Clicking "Refresh Field Metrics" feeds fresh photosynthesis, groundwater, and moisture data straight into diagnostics.'
                 )}
               </li>
             </ul>

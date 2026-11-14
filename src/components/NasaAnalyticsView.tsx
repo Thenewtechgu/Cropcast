@@ -14,9 +14,11 @@ import {
 import { FieldProfile, WeatherObservation } from '../types';
 import {
   getCellMonthlyProfile,
+  getCellAnnualSeries2001to2025,
   findNearestNasaGrid,
   getLocalizedRegionName,
 } from '../data/nasaVietnamGrid';
+import { getPlantDisplayName } from '../data/cropTaxonomy';
 import { SatelliteMap } from './SatelliteMap';
 import { computeHarmonizedIndicators } from '../services/rotationEngine';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -43,29 +45,13 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthlyData = getCellMonthlyProfile(cell, lang);
+  const annualSeries = getCellAnnualSeries2001to2025(cell);
   const harmonized = computeHarmonizedIndicators(
     field,
     weather,
     { rainDeltaPct: 0, tempDeltaC: 0 },
     lang
   );
-
-  const earth = field.adaptiveMemory?.earthMetrics;
-  const formatTimestamp = (iso?: string) => {
-    if (!iso) return t('Chưa đồng bộ (nhấn Đồng bộ ở Tổng quan)', 'Not synced yet (click Sync on Dashboard)');
-    if (iso === 'Hôm nay (Cập nhật 07:00)') {
-      return t('Hôm nay (Cập nhật 07:00)', 'Today (Updated 07:00)');
-    }
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString(lang === 'en' ? 'en-US' : 'vi-VN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   const indicatorsMeta = [
     {
@@ -186,8 +172,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           : t('Chưa ghi nhận mùa mưa cực đoan kéo dài.', 'No prolonged extreme rainfall months flagged.'),
     },
     water_trend: {
-      title: t('Lớp Xu hướng nguồn nước dài hạn', 'Long-Term Water & GRACE Trend'),
-      badge: t('Chu kỳ đối chiếu 21 năm + GRACE', '21-yr Baseline + GRACE'),
+      title: t('Lớp Xu hướng nguồn nước dài hạn', 'Long-Term Water & Reserve Trend'),
+      badge: t('Chu kỳ đối chiếu 25 năm (2001–2025)', '25-yr Baseline (2001–2025)'),
       detail: harmonized.longTermWaterTrend,
       riskNote: harmonized.vegetationStressNote,
     },
@@ -258,7 +244,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-0.5 rounded-full">
-              {t('Chuỗi khí hậu 21 năm (2005–2025)', '21-Year Climatology (2005–2025)')}
+              {t('Chuỗi khí hậu 25 năm (2001–2025)', '25-Year Climatology (2001–2025)')}
             </span>
             <span className="text-xs text-stone-500">
               {t('Vùng', 'Region')} {getLocalizedRegionName(cell.region, lang)}
@@ -271,9 +257,11 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             )}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-            {t('Điểm khí hậu gần nhất:', 'Nearest NASA grid:')} <strong>{field.nasaGrid.cellId}</strong> (
-            {cell.lat}°N, {cell.lon}°E · {t('cách ruộng', 'distance')}{' '}
-            <strong>{field.nasaGrid.distanceKm} km</strong>)
+            {t('Điểm khí hậu tham chiếu gần nhất:', 'Nearest climate point:')}{' '}
+            <strong>
+              {cell.lat}°N, {cell.lon}°E
+            </strong>{' '}
+            · {t('cách ruộng', 'distance')} <strong>{field.nasaGrid.distanceKm} km</strong>
           </p>
         </div>
 
@@ -319,7 +307,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
                 { id: 'moisture', label: t('Độ ẩm đất vùng rễ', 'Root Soil Moisture') },
                 { id: 'heat', label: t('Nắng nóng & Bốc hơi', 'Heat & Evapotranspiration') },
                 { id: 'erosion', label: t('Rủi ro xói mòn & Úng', 'Erosion & Flood Risk') },
-                { id: 'water_trend', label: t('Xu hướng nước dài hạn', 'Water & GRACE Trend') },
+                { id: 'water_trend', label: t('Xu hướng nước dài hạn', 'Long-Term Water Trend') },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -352,80 +340,132 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
         </div>
       </div>
 
-      {/* Data Source Last Updated Column Table */}
-      <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">
-        <div className="px-5 py-3 border-b border-stone-100 flex items-center justify-between">
-          <h2 className="text-xs sm:text-sm font-bold text-stone-900 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-emerald-700" />
-            {t('Nguồn dữ liệu NASA & Lần cuối cập nhật', 'NASA Data Sources & Last Updated')}
-          </h2>
-          <span className="text-[11px] text-stone-500">NASA Space Apps 2026</span>
+      {/* 25-Year Historical Climate & Crop Yield Summary (2001–2025) */}
+      <div className="bg-white rounded-2xl border border-stone-200 p-5 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+          <div>
+            <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-emerald-700" />
+              {t(
+                'Chuỗi khí hậu & Năng suất cây trồng 25 năm (2001–2025)',
+                '25-Year Climate & Crop Yield Record (2001–2025)'
+              )}
+            </h2>
+            <p className="text-xs text-stone-500 mt-0.5">
+              {t(
+                `Chỉ số khí hậu thực tế và năng suất tham chiếu cho ruộng ${field.name} (${getPlantDisplayName(field.crop.name, 'vi')}).`,
+                `25-year historical metrics and yield baseline tailored for ${field.name} (${getPlantDisplayName(field.crop.name, 'en')}).`
+              )}
+            </p>
+          </div>
+          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 self-start sm:self-auto">
+            2001–2025 ({annualSeries.length} {t('năm', 'yrs')})
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-stone-50 text-[11px] text-stone-500 border-b border-stone-200">
-              <tr>
-                <th className="py-2.5 px-4 font-semibold">{t('Nguồn dữ liệu', 'Data Source')}</th>
-                <th className="py-2.5 px-4 font-semibold">{t('Phạm vi chỉ số', 'Coverage')}</th>
-                <th className="py-2.5 px-4 font-semibold">{t('Lần cuối cập nhật', 'Last updated')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              <tr>
-                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA POWER (Ag)</td>
-                <td className="py-2.5 px-4 text-stone-600">
-                  {t('Nhiệt độ, Mưa, Ẩm đất, Bức xạ (21 năm)', 'Temp, Rain, Root/Surface Moisture, Solar')}
-                </td>
-                <td className="py-2.5 px-4 font-mono text-stone-700">
-                  {formatTimestamp(earth?.nasaPowerLastUpdated || weather.observationDate)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA OCO-2 / OCO-3</td>
-                <td className="py-2.5 px-4 text-stone-600">
-                  {earth
-                    ? `SIF ${earth.carbonFluxOco2.sifWm2SrUm} · ${earth.carbonFluxOco2.carbonUptakeTonHaYr} ${t('tấn CO₂/ha', 't CO₂/ha')}`
-                    : t('Quang hợp SIF & Hấp thụ Carbon', 'SIF Photosynthesis & Carbon Uptake')}
-                </td>
-                <td className="py-2.5 px-4 font-mono text-stone-700">
-                  {formatTimestamp(earth?.carbonFluxOco2.lastUpdated)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA GRACE / GRACE-FO</td>
-                <td className="py-2.5 px-4 text-stone-600">
-                  {earth
-                    ? `${earth.groundwaterAnomalyGrace.lweThicknessCm} cm LWE`
-                    : t('Biến động trữ lượng nước ngầm', 'Groundwater Storage Anomaly')}
-                </td>
-                <td className="py-2.5 px-4 font-mono text-stone-700">
-                  {formatTimestamp(earth?.groundwaterAnomalyGrace.lastUpdated)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-4 font-semibold text-stone-800">GHGx / EDGAR</td>
-                <td className="py-2.5 px-4 text-stone-600">
-                  {earth
-                    ? `${earth.greenhouseGasEdgar.co2eqTonHa} ${t('tấn CO₂e/ha', 't CO₂e/ha')}`
-                    : t('Phát thải CH₄ & N₂O nông nghiệp', 'Agricultural CH₄ & N₂O Flux')}
-                </td>
-                <td className="py-2.5 px-4 font-mono text-stone-700">
-                  {formatTimestamp(earth?.greenhouseGasEdgar.lastUpdated)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-4 font-semibold text-stone-800">NASA SMAP · MODIS · GPM</td>
-                <td className="py-2.5 px-4 text-stone-600">
-                  {earth?.smapModis
-                    ? `${t('Ẩm mặt', 'SMAP')} ${earth.smapModis.smapSoilMoisturePct}% · NDVI ${earth.smapModis.modisNdvi} · GPM ${earth.smapModis.gpmPrecipitation7dMm}mm`
-                    : t('Độ ẩm lớp mặt, NDVI tán lá & Mưa 7 ngày', 'Surface Moisture, Canopy NDVI & 7-day GPM Rain')}
-                </td>
-                <td className="py-2.5 px-4 font-mono text-stone-700">
-                  {formatTimestamp(earth?.smapModis?.lastUpdated)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+
+        {/* Key 25-year numerical indicators + practical field impact */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-1">
+            <span className="text-[11px] font-semibold text-stone-500 block">
+              {t('Điểm sương TB (25 năm)', 'Mean Dew Point (25-yr)')}
+            </span>
+            <div className="text-lg font-black text-stone-900 font-mono tabular-nums">
+              {cell.climatology21Yr.avgDewPointC ?? 20.5}°C
+            </div>
+            <p className="text-[11px] text-stone-600 leading-snug">
+              {t(
+                'Điểm sương cao (>21°C) báo hiệu sương đêm dày, dễ phát sinh nấm lá trên ruộng.',
+                'High dew point (>21°C) means heavy night dew and higher leaf disease pressure.'
+              )}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-200 space-y-1">
+            <span className="text-[11px] font-semibold text-amber-900 block">
+              {t('Sức hút bốc hơi (VPD)', 'Vapor Pressure Deficit')}
+            </span>
+            <div className="text-lg font-black text-amber-950 font-mono tabular-nums">
+              {cell.climatology21Yr.avgVpdMinHpa ?? 3.8} – {cell.climatology21Yr.avgVpdMaxHpa ?? 16.4} hPa
+            </div>
+            <p className="text-[11px] text-stone-600 leading-snug">
+              {t(
+                'VPD >15 hPa khiến lá thoát hơi nhanh; cần phủ rơm hoặc tưới sáng sớm để giữ sức cây.',
+                'VPD >15 hPa accelerates crop water loss; irrigate early morning or mulch beds.'
+              )}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-1">
+            <span className="text-[11px] font-semibold text-emerald-900 block">
+              {t('Năng suất TB 25 năm', '25-Year Baseline Yield')}
+            </span>
+            <div className="text-lg font-black text-emerald-950 font-mono tabular-nums">
+              {cell.climatology21Yr.avgRiceYieldTonHa ?? 5.6} {t('tấn/ha', 't/ha')}
+            </div>
+            <p className="text-[11px] text-stone-600 leading-snug">
+              {t(
+                'Mốc năng suất tham chiếu giúp đánh giá ảnh hưởng của hạn hoặc mưa cực đoan theo từng năm.',
+                'Regional yield benchmark reflecting annual temperature and rainfall swings.'
+              )}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-sky-50/60 border border-sky-200 space-y-1">
+            <span className="text-[11px] font-semibold text-sky-900 block">
+              {t('Hiện tại vs Nền 25 năm', 'Today vs. 25-Yr Avg')}
+            </span>
+            <div className="text-lg font-black text-sky-950 font-mono tabular-nums">
+              {weather.temp}°C / {cell.climatology21Yr.avgTemp}°C
+            </div>
+            <p className="text-[11px] text-stone-600 leading-snug">
+              {weather.temp - cell.climatology21Yr.avgTemp >= 2
+                ? t(
+                    'Đang ấm hơn trung bình nhiều năm — chú ý bổ sung ẩm độ vùng rễ.',
+                    'Warmer than 25-yr norm — monitor root-zone moisture closely.'
+                  )
+                : t(
+                    'Nhiệt độ sát mức trung bình 25 năm, thuận lợi cho sinh trưởng ổn định.',
+                    'Near the 25-yr norm, supporting steady crop development.'
+                  )}
+            </p>
+          </div>
+        </div>
+
+        {/* Compact 2001-2025 Annual Trend Strip */}
+        <div className="pt-2">
+          <div className="flex items-center justify-between text-[11px] text-stone-500 mb-2">
+            <span className="font-semibold text-stone-700">
+              {t('Biến động nhiệt độ TB & Năng suất từng năm (2001–2025)', 'Annual Mean Temp & Yield Index (2001–2025)')}
+            </span>
+            <span>{t('Rê chuột vào từng năm để xem số liệu', 'Hover each year for exact metrics')}</span>
+          </div>
+          <div className="overflow-x-auto pb-1">
+            <div className="min-w-[620px] grid grid-cols-[repeat(25,minmax(0,1fr))] gap-1 h-24 items-end border-b border-stone-200 pb-1">
+              {annualSeries.map((pt) => {
+                const hPct = Math.min(100, Math.max(20, Math.round((pt.yieldIndexPct / 120) * 100)));
+                return (
+                  <div key={pt.year} className="flex flex-col items-center h-full justify-end group relative">
+                    <div className="hidden group-hover:block absolute bottom-full mb-1 z-20 bg-stone-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap shadow-md pointer-events-none">
+                      <strong>{pt.year}</strong>: {pt.tmeanC}°C · {pt.pptMm}mm · VPD {pt.vpdMaxHpa} hPa · {pt.riceYieldTonHa} {t('tấn/ha', 't/ha')}
+                    </div>
+                    <div
+                      className={`w-full rounded-t-xs transition-all ${
+                        pt.yieldIndexPct >= 100 ? 'bg-emerald-600' : pt.yieldIndexPct >= 92 ? 'bg-amber-500' : 'bg-rose-500'
+                      }`}
+                      style={{ height: `${hPct}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="min-w-[620px] flex justify-between text-[10px] text-stone-400 font-mono mt-1">
+              <span>2001</span>
+              <span>2007</span>
+              <span>2013</span>
+              <span>2019</span>
+              <span>2025</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -478,8 +518,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500">
               {t(
-                'Số liệu khí hậu trung bình 21 năm (2005–2025) tại điểm lưới gần thửa ruộng nhất',
-                '21-year mean climate series (2005–2025) at the nearest NASA grid point'
+                'Số liệu khí hậu trung bình 25 năm (2001–2025) tại điểm lưới gần thửa ruộng nhất',
+                '25-year mean climate series (2001–2025) at the nearest climate grid point'
               )}
             </p>
           </div>

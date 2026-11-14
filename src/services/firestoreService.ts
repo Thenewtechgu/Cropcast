@@ -15,10 +15,15 @@ import {
 } from 'firebase/firestore';
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateEmail,
   updateProfile,
+  verifyBeforeUpdateEmail,
   deleteUser,
   User as FirebaseUser,
 } from 'firebase/auth';
@@ -40,7 +45,21 @@ import {
   FieldProfile,
   PlotPlanRecord,
 } from '../types';
-import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
+import { findNearestNasaGrid, isWithinVietnamTerritory } from '../data/nasaVietnamGrid';
+
+export function isSyntheticPlaceholderEmail(email?: string | null): boolean {
+  if (!email) return true;
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) return true;
+  return trimmed.endsWith('@users.cropcast.app');
+}
+
+export function isValidRealEmail(email: string): boolean {
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed || trimmed.length > 200) return false;
+  if (isSyntheticPlaceholderEmail(trimmed)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed);
+}
 
 function normalizeLoginIdentifier(rawInput: string): {
   username: string;
@@ -86,7 +105,7 @@ function normalizeLoginIdentifier(rawInput: string): {
 function mapAuthErrorMessage(err: any): string {
   const code = err?.code || '';
   if (code === 'auth/email-already-in-use') {
-    return 'Email hoặc tài khoản này đã được đăng ký. Vui lòng chuyển sang Đăng nhập.';
+    return 'Email này đã được đăng ký cho một tài khoản khác. Vui lòng kiểm tra lại hoặc đăng nhập.';
   }
   if (code === 'auth/invalid-email') {
     return 'Địa chỉ Email không đúng định dạng.';
@@ -96,10 +115,16 @@ function mapAuthErrorMessage(err: any): string {
     code === 'auth/wrong-password' ||
     code === 'auth/user-not-found'
   ) {
-    return 'Email / tên đăng nhập hoặc mật khẩu chưa đúng.';
+    return 'Email / tài khoản hoặc mật khẩu chưa đúng.';
   }
   if (code === 'auth/weak-password') {
     return 'Mật khẩu quá yếu. Vui lòng dùng ít nhất 6 ký tự.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Bạn đã thao tác quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.';
+  }
+  if (code === 'auth/requires-recent-login') {
+    return 'Vui lòng nhập mật khẩu hiện tại để xác nhận danh tính trước khi liên kết Email.';
   }
   if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
     return 'Phương thức Email/Mật khẩu chưa được bật trong Firebase Console (Authentication → Sign-in method → Email/Password). Bạn có thể bật trong Firebase Console hoặc đăng nhập nhanh bằng Google.';
@@ -114,7 +139,7 @@ function mapAuthErrorMessage(err: any): string {
     const host = typeof window !== 'undefined' ? window.location.hostname : '';
     return `Tên miền "${host}" chưa được cấp phép trong Firebase Authentication (Authorized domains). Hãy thêm tên miền này trong Firebase Console → Authentication → Settings → Authorized domains.`;
   }
-  return err?.message || 'Không thể đăng nhập lúc này. Vui lòng thử lại.';
+  return err?.message || 'Không thể xác thực lúc này. Vui lòng thử lại.';
 }
 
 export interface UploadedNasaDatasetDoc {
@@ -169,7 +194,8 @@ export const FirestoreService = {
   async ensureUserProfile(
     fbUser: FirebaseUser,
     fallbackDisplayName?: string,
-    fallbackEmail?: string
+    fallbackEmail?: string,
+    fallbackPhone?: string
   ): Promise<void> {
     const userRef = doc(db, 'users', fbUser.uid);
     const resolvedName = (
@@ -177,7 +203,9 @@ export const FirestoreService = {
       fallbackDisplayName ||
       'Nông dân CropCast'
     ).slice(0, 120);
-    const resolvedEmail = (fbUser.email || fallbackEmail || '').slice(0, 200);
+    const authEmail = !isSyntheticPlaceholderEmail(fbUser.email) ? fbUser.email || '' : '';
+    const resolvedEmail = (authEmail || fallbackEmail || fbUser.email || '').slice(0, 200);
+    const resolvedPhone = (fallbackPhone || '').trim().slice(0, 30);
     const resolvedPhoto = (fbUser.photoURL || '').slice(0, 500);
 
     try {
@@ -187,10 +215,27 @@ export const FirestoreService = {
           uid: fbUser.uid,
           displayName: resolvedName,
           email: resolvedEmail,
+          phone: resolvedPhone,
           photoURL: resolvedPhoto,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
+      } else {
+        const existingData = snap.data() || {};
+        const patch: Record<string, any> = {};
+        if (
+          isSyntheticPlaceholderEmail(existingData.email) &&
+          !isSyntheticPlaceholderEmail(resolvedEmail)
+        ) {
+          patch.email = resolvedEmail;
+        }
+        if (resolvedPhone && !existingData.phone) {
+          patch.phone = resolvedPhone;
+        }
+        if (Object.keys(patch).length > 0) {
+          patch.updatedAt = serverTimestamp();
+          await updateDoc(userRef, patch);
+        }
       }
       if (isBootstrapAdminEmail(resolvedEmail)) {
         await setDoc(
@@ -208,29 +253,77 @@ export const FirestoreService = {
     }
   },
 
-  async signUpWithUsername(identifier: string, password: string): Promise<AppUser> {
-    const { username: cleanUser, email, displayName } = normalizeLoginIdentifier(identifier);
+  async checkUserNeedsRecoveryEmail(fbUser: FirebaseUser): Promise<boolean> {
+    if (isSyntheticPlaceholderEmail(fbUser.email)) {
+      return true;
+    }
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
+      const snap = await getDoc(doc(db, 'users', fbUser.uid));
+      if (!snap.exists()) {
+        return isSyntheticPlaceholderEmail(fbUser.email);
+      }
+      const docEmail = String(snap.data()?.email || '');
+      if (isSyntheticPlaceholderEmail(docEmail)) {
+        if (!isSyntheticPlaceholderEmail(fbUser.email)) {
+          await updateDoc(doc(db, 'users', fbUser.uid), {
+            email: String(fbUser.email).slice(0, 200),
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+          return false;
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return isSyntheticPlaceholderEmail(fbUser.email);
+    }
+  },
+
+  async signUpWithEmail(params: {
+    email: string;
+    password: string;
+    displayName?: string;
+    phone?: string;
+  }): Promise<AppUser> {
+    const cleanEmail = params.email.trim().toLowerCase();
+    if (!isValidRealEmail(cleanEmail)) {
+      throw new Error('Vui lòng nhập địa chỉ Email hợp lệ (VD: nongdan@gmail.com).');
+    }
+    if (!params.password || params.password.length < 6) {
+      throw new Error('Mật khẩu cần có ít nhất 6 ký tự.');
+    }
+
+    const localPart = cleanEmail.split('@')[0] || 'farmer';
+    const resolvedName = (params.displayName?.trim() || localPart || 'Nông dân CropCast').slice(0, 120);
+    const cleanPhone = (params.phone || '').trim().slice(0, 30);
+
+    try {
+      const result = await createUserWithEmailAndPassword(auth, cleanEmail, params.password);
       const fbUser = result.user;
-      await updateProfile(fbUser, { displayName }).catch(() => {});
+      await updateProfile(fbUser, { displayName: resolvedName }).catch(() => {});
 
-      await this.ensureUserProfile(fbUser, displayName, email);
+      await this.ensureUserProfile(fbUser, resolvedName, cleanEmail, cleanPhone);
 
-      const isAdmin = await this.checkIsAdmin(fbUser.uid, email, fbUser.emailVerified);
+      const isAdmin = await this.checkIsAdmin(fbUser.uid, cleanEmail, fbUser.emailVerified);
 
       return {
         uid: fbUser.uid,
-        username: cleanUser,
-        displayName,
-        email,
+        username: localPart.slice(0, 60),
+        displayName: resolvedName,
+        email: cleanEmail,
+        phone: cleanPhone || undefined,
         emailVerified: fbUser.emailVerified,
         isAdmin,
+        needsRecoveryEmail: false,
         authMode: 'firebase',
       };
     } catch (err: any) {
       throw new Error(mapAuthErrorMessage(err));
     }
+  },
+
+  async signUpWithUsername(identifier: string, password: string): Promise<AppUser> {
+    return this.signUpWithEmail({ email: identifier, password });
   },
 
   async signInWithUsername(identifier: string, password: string): Promise<AppUser> {
@@ -241,7 +334,10 @@ export const FirestoreService = {
       const resolvedName = (fbUser.displayName || displayName || 'Nông dân CropCast').slice(0, 120);
 
       await this.ensureUserProfile(fbUser, resolvedName, email);
-      const isAdmin = await this.checkIsAdmin(fbUser.uid, fbUser.email || email, fbUser.emailVerified);
+      const [isAdmin, needsRecoveryEmail] = await Promise.all([
+        this.checkIsAdmin(fbUser.uid, fbUser.email || email, fbUser.emailVerified),
+        this.checkUserNeedsRecoveryEmail(fbUser),
+      ]);
 
       return {
         uid: fbUser.uid,
@@ -251,6 +347,7 @@ export const FirestoreService = {
         photoURL: fbUser.photoURL || undefined,
         emailVerified: fbUser.emailVerified,
         isAdmin,
+        needsRecoveryEmail,
         authMode: 'firebase',
       };
     } catch (err: any) {
@@ -275,16 +372,21 @@ export const FirestoreService = {
             uid: fbUser.uid,
             displayName: resolvedName,
             email: resolvedEmail.slice(0, 200),
+            phone: '',
             photoURL: resolvedPhoto,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
         } else {
-          await updateDoc(userRef, {
+          const updatePatch: Record<string, any> = {
             displayName: resolvedName,
             photoURL: resolvedPhoto,
             updatedAt: serverTimestamp(),
-          });
+          };
+          if (resolvedEmail && isSyntheticPlaceholderEmail(existingSnap.data()?.email)) {
+            updatePatch.email = resolvedEmail.slice(0, 200);
+          }
+          await updateDoc(userRef, updatePatch);
         }
         if (isBootstrapAdminEmail(resolvedEmail)) {
           await setDoc(
@@ -301,6 +403,8 @@ export const FirestoreService = {
         console.warn('Non-blocking google profile sync warning:', err);
       }
 
+      const needsRecoveryEmail = await this.checkUserNeedsRecoveryEmail(fbUser);
+
       return {
         uid: fbUser.uid,
         displayName: resolvedName,
@@ -308,8 +412,73 @@ export const FirestoreService = {
         photoURL: fbUser.photoURL || undefined,
         emailVerified: fbUser.emailVerified,
         isAdmin,
+        needsRecoveryEmail,
         authMode: 'firebase',
       };
+    } catch (err: any) {
+      throw new Error(mapAuthErrorMessage(err));
+    }
+  },
+
+  async linkAccountEmail(
+    newEmail: string,
+    currentPassword?: string
+  ): Promise<{ status: 'linked' | 'verification_sent'; email: string }> {
+    const fbUser = auth.currentUser;
+    if (!fbUser) {
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+    }
+    const cleanEmail = newEmail.trim().toLowerCase();
+    if (!isValidRealEmail(cleanEmail)) {
+      throw new Error('Vui lòng nhập địa chỉ Email hợp lệ (VD: nongdan@gmail.com).');
+    }
+
+    try {
+      if (currentPassword && fbUser.email) {
+        const cred = EmailAuthProvider.credential(fbUser.email, currentPassword);
+        await reauthenticateWithCredential(fbUser, cred);
+      }
+
+      try {
+        await updateEmail(fbUser, cleanEmail);
+        await setDoc(
+          doc(db, 'users', fbUser.uid),
+          {
+            uid: fbUser.uid,
+            displayName: (fbUser.displayName || cleanEmail.split('@')[0] || 'Nông dân CropCast').slice(0, 120),
+            email: cleanEmail.slice(0, 200),
+            photoURL: (fbUser.photoURL || '').slice(0, 500),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        return { status: 'linked', email: cleanEmail };
+      } catch (updateErr: any) {
+        if (updateErr?.code === 'auth/operation-not-allowed') {
+          await verifyBeforeUpdateEmail(fbUser, cleanEmail);
+          return { status: 'verification_sent', email: cleanEmail };
+        }
+        throw updateErr;
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/requires-recent-login') {
+        const recentErr: any = new Error(
+          'Vui lòng nhập mật khẩu hiện tại để xác minh trước khi liên kết Email.'
+        );
+        recentErr.code = 'auth/requires-recent-login';
+        throw recentErr;
+      }
+      throw new Error(mapAuthErrorMessage(err));
+    }
+  },
+
+  async sendPasswordReset(email: string): Promise<void> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isValidRealEmail(cleanEmail)) {
+      throw new Error('Vui lòng nhập địa chỉ Email hợp lệ đã liên kết với tài khoản của bạn.');
+    }
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
     } catch (err: any) {
       throw new Error(mapAuthErrorMessage(err));
     }
@@ -614,6 +783,14 @@ export const FirestoreService = {
     uid: string,
     fieldData: Omit<FieldProfile, 'id' | 'nasaGrid'>
   ): Promise<FieldProfile> {
+    const territoryCheck = isWithinVietnamTerritory(Number(fieldData.lat), Number(fieldData.lon));
+    if (!territoryCheck.valid) {
+      throw new Error(
+        territoryCheck.reasonVi ||
+          'Vị trí thửa ruộng nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí trong Việt Nam.'
+      );
+    }
+
     const fieldId = `FIELD_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const { cell, distanceKm } = findNearestNasaGrid(fieldData.lat, fieldData.lon);
     const nasaGrid = {
@@ -671,6 +848,14 @@ export const FirestoreService = {
   },
 
   async updateField(uid: string, field: FieldProfile): Promise<void> {
+    const territoryCheck = isWithinVietnamTerritory(Number(field.lat), Number(field.lon));
+    if (!territoryCheck.valid) {
+      throw new Error(
+        territoryCheck.reasonVi ||
+          'Vị trí thửa ruộng nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí trong Việt Nam.'
+      );
+    }
+
     const targetOwnerUid = field.ownerId || uid;
     const { cell, distanceKm } = findNearestNasaGrid(field.lat, field.lon);
     const updatedGrid = {

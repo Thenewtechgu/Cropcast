@@ -119,8 +119,8 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
       setToast({
         type: 'ok',
         text: t(
-          'Đã đồng bộ dữ liệu mới nhất từ NASA POWER, SMAP/MODIS/GPM, OCO-2, GRACE và GHGx/EDGAR.',
-          'Synced latest data from NASA POWER, SMAP/MODIS/GPM, OCO-2, GRACE-FO, and GHGx/EDGAR.'
+          'Đã cập nhật chỉ số môi trường, độ ẩm và cân bằng nước mới nhất cho thửa ruộng.',
+          'Refreshed latest environmental, soil moisture, and water balance metrics for your field.'
         ),
       });
     } catch (err: any) {
@@ -128,7 +128,7 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
         type: 'err',
         text:
           err?.message ||
-          t('Không thể đồng bộ dữ liệu NASA lúc này.', 'Unable to sync NASA data right now.'),
+          t('Không thể cập nhật chỉ số môi trường lúc này.', 'Unable to refresh field metrics right now.'),
       });
     } finally {
       setSyncing(false);
@@ -186,20 +186,17 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-base sm:text-lg font-bold text-stone-900">
-            {t(
-              'Môi trường & Bền vững (OCO-2 · GRACE · GHGx · SMAP)',
-              'Environment & Sustainability (OCO-2 · GRACE · GHGx · SMAP)'
-            )}
+            {t('Chỉ số Môi trường & Sức khỏe Ruộng', 'Field Environment & Sustainability Metrics')}
           </h2>
           <p className="text-xs text-stone-500">
             {snapshot
               ? t(
-                  `Lần cuối đồng bộ: ${formatTimestamp(snapshot.syncedAt)} · Điểm bền vững: ${snapshot.sustainabilityScore}/100`,
-                  `Last synced: ${formatTimestamp(snapshot.syncedAt)} · Sustainability score: ${snapshot.sustainabilityScore}/100`
+                  `Cập nhật lúc: ${formatTimestamp(snapshot.syncedAt)} · Điểm bền vững: ${snapshot.sustainabilityScore}/100`,
+                  `Updated: ${formatTimestamp(snapshot.syncedAt)} · Sustainability score: ${snapshot.sustainabilityScore}/100`
                 )
               : t(
-                  'Theo dõi hấp thụ carbon, nước ngầm, độ ẩm vệ tinh và phát thải khí nhà kính tại thửa ruộng',
-                  'Track carbon uptake, groundwater anomaly, satellite soil moisture, and greenhouse gas emissions'
+                  'Theo dõi hấp thụ carbon, trữ lượng nước ngầm, độ ẩm lớp mặt và phát thải đồng ruộng',
+                  'Track carbon uptake, groundwater reserve, topsoil moisture, and field greenhouse gas balance'
                 )}
           </p>
         </div>
@@ -212,8 +209,8 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
         >
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
           {syncing
-            ? t('Đang đồng bộ...', 'Syncing...')
-            : t('Đồng bộ dữ liệu NASA', 'Sync NASA Data')}
+            ? t('Đang cập nhật...', 'Refreshing...')
+            : t('Cập nhật chỉ số môi trường', 'Refresh Field Metrics')}
         </button>
       </div>
 
@@ -257,12 +254,12 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
       ) : snapshot ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Card 1: NASA OCO-2 / OCO-3 */}
+            {/* Card 1: Carbon Uptake & Canopy Photosynthesis */}
             <div className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
                 <span className="font-semibold text-stone-800 flex items-center gap-1.5">
                   <Leaf className="w-4 h-4 text-emerald-700" />
-                  {t('Hấp thụ Carbon (OCO-2)', 'Carbon Uptake (OCO-2)')}
+                  {t('Hấp thụ Carbon & Quang hợp', 'Carbon Uptake & Photosynthesis')}
                 </span>
                 <span className="font-semibold text-emerald-700">{sifLabel}</span>
               </div>
@@ -275,12 +272,23 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                   </span>
                 </div>
                 <div className="text-xs text-stone-500 mt-1 font-mono tabular-nums">
-                  SIF: {oco2?.sifWm2SrUm} · CO₂: {oco2?.xco2Ppm} ppm
+                  {t('Chỉ số quang hợp:', 'Photosynthesis index:')} {oco2?.sifWm2SrUm} · CO₂: {oco2?.xco2Ppm} ppm
                 </div>
-                <div className="text-[11px] text-stone-400 mt-1 flex items-center gap-1">
+                <p className="text-[11px] text-stone-600 mt-2 leading-snug">
+                  {oco2?.photosynthesisStatus === 'low'
+                    ? t(
+                        'Tán lá quang hợp yếu — kiểm tra thiếu nắng, thiếu đạm hoặc rễ bị úng.',
+                        'Lower leaf activity — check for cloud stress, nitrogen gap, or root stress.'
+                      )
+                    : t(
+                        'Tán cây hấp thụ CO₂ ổn định, giúp tích lũy chất hữu cơ và nuôi hạt/củ tốt.',
+                        'Canopy is actively assimilating carbon into strong foliage and yield.'
+                      )}
+                </p>
+                <div className="text-[11px] text-stone-400 mt-1.5 flex items-center gap-1">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>
-                    {t('Lần cuối cập nhật:', 'Last updated:')}{' '}
+                    {t('Cập nhật:', 'Updated:')}{' '}
                     {formatTimestamp(oco2?.lastUpdated || snapshot.syncedAt)}
                   </span>
                 </div>
@@ -293,12 +301,12 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
               />
             </div>
 
-            {/* Card 2: NASA GRACE / GRACE-FO */}
+            {/* Card 2: Groundwater Reserve */}
             <div className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
                 <span className="font-semibold text-stone-800 flex items-center gap-1.5">
                   <Droplets className="w-4 h-4 text-sky-700" />
-                  {t('Nước ngầm (GRACE)', 'Groundwater (GRACE)')}
+                  {t('Trữ lượng Nước ngầm', 'Groundwater Reserve')}
                 </span>
                 <span className={`font-semibold ${graceTone}`}>{graceLabel}</span>
               </div>
@@ -308,15 +316,26 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                   {(grace?.lweThicknessCm ?? 0) >= 0
                     ? `+${grace?.lweThicknessCm}`
                     : grace?.lweThicknessCm}{' '}
-                  <span className="text-xs font-semibold text-stone-500">cm LWE</span>
+                  <span className="text-xs font-semibold text-stone-500">cm</span>
                 </div>
                 <div className="text-xs text-stone-500 mt-1 font-mono tabular-nums">
                   {t('Cân bằng ẩm rễ:', 'Root water balance:')} {grace?.soilWaterBalancePct}%
                 </div>
-                <div className="text-[11px] text-stone-400 mt-1 flex items-center gap-1">
+                <p className="text-[11px] text-stone-600 mt-2 leading-snug">
+                  {grace?.groundwaterStatus === 'depleting'
+                    ? t(
+                        'Mực nước ngầm đang hạ — hạn chế bơm giếng sâu và ưu tiên tưới tiết kiệm / phủ gốc.',
+                        'Aquifer level is declining — reduce deep pumping and favor mulching or drip watering.'
+                      )
+                    : t(
+                        'Nguồn nước tầng sâu ổn định, đủ dự phòng ẩm cho rễ qua các đợt khô ngắn.',
+                        'Subsurface reserves are stable, buffering root moisture during short dry spells.'
+                      )}
+                </p>
+                <div className="text-[11px] text-stone-400 mt-1.5 flex items-center gap-1">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>
-                    {t('Lần cuối cập nhật:', 'Last updated:')}{' '}
+                    {t('Cập nhật:', 'Updated:')}{' '}
                     {formatTimestamp(grace?.lastUpdated || snapshot.syncedAt)}
                   </span>
                 </div>
@@ -325,16 +344,16 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
               <MiniTrendBars
                 series={grace?.trendSeries || []}
                 barColor={grace?.groundwaterStatus === 'depleting' ? 'bg-rose-500' : 'bg-sky-600'}
-                unit="cm LWE"
+                unit="cm"
               />
             </div>
 
-            {/* Card 3: GHGx / EDGAR */}
+            {/* Card 3: Field Emissions */}
             <div className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col justify-between space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
                 <span className="font-semibold text-stone-800 flex items-center gap-1.5">
                   <Cloud className="w-4 h-4 text-amber-700" />
-                  {t('Phát thải (GHGx / EDGAR)', 'Emissions (GHGx / EDGAR)')}
+                  {t('Phát thải Khí nhà kính', 'Field GHG Emissions')}
                 </span>
                 <span className={`font-semibold ${ghgTone}`}>{ghgLabel}</span>
               </div>
@@ -349,10 +368,21 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                 <div className="text-xs text-stone-500 mt-1 font-mono tabular-nums">
                   CH₄: {ghg?.ch4KgHa} kg/ha · N₂O: {ghg?.n2oKgHa} kg/ha
                 </div>
-                <div className="text-[11px] text-stone-400 mt-1 flex items-center gap-1">
+                <p className="text-[11px] text-stone-600 mt-2 leading-snug">
+                  {ghg?.emissionLevel === 'high'
+                    ? t(
+                        'Mức CH₄/N₂O cao — rút nước xen kẽ giữa vụ và chia nhỏ phân đạm để tránh thất thoát phân.',
+                        'Elevated CH₄/N₂O — apply periodic field drainage and split nitrogen doses to save fertilizer.'
+                      )
+                    : t(
+                        'Phát thải thấp, cho thấy phân đạm và mực nước đang được giữ hiệu quả trong đất.',
+                        'Low emissions show fertilizer and irrigation water are being used efficiently.'
+                      )}
+                </p>
+                <div className="text-[11px] text-stone-400 mt-1.5 flex items-center gap-1">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>
-                    {t('Lần cuối cập nhật:', 'Last updated:')}{' '}
+                    {t('Cập nhật:', 'Updated:')}{' '}
                     {formatTimestamp(ghg?.lastUpdated || snapshot.syncedAt)}
                   </span>
                 </div>
@@ -366,118 +396,49 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
             </div>
           </div>
 
-          {/* Dedicated "Lần cuối cập nhật / Last updated" Table for EVERY Data Source */}
-          <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-stone-100 flex items-center justify-between">
-              <h3 className="text-xs font-bold text-stone-800">
-                {t(
-                  'Trạng thái nguồn dữ liệu NASA & Môi trường',
-                  'NASA & Environmental Data Sources'
-                )}
-              </h3>
-              <span className="text-[11px] text-stone-500">
-                {t('Chuẩn Space Apps 2026', 'Space Apps 2026 Resources')}
-              </span>
+          {smap && (
+            <div className="bg-white rounded-2xl border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-sky-50/70 border border-sky-200">
+                <div className="text-stone-500 font-semibold">
+                  {t('Độ ẩm lớp đất mặt (0–5 cm)', 'Topsoil Moisture (0–5 cm)')}
+                </div>
+                <div className="text-lg font-black text-sky-900 font-mono tabular-nums mt-0.5">
+                  {smap.smapSoilMoisturePct}%
+                </div>
+                <div className="text-[11px] text-stone-600 mt-0.5">
+                  {smap.smapSoilMoisturePct < 35
+                    ? t('Tầng mặt khô nhanh, cây non dễ thiếu nước.', 'Topsoil drying fast; watch shallow roots.')
+                    : t('Tầng mặt giữ ẩm ổn định cho hạt & rễ non.', 'Topsoil moisture supports shallow roots.')}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                <div className="text-stone-500 font-semibold">
+                  {t('Chỉ số độ xanh tán lá (NDVI)', 'Canopy Greenness (NDVI)')}
+                </div>
+                <div className="text-lg font-black text-emerald-900 font-mono tabular-nums mt-0.5">
+                  {smap.modisNdvi}
+                </div>
+                <div className="text-[11px] text-stone-600 mt-0.5">
+                  {smap.modisNdvi >= 0.55
+                    ? t('Độ phủ tán xanh tốt, hạn chế cỏ dại & xói mòn.', 'Dense canopy shields soil from weeds & erosion.')
+                    : t('Tán lá còn thưa, nên tủ gốc giữ ẩm mặt ruộng.', 'Sparse cover — mulch exposed rows to hold moisture.')}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
+                <div className="text-stone-500 font-semibold">
+                  {t('Tổng lượng mưa 7 ngày gần nhất', '7-Day Accumulated Rainfall')}
+                </div>
+                <div className="text-lg font-black text-stone-900 font-mono tabular-nums mt-0.5">
+                  {smap.gpmPrecipitation7dMm} mm
+                </div>
+                <div className="text-[11px] text-stone-600 mt-0.5">
+                  {smap.gpmPrecipitation7dMm > 60
+                    ? t('Mưa nhiều trong tuần — ưu tiên kiểm tra tiêu úng.', 'Heavy weekly rain — prioritize field drainage.')
+                    : t('Lượng mưa tuần vừa phải, kết hợp tưới bổ sung nếu đất khô.', 'Moderate weekly rain — supplement irrigation only if dry.')}
+                </div>
+              </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-stone-50 text-[11px] text-stone-500 border-b border-stone-200">
-                  <tr>
-                    <th className="py-2.5 px-4 font-semibold">
-                      {t('Nguồn dữ liệu', 'Data Source')}
-                    </th>
-                    <th className="py-2.5 px-4 font-semibold">
-                      {t('Chỉ số chính', 'Key Metric')}
-                    </th>
-                    <th className="py-2.5 px-4 font-semibold">
-                      {t('Ngày quan trắc', 'Observation Date')}
-                    </th>
-                    <th className="py-2.5 px-4 font-semibold">
-                      {t('Lần cuối cập nhật', 'Last updated')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  <tr>
-                    <td className="py-2.5 px-4 font-semibold text-stone-800">
-                      NASA POWER (Ag)
-                    </td>
-                    <td className="py-2.5 px-4 text-stone-600">
-                      {t('Thời tiết, Bức xạ & Ẩm đất 21 năm', '21-yr Weather, Solar & Soil Moisture')}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-600">
-                      {weatherObservationDate || snapshot.syncedAt.slice(0, 10)}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {formatTimestamp(snapshot.nasaPowerLastUpdated || snapshot.syncedAt)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 px-4 font-semibold text-stone-800">
-                      NASA OCO-2 / OCO-3
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      SIF {oco2?.sifWm2SrUm} · {oco2?.carbonUptakeTonHaYr} {t('tấn CO₂/ha', 't CO₂/ha')}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-600">
-                      {oco2?.observationDate}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {formatTimestamp(oco2?.lastUpdated || snapshot.syncedAt)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 px-4 font-semibold text-stone-800">
-                      NASA GRACE / GRACE-FO
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {(grace?.lweThicknessCm ?? 0) >= 0
-                        ? `+${grace?.lweThicknessCm}`
-                        : grace?.lweThicknessCm}{' '}
-                      cm LWE ({grace?.soilWaterBalancePct}%)
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-600">
-                      {grace?.observationDate}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {formatTimestamp(grace?.lastUpdated || snapshot.syncedAt)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 px-4 font-semibold text-stone-800">
-                      GHGx / EDGAR
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {ghg?.co2eqTonHa} {t('tấn CO₂e/ha', 't CO₂e/ha')} (CH₄ {ghg?.ch4KgHa} · N₂O {ghg?.n2oKgHa})
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-600">
-                      {ghg?.observationDate}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-stone-700">
-                      {formatTimestamp(ghg?.lastUpdated || snapshot.syncedAt)}
-                    </td>
-                  </tr>
-                  {smap && (
-                    <tr>
-                      <td className="py-2.5 px-4 font-semibold text-stone-800">
-                        NASA SMAP · MODIS · GPM
-                      </td>
-                      <td className="py-2.5 px-4 font-mono text-stone-700">
-                        {t('Ẩm mặt', 'SMAP')} {smap.smapSoilMoisturePct}% · NDVI {smap.modisNdvi} ·{' '}
-                        {t('Mưa 7d', '7d Rain')} {smap.gpmPrecipitation7dMm}mm
-                      </td>
-                      <td className="py-2.5 px-4 font-mono text-stone-600">
-                        {smap.observationDate}
-                      </td>
-                      <td className="py-2.5 px-4 font-mono text-stone-700">
-                        {formatTimestamp(smap.lastUpdated || snapshot.syncedAt)}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )}
         </>
       ) : null}
 

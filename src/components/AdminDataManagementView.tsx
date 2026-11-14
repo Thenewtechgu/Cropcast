@@ -873,10 +873,13 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
       phase: 'preparing',
       processedCells: 0,
       totalCells: 14,
+      skippedExistingCells: 0,
+      updatedCells: 0,
       currentCellId: '...',
       currentRegion: '',
       currentSourceLabel: 'NASA POWER · Earthdata CMR · GHGx · Esri',
       recordsSynced: 0,
+      historyPointsSynced: 0,
       liveApiCells: 0,
       fallbackCells: 0,
       percent: 4,
@@ -967,10 +970,13 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         phase: 'completed',
         processedCells: syncLog.targetCellsCount,
         totalCells: syncLog.targetCellsCount,
+        skippedExistingCells: summary.gridCellsSkippedExisting ?? 0,
+        updatedCells: summary.gridCellsUpdated ?? 0,
         currentCellId: 'DONE',
         currentRegion: '',
         currentSourceLabel: 'All Sources Updated',
         recordsSynced: syncLog.recordsSynced,
+        historyPointsSynced: summary.powerHistoryMonthlyPoints ?? 0,
         liveApiCells: liveCount,
         fallbackCells: fallbackCount,
         percent: 100,
@@ -988,10 +994,13 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
         phase: 'error',
         processedCells: prev?.processedCells || 0,
         totalCells: prev?.totalCells || 14,
+        skippedExistingCells: prev?.skippedExistingCells || 0,
+        updatedCells: prev?.updatedCells || 0,
         currentCellId: prev?.currentCellId || '',
         currentRegion: prev?.currentRegion || '',
         currentSourceLabel: prev?.currentSourceLabel || '',
         recordsSynced: prev?.recordsSynced || 0,
+        historyPointsSynced: prev?.historyPointsSynced || 0,
         liveApiCells: prev?.liveApiCells || 0,
         fallbackCells: prev?.fallbackCells || 0,
         percent: prev?.percent || 0,
@@ -1635,8 +1644,8 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 {isPermissionErrorMessage(statsError) && (
                   <p className="text-[11px] text-amber-900 leading-relaxed">
                     {t(
-                      'Mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish (hoặc chạy GitHub Actions deploy) để tài khoản Admin có quyền đọc danh sách người dùng và thửa ruộng.',
-                      'Open Firebase Console → Firestore Database → Rules tab, paste the updated firestore.rules content and click Publish (or run the GitHub Actions workflow) so Admin accounts can list users and fields.'
+                      'Mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish để tài khoản Admin có quyền đọc danh sách người dùng và thửa ruộng.',
+                      'Open Firebase Console → Firestore Database → Rules tab, paste the updated firestore.rules content and click Publish so Admin accounts can list users and fields.'
                     )}
                   </p>
                 )}

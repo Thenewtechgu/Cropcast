@@ -10,6 +10,10 @@ import {
   FieldCheckInInput,
   generateTasksFromBrief,
 } from './services/agronomyEngine';
+import {
+  buildClimaticBaselineWeather,
+  fetchFieldLiveWeather,
+} from './services/weatherService';
 import { Navbar } from './components/Navbar';
 import { HomeView } from './components/HomeView';
 import { DashboardView } from './components/DashboardView';
@@ -24,6 +28,7 @@ import { ExplanationDrawer } from './components/ExplanationDrawer';
 import { InteractiveMapModal } from './components/InteractiveMapModal';
 import { AdminDataManagementView } from './components/AdminDataManagementView';
 import { AuthModal } from './components/AuthModal';
+import { RecoveryEmailModal } from './components/RecoveryEmailModal';
 import {
   AppUser,
   FieldProfile,
@@ -156,6 +161,7 @@ export default function App() {
   });
   const [wizardOpen, setWizardOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [recoveryEmailModalOpen, setRecoveryEmailModalOpen] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
   // Sync Firebase Auth State strictly with Firebase Authentication
@@ -168,6 +174,7 @@ export default function App() {
           fbUser.emailVerified
         );
         await FirestoreService.ensureUserProfile(fbUser).catch(() => {});
+        const needsRecoveryEmail = await FirestoreService.checkUserNeedsRecoveryEmail(fbUser);
         setAuthUser({
           uid: fbUser.uid,
           displayName: fbUser.displayName || t('Nông dân CropCast', 'CropCast Farmer'),
@@ -175,10 +182,15 @@ export default function App() {
           photoURL: fbUser.photoURL || undefined,
           emailVerified: fbUser.emailVerified,
           isAdmin,
+          needsRecoveryEmail,
           authMode: 'firebase',
         });
+        if (needsRecoveryEmail) {
+          setRecoveryEmailModalOpen(true);
+        }
       } else {
         setAuthUser(null);
+        setRecoveryEmailModalOpen(false);
       }
       setAuthReady(true);
     });
@@ -188,21 +200,31 @@ export default function App() {
   const activeField = fields.find((f) => f.id === activeFieldId) || fields[0];
   const activeFieldCellId = activeField?.nasaGrid?.cellId;
 
-  // Load Public Uploaded NASA Climate Overrides (Admin uploads, oldest -> newest, scoped to active field's NASA cell)
+  const activeFieldLat = activeField?.lat;
+  const activeFieldLon = activeField?.lon;
+
+  // Fetch live field weather + 25-yr (2001-2025) baseline and merge any public admin dataset overrides
   useEffect(() => {
     let mounted = true;
-    const baseWeather = StorageService.getWeather();
-    FirestoreService.getPublicNasaDatasets()
-      .then((datasets) => {
+    const loadWeather = async () => {
+      const liveOrBaseline =
+        activeFieldLat !== undefined && activeFieldLon !== undefined
+          ? await fetchFieldLiveWeather(activeFieldLat, activeFieldLon, activeField)
+          : buildClimaticBaselineWeather(21.03, 105.85);
+
+      if (!mounted) return;
+
+      try {
+        const datasets = await FirestoreService.getPublicNasaDatasets();
         if (!mounted) return;
         const completed = datasets
           .filter((d) => d.status === 'COMPLETED' && d.sampleOverrides?.length)
           .reverse();
         if (completed.length === 0) {
-          setWeather(baseWeather);
+          setWeather(liveOrBaseline);
           return;
         }
-        const next = { ...baseWeather };
+        const next = { ...liveOrBaseline };
         for (const ds of completed) {
           const matchingRows = (ds.sampleOverrides || [])
             .filter((row) => !activeFieldCellId || row.cell_id === activeFieldCellId)
@@ -222,14 +244,16 @@ export default function App() {
           }
         }
         setWeather(next);
-      })
-      .catch(() => {
-        if (mounted) setWeather(baseWeather);
-      });
+      } catch {
+        if (mounted) setWeather(liveOrBaseline);
+      }
+    };
+
+    loadWeather();
     return () => {
       mounted = false;
     };
-  }, [activeTab, datasetRefreshTick, activeFieldCellId]);
+  }, [activeTab, datasetRefreshTick, activeFieldCellId, activeFieldLat, activeFieldLon]);
 
   // Redeem pending share link (?share=...) once user is signed in, or prompt login
   useEffect(() => {
@@ -351,6 +375,9 @@ export default function App() {
     setAuthMessage(null);
     const user = await FirestoreService.signInWithGoogle();
     setAuthUser(user);
+    if (user.needsRecoveryEmail) {
+      setRecoveryEmailModalOpen(true);
+    }
     if (user.isAdmin) {
       navigateToTab('admin');
     } else if (activeTab === 'home') {
@@ -362,6 +389,9 @@ export default function App() {
     setAuthMessage(null);
     const user = await FirestoreService.signInWithUsername(username, password);
     setAuthUser(user);
+    if (user.needsRecoveryEmail) {
+      setRecoveryEmailModalOpen(true);
+    }
     if (user.isAdmin) {
       navigateToTab('admin');
     } else if (activeTab === 'home') {
@@ -369,18 +399,44 @@ export default function App() {
     }
   };
 
-  const handleUsernameSignUp = async (username: string, password: string) => {
+  const handleEmailSignUp = async (params: {
+    email: string;
+    password: string;
+    displayName?: string;
+    phone?: string;
+  }) => {
     setAuthMessage(null);
-    const user = await FirestoreService.signUpWithUsername(username, password);
+    const user = await FirestoreService.signUpWithEmail(params);
     setAuthUser(user);
     if (activeTab === 'home') {
       navigateToTab('fields');
     }
   };
 
+  const handleSendPasswordReset = async (email: string) => {
+    await FirestoreService.sendPasswordReset(email);
+  };
+
+  const handleLinkAccountEmail = async (newEmail: string, currentPassword?: string) => {
+    const res = await FirestoreService.linkAccountEmail(newEmail, currentPassword);
+    if (res.status === 'linked') {
+      setAuthUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              email: res.email,
+              needsRecoveryEmail: false,
+            }
+          : prev
+      );
+    }
+    return res;
+  };
+
   const handleSignOut = async () => {
     await FirestoreService.signOutUser();
     setAuthUser(null);
+    setRecoveryEmailModalOpen(false);
     setActiveFieldId('');
     navigateToTab('home');
   };
@@ -703,6 +759,26 @@ export default function App() {
         </div>
       )}
 
+      {authUser?.needsRecoveryEmail && (
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="p-3 bg-amber-50 border border-amber-300 text-amber-950 rounded-xl text-xs font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span>
+              {t(
+                'Tài khoản của bạn chưa liên kết địa chỉ Email khôi phục. Vui lòng thêm Email để dùng tính năng Quên mật khẩu và bảo vệ tài khoản.',
+                'Your account is missing a recovery Email address. Please link an Email to enable password recovery and protect your account.'
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => setRecoveryEmailModalOpen(true)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            >
+              {t('Bổ sung Email ngay', 'Link Email Now')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {shareBanner && (
         <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
           <div
@@ -958,8 +1034,18 @@ export default function App() {
         onClose={() => setAuthModalOpen(false)}
         onGoogleSignIn={handleGoogleSignIn}
         onUsernameSignIn={handleUsernameSignIn}
-        onUsernameSignUp={handleUsernameSignUp}
+        onEmailSignUp={handleEmailSignUp}
+        onSendPasswordReset={handleSendPasswordReset}
       />
+
+      {authUser && (
+        <RecoveryEmailModal
+          isOpen={recoveryEmailModalOpen}
+          displayName={authUser.displayName}
+          onClose={() => setRecoveryEmailModalOpen(false)}
+          onLinkEmail={handleLinkAccountEmail}
+        />
+      )}
 
       {/* Minimal Footer */}
       <footer className="bg-white border-t border-stone-200 py-5 px-4 text-xs text-stone-500 mt-10">
@@ -967,8 +1053,8 @@ export default function App() {
           <span className="font-semibold text-stone-700">CropCast</span>
           <span>
             {t(
-              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu vệ tinh NASA',
-              'Sustainable farming & crop rotation powered by NASA Earth data'
+              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 25 năm (2001–2025) & thời tiết thực địa',
+              'Sustainable farming & crop rotation powered by 25-year (2001–2025) climate & field weather data'
             )}
           </span>
         </div>

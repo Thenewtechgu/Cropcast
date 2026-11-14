@@ -1,5 +1,5 @@
 import { FieldProfile, FarmTask, FeedbackRecord, WeatherObservation } from '../types';
-import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
+import { findNearestNasaGrid, isWithinVietnamTerritory } from '../data/nasaVietnamGrid';
 import { analyzeFieldAgronomy, generateTasksFromBrief } from './agronomyEngine';
 
 const STORAGE_KEYS = {
@@ -165,28 +165,35 @@ export const DEFAULT_FIELDS: FieldProfile[] = [
   },
 ];
 
-// Default simulated current weather (e.g., cool, damp winter conditions for Northern fields)
+// Default weather baseline (synchronized with live Open-Meteo & 25-year 2001-2025 baseline)
 export const DEFAULT_WEATHER_SIM: WeatherObservation = {
-  temp: 18.5,
-  minTemp: 15.2,
-  maxTemp: 22.0,
-  rain: 14.5,
-  humidity: 88,
-  gwettop: 0.82,
-  gwetroot: 0.76,
-  solarRadiation: 11.8,
-  windSpeed: 2.8,
-  observationDate: 'Hôm nay (Cập nhật 07:00)',
+  temp: 23.8,
+  minTemp: 19.6,
+  maxTemp: 28.4,
+  rain: 6.2,
+  humidity: 80,
+  gwettop: 0.64,
+  gwetroot: 0.67,
+  solarRadiation: 15.6,
+  windSpeed: 2.4,
+  dewPointC: 20.1,
+  vpdHpa: 6.1,
+  vpdMinHpa: 2.3,
+  vpdMaxHpa: 11.8,
+  et0MmDay: 3.6,
+  observationDate: 'Hôm nay (Cập nhật tự động)',
   isRealtimeAvailable: true,
-  source: 'NASA_POWER_UPDATED',
+  source: 'LIVE_WEATHER',
   historicalBaseline: {
-    avgTemp: 21.4,
-    avgRain: 5.8,
-    avgHumidity: 78,
+    avgTemp: 23.6,
+    avgRain: 5.4,
+    avgHumidity: 79,
     avgGwettop: 0.58,
     avgGwetroot: 0.62,
-    avgSolar: 14.5,
-    sampleYears: 21,
+    avgSolar: 16.0,
+    avgDewPointC: 19.8,
+    avgVpdHpa: 6.4,
+    sampleYears: 25,
   },
 };
 
@@ -228,6 +235,10 @@ export const StorageService = {
   },
 
   addField(fieldData: Omit<FieldProfile, 'id' | 'nasaGrid'>): FieldProfile {
+    const check = isWithinVietnamTerritory(fieldData.lat, fieldData.lon);
+    if (!check.valid) {
+      throw new Error(check.reasonVi || 'Vị trí ruộng phải nằm trong lãnh thổ Việt Nam.');
+    }
     const { cell, distanceKm } = findNearestNasaGrid(fieldData.lat, fieldData.lon);
     const newField: FieldProfile = {
       ...fieldData,
@@ -254,6 +265,10 @@ export const StorageService = {
   },
 
   updateField(updated: FieldProfile) {
+    const check = isWithinVietnamTerritory(updated.lat, updated.lon);
+    if (!check.valid) {
+      throw new Error(check.reasonVi || 'Vị trí ruộng phải nằm trong lãnh thổ Việt Nam.');
+    }
     const { cell, distanceKm } = findNearestNasaGrid(updated.lat, updated.lon);
     const enriched: FieldProfile = {
       ...updated,

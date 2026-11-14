@@ -152,8 +152,8 @@ async function fetchAndNormalizeOco2(
     carbonUptakeTonHaYr: uptakeTonHa,
     photosynthesisStatus: status,
     dataSource: granuleTitle
-      ? `NASA OCO-2/3 (${granuleTitle.slice(0, 28)})`
-      : 'NASA OCO-2 / POWER Solar SIF',
+      ? 'Đo quang hợp & hấp thụ Carbon theo vùng'
+      : 'Cân bằng quang hợp tán lá theo vùng',
     trendSeries,
   };
 }
@@ -247,8 +247,8 @@ async function fetchAndNormalizeGrace(
     groundwaterStatus,
     soilWaterBalancePct: Math.round(rootMoisture * 100),
     dataSource: granuleEntry?.title
-      ? 'NASA GRACE-FO Mascon + POWER'
-      : 'NASA GRACE-FO / POWER Hydrology',
+      ? 'Theo dõi trữ lượng nước ngầm & ẩm rễ'
+      : 'Cân bằng nước ngầm vùng rễ',
     trendSeries,
   };
 }
@@ -302,7 +302,7 @@ async function fetchAndNormalizeGhgeEdgar(
     co2eqTonHa,
     emissionLevel,
     cropContext: cropName || 'Cây trồng hiện tại',
-    dataSource: hasGhgc ? 'US GHG Center (GHGx) + EDGAR v8' : 'EDGAR v8 / GHGx Agricultural Grid',
+    dataSource: hasGhgc ? 'Ước tính phát thải khí nhà kính đồng ruộng' : 'Mô hình phát thải nông nghiệp theo vùng',
     trendSeries,
   };
 }
@@ -373,8 +373,8 @@ async function fetchAndNormalizeSmapModisGpm(
     gpmPrecipitation7dMm: Number(rain7d.toFixed(1)),
     dataSource:
       smapEntry || modisEntry
-        ? 'NASA SMAP L3 · MODIS MOD13Q1 · GPM POWER'
-        : 'NASA POWER · SMAP/GPM Assimilation',
+        ? 'Theo dõi độ ẩm tầng mặt & độ xanh tán lá'
+        : 'Độ ẩm bề mặt & tán lá ước tính theo vùng',
   };
 }
 
@@ -401,33 +401,33 @@ function buildSustainabilitySummary(
 
   if (grace.groundwaterStatus === 'depleting') {
     viParts.push(
-      'Nước ngầm (GRACE) đang suy giảm: ưu tiên luân canh cây chịu hạn hoặc cây họ Đậu ngắn ngày ở vụ kế tiếp.'
+      'Dự trữ nước ngầm đang suy giảm: ưu tiên luân canh cây chịu hạn hoặc cây họ Đậu ngắn ngày ở vụ kế tiếp để giảm chi phí bơm tưới.'
     );
     enParts.push(
-      'Groundwater (GRACE) is depleting: prioritize drought-tolerant crops or short-season legumes next season.'
+      'Subsurface water reserves are depleting: prioritize drought-tolerant crops or short-season legumes next season to cut pumping needs.'
     );
   } else if (grace.groundwaterStatus === 'recharging') {
     viParts.push(
-      'Trữ lượng nước ngầm (GRACE) phục hồi tốt: thuận lợi duy trì độ ẩm luân canh mà không cần bơm tưới sâu.'
+      'Trữ lượng nước ngầm phục hồi tốt: thuận lợi duy trì độ ẩm luân canh mà không cần bơm tưới sâu.'
     );
     enParts.push(
-      'Groundwater reserves (GRACE) are recharging well: favorable moisture without deep pumping.'
+      'Groundwater reserves are recharging well: favorable root moisture without deep pumping.'
     );
   } else {
-    viParts.push('Nước ngầm (GRACE) ổn định: duy trì tưới tiết kiệm theo độ ẩm tầng rễ.');
-    enParts.push('Groundwater (GRACE) is stable: maintain root-zone moisture-based irrigation.');
+    viParts.push('Nước ngầm ổn định: duy trì tưới tiết kiệm theo độ ẩm tầng rễ thực tế.');
+    enParts.push('Groundwater is stable: maintain root-zone moisture-based irrigation.');
   }
 
   if (ghg.emissionLevel === 'high' || cropCategory === 'rice') {
     viParts.push(
-      'Phát thải Mê-tan/N₂O (GHGx) đáng lưu ý: áp dụng tưới ngập–khô xen kẽ (AWD) và luân canh 1 vụ Đậu tương/Đậu xanh để cắt phát thải và giảm phân đạm.'
+      'Phát thải Mê-tan/N₂O ở mức cần chú ý: áp dụng tưới ngập–khô xen kẽ (AWD) và luân canh 1 vụ Đậu tương/Đậu xanh để cắt phát thải và giảm phân đạm.'
     );
     enParts.push(
-      'CH₄/N₂O emissions (GHGx) are elevated: apply Alternate Wetting & Drying (AWD) and rotate one soybean/mungbean crop to cut emissions and synthetic N.'
+      'CH₄/N₂O emissions are elevated: apply Alternate Wetting & Drying (AWD) and rotate one soybean/mungbean crop to cut emissions and synthetic N.'
     );
   } else if (ghg.emissionLevel === 'low') {
-    viParts.push('Phát thải khí nhà kính (GHGx) thấp, phù hợp hướng canh tác bền vững.');
-    enParts.push('Greenhouse gas emissions (GHGx) are low, aligned with sustainable farming.');
+    viParts.push('Phát thải khí nhà kính thấp, phù hợp hướng canh tác bền vững.');
+    enParts.push('Greenhouse gas emissions are low, aligned with sustainable farming.');
   }
 
   return {

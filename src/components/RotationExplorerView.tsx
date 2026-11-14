@@ -38,9 +38,7 @@ import {
 import { GeminiService } from '../services/geminiService';
 import { getSoilLabel, getDrainageLabel } from '../services/agronomyEngine';
 import {
-  getSeedFamilyById,
-  inferSeedFamilyFromCrop,
-  getFamilyDisplayName,
+  resolveCropBotanicalProfile,
   getPlantDisplayName,
 } from '../data/cropTaxonomy';
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
@@ -203,8 +201,10 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
     });
   };
 
-  const currentFamily = getSeedFamilyById(
-    field.crop.seedFamily || inferSeedFamilyFromCrop(field.crop.name, field.crop.category)
+  const resolvedBotanical = resolveCropBotanicalProfile(
+    field.crop.name,
+    field.crop.seedFamily,
+    field.crop.category
   );
   const fixedScenario = { rainDeltaPct: 0, tempDeltaC: 0 };
   const indicators = computeHarmonizedIndicators(field, weather, fixedScenario, lang);
@@ -332,8 +332,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
           <p className="text-xs sm:text-sm text-stone-600">
             {t('Cây hiện tại:', 'Current crop:')}{' '}
             <strong>{getPlantDisplayName(field.crop.name, lang)}</strong> (
-            {getFamilyDisplayName(currentFamily, lang)}) • {t('Đất:', 'Soil:')}{' '}
-            <strong>{getSoilLabel(field.soilType, lang)}</strong> (
+            {lang === 'en' ? resolvedBotanical.familyLabelEn : resolvedBotanical.familyLabelVi}) •{' '}
+            {t('Đất:', 'Soil:')} <strong>{getSoilLabel(field.soilType, lang)}</strong> (
             {getDrainageLabel(field.soilCharacteristics.drainage, lang)})
           </p>
         </div>
@@ -347,13 +347,13 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
         </button>
       </div>
 
-      {/* Sustainability Context from OCO-2, GRACE & GHGx with Last Updated */}
+      {/* Sustainability Context with Last Updated */}
       {earthSnapshot && (
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-stone-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6 font-mono tabular-nums">
             <div>
               <span className="text-stone-500 font-sans block">
-                {t('Hấp thụ Carbon (OCO-2)', 'Carbon Uptake (OCO-2)')}
+                {t('Hấp thụ Carbon', 'Carbon Uptake')}
               </span>
               <span className="font-bold text-stone-900 text-sm">
                 {earthSnapshot.carbonFluxOco2.carbonUptakeTonHaYr}{' '}
@@ -366,7 +366,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             </div>
             <div>
               <span className="text-stone-500 font-sans block">
-                {t('Nước ngầm (GRACE)', 'Groundwater (GRACE)')}
+                {t('Trữ lượng Nước ngầm', 'Groundwater Reserve')}
               </span>
               <span className="font-bold text-stone-900 text-sm">
                 {earthSnapshot.groundwaterAnomalyGrace.lweThicknessCm >= 0
@@ -381,7 +381,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             </div>
             <div>
               <span className="text-stone-500 font-sans block">
-                {t('Phát thải (GHGx)', 'Emissions (GHGx)')}
+                {t('Phát thải Ruộng', 'Field Emissions')}
               </span>
               <span className="font-bold text-stone-900 text-sm">
                 {earthSnapshot.greenhouseGasEdgar.co2eqTonHa}{' '}
@@ -402,7 +402,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
         </div>
       )}
 
-      {/* Farmer Priorities & Automated NASA Forecast Indicators */}
+      {/* Farmer Priorities & Automated Climate Forecast Indicators */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left: Farmer Priorities & Practical Constraints */}
         <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-4">
@@ -501,20 +501,20 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
           </div>
         </div>
 
-        {/* Right: App-Computed NASA Climate & Soil Indicators */}
+        {/* Right: App-Computed Climate & Soil Indicators */}
         <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-4">
           <div>
             <h2 className="text-sm font-bold text-stone-900 flex items-center gap-2">
               <Satellite className="w-4 h-4 text-emerald-700" />
               {t(
-                '2. Điều kiện Khí hậu & Độ ẩm Mùa tới (Tự động từ NASA)',
-                '2. Upcoming Season Climate & Moisture (NASA Derived)'
+                '2. Điều kiện Khí hậu & Độ ẩm Mùa tới',
+                '2. Upcoming Season Climate & Moisture'
               )}
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
               {t(
-                `Tính toán từ NASA POWER 21 năm (${field.nasaGrid.cellId}), OCO-2, GRACE và đặc điểm đất.`,
-                `Computed from 21-yr NASA POWER (${field.nasaGrid.cellId}), OCO-2, GRACE, and field soil profile.`
+                `Tính toán từ chuỗi khí hậu 25 năm (2001–2025), cân bằng nước và đặc điểm đất của thửa ruộng.`,
+                `Computed from the 25-year climate baseline (2001–2025), water balance, and field soil profile.`
               )}
             </p>
           </div>
@@ -565,7 +565,7 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
 
           <div className="text-xs text-stone-700 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-1">
             <div>
-              <strong>{t('Xu thế nước vùng:', 'Water & GRACE trend:')}</strong>{' '}
+              <strong>{t('Xu thế nước vùng:', 'Regional water trend:')}</strong>{' '}
               {indicators.longTermWaterTrend}
             </div>
             <div className="text-stone-600">{indicators.vegetationStressNote}</div>
@@ -678,8 +678,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500">
               {t(
-                'Hệ thống chọn ra 1 chiến lược tốt nhất dựa trên đất, nguồn nước, thời tiết và dữ liệu OCO-2/GRACE/GHGx. Nếu thấy chưa phù hợp thực tế, bạn có thể phản hồi để AI chọn phương án khác.',
-                'Selects the top strategy using soil, water, NASA climate, and OCO-2/GRACE/GHGx metrics. Reject with a reason below to have AI choose another plan.'
+                'Hệ thống chọn ra 1 chiến lược tốt nhất dựa trên đất, nguồn nước, thời tiết và chỉ số môi trường ruộng. Nếu thấy chưa phù hợp thực tế, bạn có thể phản hồi để AI chọn phương án khác.',
+                'Selects the top strategy using soil, water, climate baseline, and field sustainability metrics. Reject with a reason below to have AI choose another plan.'
               )}
             </p>
           </div>
@@ -972,8 +972,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
                 </div>
                 <p className="text-emerald-900 leading-relaxed">
                   {t(
-                    'Vệ tinh đo xu hướng nhiệt độ, mưa, ẩm đất, SIF quang hợp (OCO-2) và nước ngầm (GRACE) trên ô lưới rộng; tuy nhiên không thể thấy độ phèn mặn đầu kênh hay sâu bệnh cục bộ dưới tán lá — nên kết hợp phản hồi của bạn giúp gợi ý chính xác hơn.',
-                    'Satellites track regional climate, moisture, OCO-2 SIF photosynthesis, and GRACE aquifers, but cannot see micro-slope salinity or under-leaf pests — pairing with your field feedback maximizes accuracy.'
+                    'Hệ thống theo dõi xu hướng nhiệt độ, mưa, ẩm đất, quang hợp tán lá và trữ lượng nước ngầm theo vùng; tuy nhiên không thể thấy độ phèn mặn đầu kênh hay sâu bệnh cục bộ dưới tán lá — nên kết hợp phản hồi của bạn giúp gợi ý chính xác hơn.',
+                    'Regional monitoring tracks temperature, rainfall, soil moisture, photosynthesis, and aquifers, but cannot see micro-slope salinity or under-leaf pests — pairing with your field feedback maximizes accuracy.'
                   )}
                 </p>
               </div>

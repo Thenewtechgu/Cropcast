@@ -10,7 +10,11 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { SatelliteMap } from './SatelliteMap';
-import { findNearestNasaGrid, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import {
+  findNearestNasaGrid,
+  getLocalizedRegionName,
+  isWithinVietnamTerritory,
+} from '../data/nasaVietnamGrid';
 import {
   SEED_FAMILIES,
   getFamilyDisplayName,
@@ -172,6 +176,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
   );
   const bareMonths = timeline.filter((item) => item.fieldState === 'bare_fallow');
 
+  const [locationAlert, setLocationAlert] = useState<string | null>(null);
+
   const handleUseGps = () => {
     if (!navigator.geolocation) {
       setGpsStatus(
@@ -184,15 +190,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
     setGpsLoading(true);
     setGpsStatus(null);
+    setLocationAlert(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setSandboxLat(Number(pos.coords.latitude.toFixed(5)));
-        setSandboxLon(Number(pos.coords.longitude.toFixed(5)));
+        const nextLat = Number(pos.coords.latitude.toFixed(5));
+        const nextLon = Number(pos.coords.longitude.toFixed(5));
         setGpsLoading(false);
+        const check = isWithinVietnamTerritory(nextLat, nextLon);
+        if (!check.valid) {
+          setLocationAlert(
+            lang === 'en'
+              ? check.reasonEn || 'GPS position is outside Vietnamese territory.'
+              : check.reasonVi || 'Vị trí GPS nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn vị trí trong Việt Nam và thử lại.'
+          );
+          return;
+        }
+        setSandboxLat(nextLat);
+        setSandboxLon(nextLon);
         setGpsStatus(
           t(
-            'Đã định vị theo GPS thiết bị và tự động ghép điểm khí hậu gần nhất.',
-            'Located via device GPS and matched nearest climate grid cell.'
+            'Đã định vị theo GPS thiết bị và tự động ghép dữ liệu khí hậu vùng gần nhất.',
+            'Located via device GPS and matched nearest regional climate baseline.'
           )
         );
       },
@@ -312,9 +330,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
               onLocationChange={(lat, lon) => {
                 setSandboxLat(lat);
                 setSandboxLon(lon);
+                setLocationAlert(null);
+              }}
+              onInvalidLocation={(reason) => {
+                setLocationAlert(reason);
+                setGpsStatus(null);
               }}
               fieldLabel={t('Vị trí thử nghiệm', 'Trial Location')}
             />
+
+            {locationAlert && (
+              <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 font-semibold">
+                {locationAlert}
+              </div>
+            )}
 
             {gpsStatus && (
               <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">

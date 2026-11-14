@@ -18,6 +18,10 @@
           "type": "string",
           "maxLength": 200
         },
+        "phone": {
+          "type": "string",
+          "maxLength": 30
+        },
         "photoURL": {
           "type": "string",
           "maxLength": 500

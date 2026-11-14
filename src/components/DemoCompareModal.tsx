@@ -45,7 +45,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
       avgGwettop: 0.55,
       avgGwetroot: 0.58,
       avgSolar: 14.0,
-      sampleYears: 21,
+      sampleYears: 25,
     },
   });
 
@@ -219,8 +219,8 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
               </div>
               <p className="text-xs text-stone-300">
                 {t(
-                  'Minh chứng: Cùng một dữ liệu thời tiết NASA, AI đưa ra khuyến nghị khác biệt hoàn toàn theo hồ sơ ruộng!',
-                  'Proof: Identical NASA weather produces tailored agronomic decisions depending on each field profile!'
+                  'Minh chứng: Cùng một điều kiện thời tiết vùng, AI đưa ra khuyến nghị khác biệt hoàn toàn theo hồ sơ ruộng!',
+                  'Proof: Identical regional weather produces tailored agronomic decisions depending on each field profile!'
                 )}
               </p>
             </div>
@@ -244,7 +244,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
                   {t('1. Dữ liệu thời tiết chung tác động lên cả 2 ruộng', '1. Shared Weather Input for Both Fields')}
                 </span>
                 <span className="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded">
-                  NASA POWER 0.5° Grid
+                  {t('Thời tiết vùng chung', 'Shared Regional Weather')}
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -613,8 +613,8 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
             </div>
             <p className="text-xs text-stone-200 leading-relaxed">
               {t(
-                'Thời tiết đo từ NASA POWER là như nhau (độ phân giải 0.5°), nhưng:',
-                'The 0.5° NASA POWER grid weather is identical, yet:'
+                'Thời tiết đầu vào cho cả hai thửa ruộng là giống hệt nhau, nhưng:',
+                'The regional weather input is identical for both plots, yet:'
               )}
               <br />
               • <strong>{t('Ruộng A (Đất sét, rau con):', 'Field A (Clay, seedling greens):')}</strong>{' '}

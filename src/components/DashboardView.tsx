@@ -133,7 +133,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Environmental Sustainability Panel: NASA OCO-2, GRACE, GHGx/EDGAR, SMAP + Sync Button */}
+      {/* Environmental Sustainability Panel */}
       <EarthSustainabilityPanel
         field={field}
         weatherObservationDate={weather.observationDate}
@@ -339,11 +339,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {weather.temp}°C
             </div>
             <div className="text-xs text-stone-500 mt-1 font-mono tabular-nums">
-              {weather.minTemp}°C – {weather.maxTemp}°C · {t('Nền 21 năm:', '21-yr avg:')}{' '}
+              {weather.minTemp}°C – {weather.maxTemp}°C · {t('Nền 25 năm:', '25-yr avg:')}{' '}
               {weather.historicalBaseline.avgTemp}°C
             </div>
             <div className="text-[11px] text-stone-400 mt-1">
-              NASA POWER · {t('Cập nhật:', 'Last updated:')} {powerUpdatedLabel}
+              {t('Cập nhật:', 'Updated:')} {powerUpdatedLabel}
             </div>
           </div>
 
@@ -361,20 +361,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
             <div>
-              <span className="text-stone-400 block">{t('Bức xạ', 'Solar')}</span>
+              <span className="text-stone-400 block">
+                {weather.vpdHpa !== undefined
+                  ? t('Sức hút bốc hơi', 'Drying demand')
+                  : t('Bức xạ', 'Solar')}
+              </span>
               <span className="font-bold text-stone-800 font-mono tabular-nums">
-                {weather.solarRadiation} MJ/m²
+                {weather.vpdHpa !== undefined
+                  ? `${weather.vpdHpa} hPa`
+                  : `${weather.solarRadiation} MJ/m²`}
               </span>
             </div>
             <div>
               <span className="text-stone-400 block flex items-center gap-1">
-                <Wind className="w-3 h-3" /> {t('Gió', 'Wind')}
+                <Wind className="w-3 h-3" />{' '}
+                {weather.dewPointC !== undefined
+                  ? t('Điểm sương', 'Dew point')
+                  : t('Gió', 'Wind')}
               </span>
               <span className="font-bold text-stone-800 font-mono tabular-nums">
-                {weather.windSpeed} m/s
+                {weather.dewPointC !== undefined
+                  ? `${weather.dewPointC}°C`
+                  : `${weather.windSpeed} m/s`}
               </span>
             </div>
           </div>
+          <p className="text-[11px] text-stone-600 leading-snug pt-2 border-t border-stone-100">
+            {weather.vpdHpa !== undefined && weather.vpdHpa >= 18
+              ? t(
+                  `Không khí khô (sức hút ${weather.vpdHpa} hPa) làm lá ${getPlantDisplayName(field.crop.name, 'vi')} mất nước nhanh — ưu tiên tưới sáng sớm.`,
+                  `Dry air (${weather.vpdHpa} hPa) speeds up water loss in ${getPlantDisplayName(field.crop.name, 'en')} — water early morning.`
+                )
+              : weather.humidity >= 85
+              ? t(
+                  `Ẩm cao ${weather.humidity}% dễ đọng sương trên lá ${getPlantDisplayName(field.crop.name, 'vi')} — lưu ý phòng nấm bệnh.`,
+                  `High ${weather.humidity}% humidity keeps ${getPlantDisplayName(field.crop.name, 'en')} leaves wet — scout for fungal spots.`
+                )
+              : t(
+                  `Mức bốc hơi${weather.et0MmDay !== undefined ? ` ~${weather.et0MmDay} mm/ngày` : ''} ôn hòa, phù hợp cho ${getPlantDisplayName(field.crop.name, 'vi')} phát triển.`,
+                  `Moderate water loss${weather.et0MmDay !== undefined ? ` (~${weather.et0MmDay} mm/day)` : ''} supports steady ${getPlantDisplayName(field.crop.name, 'en')} growth.`
+                )}
+          </p>
         </div>
 
         {/* Card 2: Soil Moisture */}
@@ -426,9 +453,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {smap && (
               <div className="text-[11px] text-stone-500 font-mono">
-                MODIS NDVI: {smap.modisNdvi} · GPM 7d: {smap.gpmPrecipitation7dMm} mm
+                {t('Độ xanh tán lá:', 'Canopy greenness:')} {smap.modisNdvi} ·{' '}
+                {t('Mưa 7 ngày:', '7-day rain:')} {smap.gpmPrecipitation7dMm} mm
               </div>
             )}
+            <p className="text-[11px] text-stone-600 leading-snug">
+              {weather.gwetroot < 0.4
+                ? t(
+                    `Ẩm vùng rễ dưới 40% trên ${getSoilLabel(field.soilType, 'vi').toLowerCase()} — cần bổ sung ẩm để rễ không bị khô.`,
+                    `Root moisture below 40% in ${getSoilLabel(field.soilType, 'en').toLowerCase()} — plan morning watering.`
+                  )
+                : weather.gwetroot > 0.78
+                ? t(
+                    `Đất đang rất ẩm (${(weather.gwetroot * 100).toFixed(0)}%) — tạm ngừng tưới và kiểm tra rãnh thoát nước.`,
+                    `Soil is very wet (${(weather.gwetroot * 100).toFixed(0)}%) — pause irrigation and check drainage.`
+                  )
+                : t(
+                    `Độ ẩm vùng rễ ${(weather.gwetroot * 100).toFixed(0)}% nằm trong ngưỡng an toàn cho bộ rễ hấp thu dinh dưỡng.`,
+                    `Root moisture at ${(weather.gwetroot * 100).toFixed(0)}% is in the healthy range for nutrient uptake.`
+                  )}
+            </p>
           </div>
 
           <button

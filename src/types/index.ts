@@ -41,6 +41,22 @@ export type SeedFamilyId =
   | 'cucurbitaceae'
   | 'other_perennial';
 
+export interface AnnualClimatePoint {
+  year: number; // 2001..2025
+  tmeanC: number;
+  tminC: number;
+  tmaxC: number;
+  pptMm: number;
+  tdmeanC: number; // Dew point mean (°C)
+  vpdMinHpa: number; // Min vapor pressure deficit (hPa)
+  vpdMaxHpa: number; // Max vapor pressure deficit (hPa)
+  solradMjM2: number; // Solar radiation (MJ/m²/day)
+  rootMoisturePct: number;
+  humidityPct: number;
+  yieldIndexPct: number; // Normalized crop productivity index (100 = 25-yr baseline)
+  riceYieldTonHa: number; // Estimated paddy/crop yield equivalent (tấn/ha)
+}
+
 export interface NasaGridCell {
   cellId: string;
   lat: number;
@@ -56,10 +72,16 @@ export interface NasaGridCell {
     avgGwettop: number;
     avgRh2m: number;
     avgSolarDwn: number;
+    avgDewPointC?: number;
+    avgVpdMinHpa?: number;
+    avgVpdMaxHpa?: number;
+    avgRiceYieldTonHa?: number;
+    sampleYears?: number;
     riskMonthsCold: number[];
     riskMonthsDrought: number[];
     riskMonthsFlood: number[];
   };
+  historicalSeries2001to2025?: AnnualClimatePoint[];
 }
 
 export interface FieldProfile {
@@ -148,6 +170,7 @@ export interface AdminUserSummary {
   uid: string;
   displayName: string;
   email: string;
+  phone?: string;
   photoURL?: string;
   createdAt: string;
   fieldCount: number;
@@ -209,6 +232,16 @@ export interface ProvenanceBadge {
   lastUpdated?: string;
 }
 
+export interface DailyForecastPoint {
+  date: string;
+  tempMin: number;
+  tempMax: number;
+  rainMm: number;
+  solarMjM2: number;
+  et0Mm?: number;
+  vpdMaxHpa?: number;
+}
+
 export interface WeatherObservation {
   temp: number;
   minTemp: number;
@@ -219,9 +252,15 @@ export interface WeatherObservation {
   gwetroot: number;
   solarRadiation: number;
   windSpeed: number;
+  dewPointC?: number;
+  vpdHpa?: number;
+  vpdMinHpa?: number;
+  vpdMaxHpa?: number;
+  et0MmDay?: number;
+  forecastDays?: DailyForecastPoint[];
   observationDate: string;
   isRealtimeAvailable: boolean;
-  source: 'NASA_POWER_UPDATED' | 'USER_OBSERVATION' | 'WEATHER_STATION' | 'ESTIMATED_CLIMATE';
+  source: 'NASA_POWER_UPDATED' | 'LIVE_WEATHER' | 'USER_OBSERVATION' | 'WEATHER_STATION' | 'ESTIMATED_CLIMATE';
   historicalBaseline: {
     avgTemp: number;
     avgRain: number;
@@ -229,6 +268,8 @@ export interface WeatherObservation {
     avgGwettop: number;
     avgGwetroot: number;
     avgSolar: number;
+    avgDewPointC?: number;
+    avgVpdHpa?: number;
     sampleYears: number;
   };
 }
@@ -438,9 +479,11 @@ export interface AppUser {
   displayName: string;
   username?: string;
   email: string;
+  phone?: string;
   photoURL?: string;
   emailVerified: boolean;
   isAdmin: boolean;
+  needsRecoveryEmail?: boolean;
   authMode?: 'firebase';
 }
 

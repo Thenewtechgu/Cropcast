@@ -24,6 +24,152 @@ interface ChatMessage {
   fromFallback?: boolean;
 }
 
+function renderInlineMarkdown(text: string, isAi: boolean): React.ReactNode[] {
+  // Parse **bold**, __bold__, `code`, and *italic* without raw syntax leakage
+  const tokens: React.ReactNode[] = [];
+  const pattern = /(\*\*[^*\n]+?\*\*|__[^_\n]+?__|`[^`\n]+?`|\*[^*\n]+?\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIdx = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push(text.slice(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith('**') && token.endsWith('**')) {
+      tokens.push(
+        <strong
+          key={`b-${keyIdx++}`}
+          className={isAi ? 'font-bold text-stone-950' : 'font-bold text-white'}
+        >
+          {token.slice(2, -2)}
+        </strong>
+      );
+    } else if (token.startsWith('__') && token.endsWith('__')) {
+      tokens.push(
+        <strong
+          key={`u-${keyIdx++}`}
+          className={isAi ? 'font-bold text-stone-950' : 'font-bold text-white'}
+        >
+          {token.slice(2, -2)}
+        </strong>
+      );
+    } else if (token.startsWith('`') && token.endsWith('`')) {
+      tokens.push(
+        <code
+          key={`c-${keyIdx++}`}
+          className={`px-1 py-0.5 rounded font-mono text-[0.9em] ${
+            isAi ? 'bg-stone-200/80 text-emerald-900' : 'bg-emerald-700 text-emerald-50'
+          }`}
+        >
+          {token.slice(1, -1)}
+        </code>
+      );
+    } else if (token.startsWith('*') && token.endsWith('*')) {
+      tokens.push(
+        <em key={`i-${keyIdx++}`} className="italic">
+          {token.slice(1, -1)}
+        </em>
+      );
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    tokens.push(text.slice(lastIndex));
+  }
+
+  return tokens;
+}
+
+const FormattedChatContent: React.FC<{ text: string; isAi: boolean }> = ({ text, isAi }) => {
+  const lines = text.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let listItems: Array<{ ordered: boolean; num?: string; content: string }> = [];
+  let keyCounter = 0;
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    const isOrdered = listItems[0].ordered;
+    if (isOrdered) {
+      blocks.push(
+        <ol key={`list-${keyCounter++}`} className="space-y-1.5 pl-4 list-decimal">
+          {listItems.map((item, idx) => (
+            <li key={idx} className="leading-relaxed">
+              {renderInlineMarkdown(item.content, isAi)}
+            </li>
+          ))}
+        </ol>
+      );
+    } else {
+      blocks.push(
+        <ul key={`list-${keyCounter++}`} className="space-y-1.5 pl-4 list-disc">
+          {listItems.map((item, idx) => (
+            <li key={idx} className="leading-relaxed">
+              {renderInlineMarkdown(item.content, isAi)}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      flushList();
+      const level = headingMatch[1].length;
+      const headingText = headingMatch[2];
+      blocks.push(
+        <div
+          key={`h-${keyCounter++}`}
+          className={`font-bold ${
+            isAi ? 'text-emerald-950' : 'text-white'
+          } ${level <= 2 ? 'text-sm sm:text-base pt-1' : 'text-xs sm:text-sm pt-1'} ${
+            blocks.length > 0 ? 'mt-1.5 border-t border-stone-200/70 pt-2' : ''
+          }`}
+        >
+          {renderInlineMarkdown(headingText, isAi)}
+        </div>
+      );
+      continue;
+    }
+
+    const bulletMatch = trimmed.match(/^(?:•|-|\*)\s+(.+)$/);
+    if (bulletMatch) {
+      if (listItems.length > 0 && listItems[0].ordered) flushList();
+      listItems.push({ ordered: false, content: bulletMatch[1] });
+      continue;
+    }
+
+    const orderedMatch = trimmed.match(/^(\d+)[.)]\s+(.+)$/);
+    if (orderedMatch) {
+      if (listItems.length > 0 && !listItems[0].ordered) flushList();
+      listItems.push({ ordered: true, num: orderedMatch[1], content: orderedMatch[2] });
+      continue;
+    }
+
+    flushList();
+    blocks.push(
+      <p key={`p-${keyCounter++}`} className="leading-relaxed">
+        {renderInlineMarkdown(trimmed, isAi)}
+      </p>
+    );
+  }
+
+  flushList();
+
+  return <div className="space-y-1.5">{blocks}</div>;
+};
+
 export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, weather }) => {
   const { lang, t } = useLanguage();
 
@@ -31,8 +177,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
     id: `msg-0-${field.id}-${lang}`,
     sender: 'ai',
     text: t(
-      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu NASA POWER, OCO-2, GRACE và GHGx. Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
-      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using NASA POWER, OCO-2, GRACE-FO, and GHGx data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu 25 năm. Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
+      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 25-year climate data. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
     ),
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
@@ -53,14 +199,14 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
       ? [
           `My soil is ${getSoilLabel(activeField.soilType, 'en')}; should I irrigate today?`,
           `With ${weather.temp}°C and ${weather.humidity}% humidity, what disease risks exist?`,
-          `How do my OCO-2, GRACE, and GHGx readings guide my next crop rotation?`,
-          `Does the 21-year climate history show cold or drought risk right now?`,
+          `How do my carbon, groundwater, and emissions metrics guide my next rotation?`,
+          `Does the 25-year climate history show cold or drought risk right now?`,
         ]
       : [
           `Đất ruộng của tôi là ${getSoilLabel(activeField.soilType, 'vi')}, hôm nay có nên tưới thêm không?`,
           `Với nhiệt độ ${weather.temp}°C và ẩm ${weather.humidity}%, có nguy cơ nấm bệnh gì?`,
-          `Chỉ số OCO-2, GRACE và GHGx của ruộng gợi ý điều chỉnh phân bón và luân canh thế nào?`,
-          `Dữ liệu khí hậu 21 năm tại đây có hay gặp đợt rét/hạn vào thời điểm này không?`,
+          `Chỉ số carbon, nước ngầm và phát thải của ruộng gợi ý điều chỉnh phân bón và luân canh thế nào?`,
+          `Dữ liệu khí hậu 25 năm tại đây có hay gặp đợt rét/hạn vào thời điểm này không?`,
         ];
 
   const scrollToBottom = () => {
@@ -142,8 +288,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           </h1>
           <p className="text-xs text-stone-500">
             {t(
-              'AI kết hợp hồ sơ đất, giống cây với dữ liệu vệ tinh NASA POWER, OCO-2, GRACE, GHGx & SMAP.',
-              'Combines your soil & crop profile with NASA POWER, OCO-2, GRACE-FO, GHGx, and SMAP telemetry.'
+              'AI kết hợp hồ sơ đất, giống cây với thời tiết thực tế, chuỗi khí hậu 25 năm và chỉ số môi trường ruộng.',
+              'Combines your soil & crop profile with live weather, 25-year climate baseline, and field sustainability metrics.'
             )}
           </p>
         </div>
@@ -177,7 +323,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
                       : 'bg-emerald-800 text-white rounded-tr-xs shadow-xs'
                   }`}
                 >
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
+                  <FormattedChatContent text={msg.text} isAi={isAi} />
                   <div
                     className={`text-[10px] text-right font-mono ${
                       isAi ? 'text-stone-400' : 'text-emerald-200'
@@ -201,8 +347,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
               <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
               <span>
                 {t(
-                  'AI đang phân tích dữ liệu đất & vệ tinh NASA...',
-                  'Analyzing soil & NASA satellite telemetry...'
+                  'AI đang phân tích dữ liệu đất & thời tiết ruộng...',
+                  'Analyzing soil & field weather metrics...'
                 )}
               </span>
             </div>
@@ -249,8 +395,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           <input
             type="text"
             placeholder={t(
-              'Hỏi trợ lý AI về đất, nước, OCO-2/GRACE/GHGx, bón phân hay thời tiết...',
-              'Ask AI about soil, irrigation, OCO-2/GRACE/GHGx, fertilizer, or weather...'
+              'Hỏi trợ lý AI về đất, nước, chỉ số môi trường, bón phân hay thời tiết...',
+              'Ask AI about soil, irrigation, field metrics, fertilizer, or weather...'
             )}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}

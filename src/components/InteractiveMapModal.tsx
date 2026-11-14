@@ -7,8 +7,13 @@ import {
   Navigation,
   Info,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
-import { findNearestNasaGrid, getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import {
+  findNearestNasaGrid,
+  getLocalizedRegionName,
+  isWithinVietnamTerritory,
+} from '../data/nasaVietnamGrid';
 import { SatelliteMap } from './SatelliteMap';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -32,12 +37,14 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
   const [currentLon, setCurrentLon] = useState(selectedLon || 105.85);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setCurrentLat(selectedLat || 21.03);
       setCurrentLon(selectedLon || 105.85);
       setGpsMessage(null);
+      setLocationError(null);
     }
   }, [isOpen, selectedLat, selectedLon]);
 
@@ -57,17 +64,29 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
     }
     setGpsLoading(true);
     setGpsMessage(null);
+    setLocationError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const nextLat = Number(pos.coords.latitude.toFixed(5));
         const nextLon = Number(pos.coords.longitude.toFixed(5));
+        setGpsLoading(false);
+
+        const check = isWithinVietnamTerritory(nextLat, nextLon);
+        if (!check.valid) {
+          setLocationError(
+            lang === 'en'
+              ? check.reasonEn || 'GPS location is outside Vietnamese territory. Please pick a location inside Vietnam.'
+              : check.reasonVi || 'Vị trí GPS nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn lại vị trí trong Việt Nam và thử lại.'
+          );
+          return;
+        }
+
         setCurrentLat(nextLat);
         setCurrentLon(nextLon);
-        setGpsLoading(false);
         setGpsMessage(
           t(
-            `Đã lấy vị trí GPS của thiết bị (độ chính xác ~${Math.round(pos.coords.accuracy)} m) và tự động khớp điểm khí hậu gần nhất.`,
-            `Located via device GPS (accuracy ~${Math.round(pos.coords.accuracy)} m) and matched nearest climate grid cell.`
+            `Đã lấy vị trí GPS của thiết bị (độ chính xác ~${Math.round(pos.coords.accuracy)} m) và tự động khớp vùng khí hậu gần nhất.`,
+            `Located via device GPS (accuracy ~${Math.round(pos.coords.accuracy)} m) and matched nearest climate zone.`
           )
         );
       },
@@ -85,6 +104,15 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
   };
 
   const handleApplyCoordinates = () => {
+    const check = isWithinVietnamTerritory(currentLat, currentLon);
+    if (!check.valid) {
+      setLocationError(
+        lang === 'en'
+          ? check.reasonEn || 'Selected coordinates are outside Vietnamese territory. Please select a location inside Vietnam.'
+          : check.reasonVi || 'Vị trí bạn chọn nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn một vị trí trong Việt Nam và thử lại.'
+      );
+      return;
+    }
     onSelectCoordinates(currentLat, currentLon);
     onClose();
   };
@@ -104,8 +132,8 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               </h2>
               <p className="text-xs text-emerald-200">
                 {t(
-                  'Chạm vào bản đồ vệ tinh hoặc dùng GPS thiết bị để xác định tọa độ và điểm dữ liệu khí hậu gần nhất',
-                  'Tap on the satellite map or use device GPS to set coordinates and match the nearest NASA climate grid'
+                  'Chạm vào bản đồ vệ tinh trong lãnh thổ Việt Nam hoặc dùng GPS để xác định tọa độ ruộng',
+                  'Tap inside Vietnamese territory on the map or use GPS to set your field coordinates'
                 )}
               </p>
             </div>
@@ -127,8 +155,8 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               <span className="flex items-center gap-1.5 font-semibold text-stone-700">
                 <Compass className="w-4 h-4 text-emerald-700" />{' '}
                 {t(
-                  'Chạm vào bất kỳ vị trí nào trên ảnh vệ tinh để đặt ghim ruộng',
-                  'Tap anywhere on the satellite imagery to place your field pin'
+                  'Chạm vào vị trí ruộng tại Việt Nam để đặt ghim',
+                  'Tap a location inside Vietnam to place your field pin'
                 )}
               </span>
               <button
@@ -152,6 +180,11 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               onLocationChange={(lat, lon) => {
                 setCurrentLat(lat);
                 setCurrentLon(lon);
+                setLocationError(null);
+              }}
+              onInvalidLocation={(reason) => {
+                setLocationError(reason);
+                setGpsMessage(null);
               }}
               fieldLabel={t('Vị trí ruộng đã chọn', 'Selected Field Location')}
             />
@@ -163,12 +196,19 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-full bg-emerald-500 border border-stone-800 inline-block" />{' '}
-                {t('Điểm tham chiếu khí hậu gần nhất', 'Nearest climate grid')}
+                {t('Điểm tham chiếu khí hậu gần nhất', 'Nearest climate reference')}
               </span>
               <span className="text-amber-700 font-semibold font-mono tabular-nums">
                 {t('Khoảng cách:', 'Distance:')} {distanceKm} km
               </span>
             </div>
+
+            {locationError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 font-semibold flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{locationError}</span>
+              </div>
+            )}
 
             {gpsMessage && (
               <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">
@@ -177,7 +217,7 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
             )}
           </div>
 
-          {/* Right: Coordinates, Quick Presets & Nearest Climate Grid Info */}
+          {/* Right: Coordinates & Nearest Climate Info */}
           <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
             <div className="space-y-4">
               {/* Coordinates manual input */}
@@ -190,7 +230,10 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                     type="number"
                     step="0.001"
                     value={currentLat}
-                    onChange={e => setCurrentLat(parseFloat(e.target.value) || 0)}
+                    onChange={e => {
+                      setCurrentLat(parseFloat(e.target.value) || 0);
+                      setLocationError(null);
+                    }}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white font-mono font-bold text-stone-900 tabular-nums"
                   />
                 </div>
@@ -202,20 +245,23 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                     type="number"
                     step="0.001"
                     value={currentLon}
-                    onChange={e => setCurrentLon(parseFloat(e.target.value) || 0)}
+                    onChange={e => {
+                      setCurrentLon(parseFloat(e.target.value) || 0);
+                      setLocationError(null);
+                    }}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white font-mono font-bold text-stone-900 tabular-nums"
                   />
                 </div>
               </div>
 
-              {/* Nearest NASA Grid Cell Match */}
+              {/* Nearest Climate Reference Match */}
               <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-900">
-                    {t('Điểm Khí hậu Gần Nhất', 'Nearest Climate Grid')}
+                    {t('Hồ sơ Khí hậu Vùng (2001–2025)', 'Regional Climate Profile (2001–2025)')}
                   </span>
                   <span className="text-xs font-mono text-emerald-800 font-bold">
-                    {nearestCell.cellId}
+                    {distanceKm} km
                   </span>
                 </div>
 
@@ -226,21 +272,7 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
                     <div className="text-stone-500 text-[11px]">
-                      {t('Tọa độ tâm lưới:', 'Grid center:')}
-                    </div>
-                    <div className="font-bold text-stone-800 font-mono tabular-nums">
-                      {nearestCell.lat}°{lang === 'en' ? 'N' : 'B'}, {nearestCell.lon}°{lang === 'en' ? 'E' : 'Đ'}
-                    </div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
-                    <div className="text-stone-500 text-[11px]">
-                      {t('Cách thửa ruộng:', 'Distance to field:')}
-                    </div>
-                    <div className="font-bold text-amber-700 font-mono tabular-nums">{distanceKm} km</div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
-                    <div className="text-stone-500 text-[11px]">
-                      {t('Nhiệt độ TB nhiều năm:', '21-yr mean temp:')}
+                      {t('Nhiệt độ TB 25 năm:', '25-yr mean temp:')}
                     </div>
                     <div className="font-bold text-stone-800 font-mono tabular-nums">
                       {nearestCell.climatology21Yr.avgTemp}°C
@@ -254,14 +286,30 @@ export const InteractiveMapModal: React.FC<InteractiveMapModalProps> = ({
                       {nearestCell.climatology21Yr.annualRainfallMm} mm
                     </div>
                   </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
+                    <div className="text-stone-500 text-[11px]">
+                      {t('Độ ẩm không khí TB:', 'Mean humidity:')}
+                    </div>
+                    <div className="font-bold text-stone-800 font-mono tabular-nums">
+                      {nearestCell.climatology21Yr.avgRh2m}%
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-emerald-100">
+                    <div className="text-stone-500 text-[11px]">
+                      {t('Ẩm đất tầng rễ TB:', 'Mean root moisture:')}
+                    </div>
+                    <div className="font-bold text-amber-700 font-mono tabular-nums">
+                      {Math.round(nearestCell.climatology21Yr.avgGwetroot * 100)}%
+                    </div>
+                  </div>
                 </div>
 
                 <div className="text-[11px] text-emerald-900 leading-relaxed flex items-start gap-1.5">
                   <Info className="w-4 h-4 shrink-0 mt-0.5 text-emerald-700" />
                   <span>
                     {t(
-                      'Ảnh vệ tinh giúp bạn nhận diện đúng bờ thửa, mương nước và khu vực trồng trọt. Hệ thống tự động ghép tọa độ ruộng với dữ liệu khí hậu 21 năm gần nhất để tư vấn mùa vụ.',
-                      'Satellite imagery helps pinpoint field borders, canals, and plots. Coordinates automatically link to the nearest 21-year NASA climate grid for seasonal advisories.'
+                      'Ảnh vệ tinh giúp bạn nhận diện đúng bờ thửa, mương nước tại Việt Nam. Tọa độ ruộng tự động liên kết dữ liệu thời tiết hiện tại và chuỗi khí hậu 25 năm (2001–2025) để tư vấn tưới và lịch gieo trồng.',
+                      'Satellite imagery helps pinpoint field borders and canals in Vietnam. Coordinates automatically pair live weather with 25-year (2001–2025) climate trends for irrigation and planting guidance.'
                     )}
                   </span>
                 </div>

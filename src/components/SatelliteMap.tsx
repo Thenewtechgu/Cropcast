@@ -1,16 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { findNearestNasaGrid } from '../data/nasaVietnamGrid';
+import { AlertTriangle, X } from 'lucide-react';
+import { findNearestNasaGrid, isWithinVietnamTerritory } from '../data/nasaVietnamGrid';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface SatelliteMapProps {
   lat: number;
   lon: number;
   zoom?: number;
+  flyToTrigger?: number;
   heightClass?: string;
   interactive?: boolean;
   showNasaGrid?: boolean;
+  validateVietnamBoundary?: boolean;
   onLocationChange?: (lat: number, lon: number) => void;
+  onInvalidLocation?: (reason: string) => void;
   fieldLabel?: string;
 }
 
@@ -18,10 +22,13 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
   lat,
   lon,
   zoom = 14,
+  flyToTrigger = 0,
   heightClass = 'h-64',
   interactive = true,
   showNasaGrid = true,
+  validateVietnamBoundary = true,
   onLocationChange,
+  onInvalidLocation,
   fieldLabel,
 }) => {
   const { lang, t } = useLanguage();
@@ -34,8 +41,18 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     labels: L.TileLayer;
   } | null>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
+  const prevZoomRef = useRef<number>(zoom);
+  const prevTriggerRef = useRef<number>(flyToTrigger);
+  const onLocationChangeRef = useRef(onLocationChange);
+  const onInvalidLocationRef = useRef(onInvalidLocation);
+  const langRef = useRef(lang);
+
+  onLocationChangeRef.current = onLocationChange;
+  onInvalidLocationRef.current = onInvalidLocation;
+  langRef.current = lang;
 
   const [basemap, setBasemap] = useState<'satellite' | 'street'>('satellite');
+  const [boundaryAlert, setBoundaryAlert] = useState<string | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -52,16 +69,14 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
       attributionControl: true,
     });
 
-    // High-resolution Esri World Imagery (Satellite Aerial View)
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
-        attribution: 'Esri World Imagery',
+        attribution: 'World Imagery',
         maxZoom: 18,
       }
     );
 
-    // Hybrid place labels overlay
     const labelsLayer = L.tileLayer(
       'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
       {
@@ -70,11 +85,10 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
       }
     );
 
-    // Reliable Esri World Street Map layer (works cleanly in iframe sandboxes)
     const osmLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
       {
-        attribution: 'Esri World Street Map',
+        attribution: 'World Street Map',
         maxZoom: 18,
       }
     );
@@ -84,11 +98,28 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
 
     const markerGroup = L.layerGroup().addTo(map);
 
-    if (interactive && onLocationChange) {
+    if (interactive) {
       map.on('click', (e: L.LeafletMouseEvent) => {
         const nextLat = Number(e.latlng.lat.toFixed(5));
         const nextLon = Number(e.latlng.lng.toFixed(5));
-        onLocationChange(nextLat, nextLon);
+
+        if (validateVietnamBoundary) {
+          const check = isWithinVietnamTerritory(nextLat, nextLon);
+          if (!check.valid) {
+            const msg =
+              langRef.current === 'en'
+                ? check.reasonEn ||
+                  'Selected point is outside Vietnamese territory. Please choose a location inside Vietnam and try again.'
+                : check.reasonVi ||
+                  'Vị trí bạn chọn nằm ngoài lãnh thổ Việt Nam. Vui lòng chọn một vị trí trong Việt Nam và thử lại.';
+            setBoundaryAlert(msg);
+            onInvalidLocationRef.current?.(msg);
+            return;
+          }
+        }
+
+        setBoundaryAlert(null);
+        onLocationChangeRef.current?.(nextLat, nextLon);
       });
     }
 
@@ -96,7 +127,6 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     layersRef.current = { satellite: satelliteLayer, osm: osmLayer, labels: labelsLayer };
     markersRef.current = markerGroup;
 
-    // Ensure proper tile sizing after modal/tab transitions
     const resizeTimer = setTimeout(() => {
       map.invalidateSize();
     }, 180);
@@ -128,19 +158,24 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     setTimeout(() => map.invalidateSize(), 60);
   }, [basemap]);
 
-  // Update center & markers when lat/lon changes
+  // Smoothly fly/pan map & redraw active markers when lat/lon/zoom/flyToTrigger updates
   useEffect(() => {
     const map = mapRef.current;
     const group = markersRef.current;
     if (!map || !group) return;
 
+    const zoomChanged = prevZoomRef.current !== zoom;
+    const triggerChanged = prevTriggerRef.current !== flyToTrigger;
+    prevZoomRef.current = zoom;
+    prevTriggerRef.current = flyToTrigger;
+
     group.clearLayers();
-    map.setView([lat, lon], map.getZoom() || zoom, { animate: true });
+    const targetZoom = zoomChanged || triggerChanged ? zoom : map.getZoom() || zoom;
+    map.flyTo([lat, lon], targetZoom, { duration: 0.75 });
 
     const { cell, distanceKm } = findNearestNasaGrid(lat, lon);
 
     if (showNasaGrid) {
-      // 0.5-degree NASA grid box around nearest cell center
       const gridBounds: L.LatLngBoundsExpression = [
         [cell.lat - 0.25, cell.lon - 0.25],
         [cell.lat + 0.25, cell.lon + 0.25],
@@ -153,7 +188,6 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
         fillOpacity: 0.08,
       }).addTo(group);
 
-      // Line connecting field to nearest NASA grid point
       L.polyline(
         [
           [lat, lon],
@@ -166,18 +200,17 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
         }
       ).addTo(group);
 
-      // Nearest NASA Grid Center marker
-      const nasaIcon = L.divIcon({
-        className: 'custom-nasa-pin',
+      const gridIcon = L.divIcon({
+        className: 'custom-climate-pin',
         html: `<div style="width:14px;height:14px;border-radius:9999px;background:#10b981;border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.45);"></div>`,
         iconSize: [14, 14],
         iconAnchor: [7, 7],
       });
-      L.marker([cell.lat, cell.lon], { icon: nasaIcon })
+      L.marker([cell.lat, cell.lon], { icon: gridIcon })
         .bindTooltip(
           lang === 'en'
-            ? `Nearest climate grid (${cell.cellId} · ${distanceKm} km away)`
-            : `Điểm dữ liệu khí hậu gần nhất (${cell.cellId} · cách ${distanceKm} km)`,
+            ? `Nearest climate reference (${distanceKm} km away)`
+            : `Điểm tham chiếu khí hậu gần nhất (cách ${distanceKm} km)`,
           {
             direction: 'top',
           }
@@ -185,7 +218,6 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
         .addTo(group);
     }
 
-    // Field location marker
     const fieldIcon = L.divIcon({
       className: 'custom-field-pin',
       html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:9999px;background:#f59e0b;border:3px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.5);">
@@ -201,11 +233,28 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
         direction: 'top',
       })
       .addTo(group);
-  }, [lat, lon, showNasaGrid, displayFieldLabel, lang]);
+  }, [lat, lon, zoom, flyToTrigger, showNasaGrid, displayFieldLabel, lang]);
 
   return (
     <div className={`relative w-full ${heightClass} rounded-xl overflow-hidden border border-stone-300 bg-stone-900`}>
       <div ref={containerRef} className="w-full h-full z-10" />
+
+      {boundaryAlert && (
+        <div className="absolute top-12 left-2.5 right-2.5 z-30 bg-rose-50/95 border border-rose-300 text-rose-900 px-3 py-2 rounded-xl shadow-md text-xs flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <span className="font-semibold leading-snug">{boundaryAlert}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBoundaryAlert(null)}
+            className="p-0.5 rounded hover:bg-rose-100 text-rose-700 cursor-pointer shrink-0"
+            aria-label={t('Đóng cảnh báo', 'Dismiss warning')}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {interactive && (
         <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1 bg-white/95 backdrop-blur-xs p-1 rounded-lg border border-stone-200 shadow-sm text-[11px]">

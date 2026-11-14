@@ -107,8 +107,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-4 h-4 text-emerald-600" />
             {t(
-              'Đánh giá xác suất rủi ro lịch sử 21 năm (2005–2025)',
-              '21-Year Historical Risk Assessment (2005–2025)'
+              'Đánh giá xác suất rủi ro lịch sử 25 năm (2001–2025)',
+              '25-Year Historical Risk Assessment (2001–2025)'
             )}
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
@@ -119,8 +119,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
             {t(
-              `Dựa trên 21 năm quan trắc tại điểm khí hậu ${activeField.nasaGrid.cellId} (${getLocalizedRegionName(activeField.province, 'vi')}). Đánh giá số năm xuất hiện điều kiện bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
-              `Based on 21 years of NASA POWER observations at grid ${activeField.nasaGrid.cellId} (${getLocalizedRegionName(activeField.province, 'en')}), counting adverse years in sensitive crop growth windows.`
+              `Dựa trên 25 năm quan trắc (2001–2025) tại khu vực ${getLocalizedRegionName(activeField.province, 'vi')}. Đánh giá số năm xuất hiện điều kiện bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
+              `Based on 25 years of historical climate observations (2001–2025) in ${getLocalizedRegionName(activeField.province, 'en')}, counting adverse years in sensitive crop growth windows.`
             )}
           </p>
         </div>
@@ -193,10 +193,10 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           </div>
         </div>
         <p className="text-[11px] text-stone-600 border-t border-stone-200/80 pt-2">
-          <strong>{t('Ý nghĩa chỉ số "X/21 năm bất lợi":', 'Meaning of "X/21 adverse yrs":')}</strong>{' '}
+          <strong>{t('Ý nghĩa chỉ số "X/25 năm bất lợi":', 'Meaning of "X/25 adverse yrs":')}</strong>{' '}
           {t(
-            'Đếm số năm trong chuỗi 21 năm (2005–2025) xuất hiện rét đậm, nắng nóng hoặc úng/hạn rơi đúng giai đoạn nhạy cảm nếu gieo vào tháng đó.',
-            'Counts how many years out of 2005–2025 experienced cold snaps, heatwaves, or floods/drought during sensitive growth stages when planted in that month.'
+            'Đếm số năm trong chuỗi 25 năm (2001–2025) xuất hiện rét đậm, nắng nóng hoặc úng/hạn rơi đúng giai đoạn nhạy cảm nếu gieo vào tháng đó.',
+            'Counts how many years out of 2001–2025 experienced cold snaps, heatwaves, or floods/drought during sensitive growth stages when planted in that month.'
           )}
         </p>
       </div>
@@ -253,7 +253,7 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
                     : t('Rủi ro cao', 'High Risk')}
                 </div>
                 <div className="text-[10px] text-stone-500">
-                  {ev.adverseYearsCount}/21 {t('năm bất lợi', 'adverse yrs')}
+                  {ev.adverseYearsCount}/25 {t('năm bất lợi', 'adverse yrs')}
                 </div>
               </button>
             );
@@ -269,8 +269,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
               <CalendarDays className="w-5 h-5 text-emerald-700" />
               <h3 className="font-bold text-base text-stone-900">
                 {t(
-                  `Thống kê 21 năm NASA POWER: Xuống giống vào Tháng ${activeDetail.month}`,
-                  `21-Year NASA POWER Stats: Planting in Month ${activeDetail.month}`
+                  `Thống kê 25 năm (2001–2025): Xuống giống vào Tháng ${activeDetail.month}`,
+                  `25-Year Climate Stats (2001–2025): Planting in Month ${activeDetail.month}`
                 )}
               </h3>
             </div>
@@ -291,8 +291,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
           <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs text-stone-800">
             <div className="font-bold text-emerald-950 text-sm">
               {t(
-                `"Trong 21 năm (2005–2025), có ${activeDetail.adverseYearsCount} năm xuất hiện trung bình ${activeDetail.adverseDaysAvg} ngày có ${activeDetail.thresholdCondition}."`,
-                `"Across 21 years (2005–2025), ${activeDetail.adverseYearsCount} years averaged ${activeDetail.adverseDaysAvg} days with ${activeDetail.thresholdCondition}."`
+                `"Trong 25 năm (2001–2025), có ${activeDetail.adverseYearsCount} năm xuất hiện trung bình ${activeDetail.adverseDaysAvg} ngày có ${activeDetail.thresholdCondition}."`,
+                `"Across 25 years (2001–2025), ${activeDetail.adverseYearsCount} years averaged ${activeDetail.adverseDaysAvg} days with ${activeDetail.thresholdCondition}."`
               )}
             </div>
             <p className="text-stone-700 leading-relaxed font-normal">
@@ -306,7 +306,7 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
                 {t('Mẫu dữ liệu khảo sát:', 'Sample window:')}
               </span>
               <span className="font-bold text-stone-800">
-                {t('21 năm liên tục (2005 - 2025)', '21 continuous years (2005–2025)')}
+                {t('25 năm liên tục (2001 – 2025)', '25 continuous years (2001–2025)')}
               </span>
             </div>
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
@@ -314,8 +314,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
                 {t('Số năm gặp sự cố bất lợi:', 'Adverse years:')}
               </span>
               <span className="font-bold text-amber-700">
-                {activeDetail.adverseYearsCount} / 21 {t('năm', 'yrs')} (
-                {((activeDetail.adverseYearsCount / 21) * 100).toFixed(0)}%)
+                {activeDetail.adverseYearsCount} / 25 {t('năm', 'yrs')} (
+                {((activeDetail.adverseYearsCount / 25) * 100).toFixed(0)}%)
               </span>
             </div>
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
@@ -328,8 +328,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
 
           <div className="text-[11px] text-stone-400 italic">
             {t(
-              '* Lưu ý khoa học: Lịch gieo trồng phản ánh xác suất rủi ro khí hậu lịch sử 21 năm của NASA, không phải cam kết tuyệt đối về năng suất tương lai.',
-              '* Scientific note: Planting calendar reflects 21-year historical climate probability from NASA POWER, not a guarantee of future yield.'
+              '* Lưu ý thực địa: Lịch gieo trồng phản ánh xác suất rủi ro khí hậu lịch sử 25 năm, cần kết hợp quan sát thực tế tại ruộng.',
+              '* Agronomic note: Planting calendar reflects 25-year historical climate probability and should be paired with local field checks.'
             )}
           </div>
         </div>
