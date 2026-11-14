@@ -1,12 +1,12 @@
 {
-  "projectId": "astute-reducer-8vc14",
-  "appId": "1:1074147180631:web:09f4feec8b6085b839e312",
-  "apiKey": "AIzaSyBTpagjLZHWPlZNw_wmFLo04DVlExLao94",
-  "authDomain": "astute-reducer-8vc14.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-nasa-374a62db-747b-4ce5-adbf-f545c4aa0fb3",
-  "storageBucket": "astute-reducer-8vc14.firebasestorage.app",
-  "messagingSenderId": "1074147180631",
+  "projectId": "cropcast-49e04",
+  "appId": "1:571494317663:web:d165ea002aa190ed4ae5ea",
+  "apiKey": "AIzaSyARWn0gjqvjFK6fRyvocCHQhVLYI3m_t4E",
+  "authDomain": "cropcast-49e04.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-cropcast-cbadc509-479a-4ec9-9ec1-08944ac80dc7",
+  "storageBucket": "cropcast-49e04.firebasestorage.app",
+  "messagingSenderId": "571494317663",
   "measurementId": "",
-  "oAuthClientId": "1074147180631-gggv9r2u0cev3gqm2n7e0secvttp2kn1.apps.googleusercontent.com",
+  "oAuthClientId": "571494317663-4bebergok58maomeinbhlmkneklqauq5.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

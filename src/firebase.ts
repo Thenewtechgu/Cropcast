@@ -45,6 +45,7 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 export const BOOTSTRAP_ADMIN_EMAILS = [
   'vanha.uow@gmail.com',
   'fss01211cg@gmail.com',
+  'lamphuongh88@gmail.com',
 ] as const;
 
 export const BOOTSTRAP_ADMIN_EMAIL = BOOTSTRAP_ADMIN_EMAILS[0];
