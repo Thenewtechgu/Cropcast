@@ -201,7 +201,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 return (
                   <label
                     key={act.id}
-                    onClick={() => handleActionCheck(act.id, act.title)}
                     className={`p-3 rounded-xl border text-xs transition cursor-pointer flex items-start gap-2.5 ${
                       isDone
                         ? 'bg-emerald-50 border-emerald-200 text-stone-500 line-through'
@@ -211,7 +210,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <input
                       type="checkbox"
                       checked={isDone}
-                      onChange={() => {}}
+                      onChange={() => handleActionCheck(act.id, act.title)}
                       className="w-4 h-4 rounded text-emerald-600 mt-0.5 cursor-pointer accent-emerald-600"
                     />
                     <div className="space-y-0.5 flex-1">
@@ -240,36 +239,74 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Simple Feedback Strip */}
-        <div className="pt-4 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <span className="text-stone-600 font-medium">
-            {t('Phản hồi thực tế tại ruộng:', 'Field reality feedback:')}
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleFeedback('helpful', t('Hữu ích', 'Helpful'))}
-              className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
-            >
-              <ThumbsUp className="w-3.5 h-3.5 text-emerald-600" /> {t('Hữu ích', 'Helpful')}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFeedback('soil_still_dry', t('Đất vẫn khô', 'Soil is dry'))}
-              className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
-            >
-              <Droplets className="w-3.5 h-3.5 text-amber-600" />{' '}
-              {t('Đất vẫn khô', 'Soil is dry')}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFeedback('soil_too_wet', t('Đất quá ẩm', 'Soil too wet'))}
-              className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
-            >
-              <ThumbsDown className="w-3.5 h-3.5 text-sky-600" />{' '}
-              {t('Đất quá ẩm', 'Soil too wet')}
-            </button>
+        {/* Field Reality Check & Quick Feedback Strip */}
+        <div className="pt-4 border-t border-stone-100 space-y-2.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-stone-600 font-medium">
+              {t('Phản hồi thực tế & Kiểm chứng dự báo:', 'Field reality & forecast check:')}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleFeedback('helpful', t('Hữu ích', 'Helpful'))}
+                className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <ThumbsUp className="w-3.5 h-3.5 text-emerald-600" /> {t('Hữu ích', 'Helpful')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleFeedback('soil_still_dry', t('Đất vẫn khô', 'Soil is dry'))}
+                className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Droplets className="w-3.5 h-3.5 text-amber-600" />{' '}
+                {t('Đất vẫn khô', 'Soil is dry')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleFeedback('soil_too_wet', t('Đất quá ẩm', 'Soil too wet'))}
+                className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg text-stone-700 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <ThumbsDown className="w-3.5 h-3.5 text-sky-600" />{' '}
+                {t('Đất quá ẩm', 'Soil too wet')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('feedback')}
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold inline-flex items-center gap-1 cursor-pointer"
+              >
+                {t('Cập nhật ruộng & Kiểm tra cách sửa →', 'Update field & check fixes →')}
+              </button>
+            </div>
           </div>
+
+          {field.adaptiveMemory?.lastCheckInSummary && (
+            <div
+              className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                field.adaptiveMemory.lastPredictionOutcome === 'on_track'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-950'
+              }`}
+            >
+              <div className="space-y-0.5">
+                <div className="font-bold">
+                  {field.adaptiveMemory.lastPredictionOutcome === 'on_track'
+                    ? t('Lần thăm ruộng gần nhất: Dự báo khớp kế hoạch', 'Latest check-in: Prediction is on track')
+                    : t('Lần thăm ruộng gần nhất: Đã phát hiện sai lệch & có hướng sửa', 'Latest check-in: Fixes ready to restore plan')}
+                </div>
+                <div className="text-[11px] opacity-90">
+                  {field.adaptiveMemory.planFixRecommendations?.[0] ||
+                    field.adaptiveMemory.lastCheckInSummary}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('feedback')}
+                className="px-3 py-1.5 bg-white border border-stone-200 rounded-lg font-bold text-stone-800 hover:bg-stone-50 shrink-0 cursor-pointer"
+              >
+                {t('Xem chi tiết', 'View fixes')}
+              </button>
+            </div>
+          )}
         </div>
 
         {feedbackSubmitted && (

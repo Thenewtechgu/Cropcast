@@ -413,6 +413,21 @@
           "type": "string",
           "maxLength": 500
         },
+        "predictionOutcome": {
+          "type": "string",
+          "enum": ["on_track", "needs_adjustment", "off_track"]
+        },
+        "observedMoisture": {
+          "type": "string",
+          "enum": ["dry", "balanced", "wet"]
+        },
+        "observedCropHealth": {
+          "type": "string",
+          "enum": ["healthy", "stressed", "pest_risk"]
+        },
+        "recommendedFixes": {
+          "type": "array"
+        },
         "appliedToProfile": {
           "type": "boolean"
         },

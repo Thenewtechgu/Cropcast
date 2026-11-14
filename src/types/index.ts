@@ -125,6 +125,9 @@ export interface FieldProfile {
     irrigationSensitivity?: 'higher' | 'normal' | 'lower';
     consecutiveDryAlerts?: number;
     lastFeedbackDate?: string;
+    lastPredictionOutcome?: 'on_track' | 'needs_adjustment' | 'off_track';
+    lastCheckInSummary?: string;
+    planFixRecommendations?: string[];
     earthMetrics?: EarthEnvironmentSnapshot;
   };
 }
@@ -278,6 +281,10 @@ export type FeedbackType =
   | 'crop_healthy'
   | 'crop_abnormal';
 
+export type PredictionOutcome = 'on_track' | 'needs_adjustment' | 'off_track';
+export type ObservedMoistureState = 'dry' | 'balanced' | 'wet';
+export type ObservedCropHealthState = 'healthy' | 'stressed' | 'pest_risk';
+
 export interface FeedbackRecord {
   id: string;
   ownerId?: string;
@@ -286,6 +293,10 @@ export interface FeedbackRecord {
   feedbackType: FeedbackType;
   userComment?: string;
   systemActionTaken?: string;
+  predictionOutcome?: PredictionOutcome;
+  observedMoisture?: ObservedMoistureState;
+  observedCropHealth?: ObservedCropHealthState;
+  recommendedFixes?: string[];
   appliedToProfile: boolean;
 }
 
@@ -320,7 +331,7 @@ export interface DataImportRecord {
 
 export interface SyncLogRecord {
   id: string;
-  syncType: 'NASA_POWER_API' | 'CSV_UPLOAD' | 'MANUAL_SYNC';
+  syncType: 'NASA_POWER_API' | 'CSV_UPLOAD' | 'MANUAL_SYNC' | 'ALL_SOURCES_SYNC';
   targetCellsCount: number;
   recordsSynced: number;
   startTime: string;
@@ -349,6 +360,7 @@ export interface CsvPreviewResult {
   totalRows: number;
   validRows: number;
   invalidRows: number;
+  skippedEmptyRows?: number;
   uniqueCells: number;
   startDate: string;
   endDate: string;

@@ -482,6 +482,10 @@ export const FirestoreService = {
             feedbackType: data.feedbackType,
             userComment: data.userComment,
             systemActionTaken: data.systemActionTaken,
+            predictionOutcome: data.predictionOutcome,
+            observedMoisture: data.observedMoisture,
+            observedCropHealth: data.observedCropHealth,
+            recommendedFixes: Array.isArray(data.recommendedFixes) ? data.recommendedFixes : undefined,
             appliedToProfile: data.appliedToProfile,
             timestamp:
               data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
@@ -631,7 +635,7 @@ export const FirestoreService = {
       district: (fieldData.district || 'Khu vực canh tác').slice(0, 120),
       lat: Number(fieldData.lat),
       lon: Number(fieldData.lon),
-      areaHa: Math.max(0.01, Number(fieldData.areaHa) || 0.5),
+      areaHa: Number(Math.max(0.001, Number(fieldData.areaHa) || 0.5).toFixed(4)),
       soilType: fieldData.soilType,
       soilCharacteristics: fieldData.soilCharacteristics,
       waterSource: fieldData.waterSource,
@@ -681,7 +685,7 @@ export const FirestoreService = {
       district: (field.district || 'Khu vực canh tác').slice(0, 120),
       lat: Number(field.lat),
       lon: Number(field.lon),
-      areaHa: Math.max(0.01, Number(field.areaHa) || 0.5),
+      areaHa: Number(Math.max(0.001, Number(field.areaHa) || 0.5).toFixed(4)),
       soilType: field.soilType,
       soilCharacteristics: field.soilCharacteristics,
       waterSource: field.waterSource,
@@ -780,6 +784,12 @@ export const FirestoreService = {
     };
     if (fb.userComment) payload.userComment = fb.userComment.slice(0, 1000);
     if (fb.systemActionTaken) payload.systemActionTaken = fb.systemActionTaken.slice(0, 500);
+    if (fb.predictionOutcome) payload.predictionOutcome = fb.predictionOutcome;
+    if (fb.observedMoisture) payload.observedMoisture = fb.observedMoisture;
+    if (fb.observedCropHealth) payload.observedCropHealth = fb.observedCropHealth;
+    if (Array.isArray(fb.recommendedFixes) && fb.recommendedFixes.length > 0) {
+      payload.recommendedFixes = fb.recommendedFixes.slice(0, 8).map((s) => String(s).slice(0, 260));
+    }
     const fbPath = `users/${uid}/feedbacks/${fbId}`;
     try {
       await setDoc(doc(db, 'users', uid, 'feedbacks', fbId), payload);
@@ -806,7 +816,7 @@ export const FirestoreService = {
         status: dataset.status,
         uploadedBy: uid,
         isPublic: true,
-        sampleOverrides: (dataset.sampleOverrides || []).slice(0, 500),
+        sampleOverrides: (dataset.sampleOverrides || []).slice(0, 2500),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -1139,12 +1149,20 @@ export const FirestoreService = {
   // =========================================================================
 
   async getAdminPlatformStats(): Promise<AdminPlatformStats> {
+    const listPath = async (colRef: ReturnType<typeof collection>, pathLabel: string) => {
+      try {
+        return await getDocs(colRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, pathLabel);
+      }
+    };
+
     try {
       const [usersSnap, adminsSnap, sharesSnap, datasetsSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'admins')),
-        getDocs(collection(db, 'field_shares')),
-        getDocs(collection(db, 'nasa_datasets')),
+        listPath(collection(db, 'users'), 'users'),
+        listPath(collection(db, 'admins'), 'admins'),
+        listPath(collection(db, 'field_shares'), 'field_shares'),
+        listPath(collection(db, 'nasa_datasets'), 'nasa_datasets'),
       ]);
 
       const adminUids = new Set<string>(adminsSnap.docs.map((d) => d.id));
@@ -1161,9 +1179,9 @@ export const FirestoreService = {
         usersSnap.docs.map(async (uDoc) => {
           const uid = uDoc.id;
           const [plotsSnap, tasksSnap, feedbacksSnap] = await Promise.all([
-            getDocs(collection(db, 'users', uid, 'plots')),
-            getDocs(collection(db, 'users', uid, 'tasks')),
-            getDocs(collection(db, 'users', uid, 'feedbacks')),
+            listPath(collection(db, 'users', uid, 'plots'), `users/${uid}/plots`),
+            listPath(collection(db, 'users', uid, 'tasks'), `users/${uid}/tasks`),
+            listPath(collection(db, 'users', uid, 'feedbacks'), `users/${uid}/feedbacks`),
           ]);
           return { uid, plotsSnap, tasksSnap, feedbacksSnap };
         })
@@ -1301,6 +1319,9 @@ export const FirestoreService = {
           .sort((a, b) => b.count - a.count),
       };
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith('{"error":')) {
+        throw err;
+      }
       handleFirestoreError(err, OperationType.LIST, 'admin_stats');
     }
   },

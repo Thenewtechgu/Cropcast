@@ -85,6 +85,54 @@ export function getWaterObsLabel(obs: string, lang: AppLanguage = 'vi'): string 
   }
 }
 
+type FieldAreaUnit = 'ha' | 'm2' | 'sao_bac' | 'cong' | 'acre';
+
+const AREA_UNIT_TO_HA: Record<FieldAreaUnit, number> = {
+  ha: 1,
+  m2: 0.0001,
+  sao_bac: 0.036,
+  cong: 0.1,
+  acre: 0.404686,
+};
+
+function convertToHectares(rawInput: string, unit: FieldAreaUnit): number {
+  const normalized = rawInput.replace(',', '.').trim();
+  if (!normalized) return NaN;
+  const num = Number(normalized);
+  if (!Number.isFinite(num)) return NaN;
+  return num * AREA_UNIT_TO_HA[unit];
+}
+
+function formatReadableArea(ha: number): string {
+  if (!Number.isFinite(ha) || ha <= 0) return '—';
+  const m2 = Math.round(ha * 10000);
+  const haText = ha >= 1 ? ha.toFixed(2).replace(/\.?0+$/, '') : ha.toFixed(4).replace(/\.?0+$/, '');
+  return `${haText} ha (${m2.toLocaleString()} m²)`;
+}
+
+function extractReadableSaveError(err: any, lang: AppLanguage): { message: string; isPermissionError: boolean } {
+  const raw = String(err?.message || err || '');
+  const lower = raw.toLowerCase();
+  const isPerm = lower.includes('missing or insufficient permissions') || lower.includes('permission-denied');
+  if (isPerm) {
+    return {
+      isPermissionError: true,
+      message:
+        lang === 'en'
+          ? 'Unable to save field because Cloud Firestore Security Rules have not been published to your Firebase project yet (permission-denied). Open Firebase Console → Firestore Database → Rules and Publish the rules from firestore.rules, or push the GitHub Actions deployment.'
+          : 'Không thể lưu thửa ruộng vì bộ Firestore Security Rules mới chưa được Publish lên dự án Firebase đang chạy (lỗi permission-denied). Hãy mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish (hoặc chạy GitHub Actions deploy).',
+    };
+  }
+  return {
+    isPermissionError: false,
+    message:
+      raw ||
+      (lang === 'en'
+        ? 'Could not save the field profile. Please check your inputs and try again.'
+        : 'Không thể lưu hồ sơ thửa ruộng. Vui lòng kiểm tra lại thông tin và thử lại.'),
+  };
+}
+
 export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   fields,
   activeField,
@@ -108,6 +156,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   const [stepError, setStepError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [savingField, setSavingField] = useState(false);
+  const [permissionErrorHint, setPermissionErrorHint] = useState(false);
 
   // Share Modal state
   const [shareModalFieldId, setShareModalFieldId] = useState<string | null>(null);
@@ -127,7 +176,12 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsNotice, setGpsNotice] = useState<string | null>(null);
-  const [areaHa, setAreaHa] = useState(1.0);
+  const [areaValueInput, setAreaValueInput] = useState('1');
+  const [areaUnit, setAreaUnit] = useState<FieldAreaUnit>('ha');
+  const areaHa = (() => {
+    const converted = convertToHectares(areaValueInput, areaUnit);
+    return Number.isFinite(converted) && converted > 0 ? Number(converted.toFixed(4)) : 0;
+  })();
 
   // Step 2: Soil
   const [soilType, setSoilType] = useState<SoilType>('loam');
@@ -229,6 +283,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
   const handleNextStep = () => {
     setStepError(null);
+    setPermissionErrorHint(false);
     if (currentStep === 1) {
       if (!name.trim()) {
         setStepError(t('Vui lòng nhập tên thửa ruộng.', 'Please enter a field name.'));
@@ -238,11 +293,21 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         setStepError(t('Vui lòng nhập Tỉnh / Thành phố của thửa ruộng.', 'Please enter the Province / City.'));
         return;
       }
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < 8 || lat > 24 || lon < 101 || lon > 111) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < 7 || lat > 24.5 || lon < 101 || lon > 116) {
         setStepError(
           t(
-            'Tọa độ ruộng chưa hợp lệ (Vĩ độ 8–24°B, Kinh độ 101–111°Đ). Hãy dùng GPS hoặc chạm bản đồ.',
-            'Invalid coordinates (Lat 8–24°N, Lon 101–111°E). Please use GPS or tap the map.'
+            'Tọa độ ruộng chưa hợp lệ (Vĩ độ 7–24.5°B, Kinh độ 101–116°Đ). Hãy dùng GPS hoặc chạm bản đồ.',
+            'Invalid coordinates (Lat 7–24.5°N, Lon 101–116°E). Please use GPS or tap the map.'
+          )
+        );
+        return;
+      }
+      const computedHa = convertToHectares(areaValueInput, areaUnit);
+      if (!Number.isFinite(computedHa) || computedHa < 0.001 || computedHa > 50000) {
+        setStepError(
+          t(
+            'Vui lòng nhập diện tích hợp lệ (tối thiểu 10 m² / 0.001 ha).',
+            'Please enter a valid field size (minimum 10 m² / 0.001 ha).'
           )
         );
         return;
@@ -260,6 +325,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setEditingField(null);
     setCurrentStep(1);
     setStepError(null);
+    setPermissionErrorHint(false);
     setName('');
     setProvince('Hà Nội');
     setDistrict('');
@@ -267,7 +333,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setLon(105.85);
     setLocationConfirmed(false);
     setGpsNotice(null);
-    setAreaHa(1.0);
+    setAreaUnit('ha');
+    setAreaValueInput('1');
     setSoilType('loam');
     setDrainage('moderate');
     setHoldsWater(true);
@@ -302,7 +369,9 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
     setLon(field.lon);
     setLocationConfirmed(true);
     setGpsNotice(null);
-    setAreaHa(field.areaHa);
+    setPermissionErrorHint(false);
+    setAreaUnit('ha');
+    setAreaValueInput(String(field.areaHa || 1));
     setSoilType(field.soilType);
     setDrainage(field.soilCharacteristics.drainage);
     setHoldsWater(field.soilCharacteristics.holdsWater);
@@ -330,11 +399,26 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
   };
 
   const handleFinishWizard = async () => {
+    setStepError(null);
+    setPermissionErrorHint(false);
     if (!name.trim()) {
       setStepError(t('Vui lòng nhập tên thửa ruộng.', 'Please enter a field name.'));
       setCurrentStep(1);
       return;
     }
+    const computedHa = convertToHectares(areaValueInput, areaUnit);
+    if (!Number.isFinite(computedHa) || computedHa < 0.001 || computedHa > 50000) {
+      setStepError(
+        t(
+          'Diện tích thửa ruộng chưa hợp lệ (tối thiểu 10 m² / 0.001 ha).',
+          'Please enter a valid field size (minimum 10 m² / 0.001 ha).'
+        )
+      );
+      setCurrentStep(1);
+      return;
+    }
+    const finalAreaHa = Number(computedHa.toFixed(4));
+
     setSavingField(true);
     try {
       const payload = {
@@ -343,7 +427,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
         district: district.trim() || (lang === 'en' ? 'Cultivation area' : 'Khu vực canh tác'),
         lat,
         lon,
-        areaHa,
+        areaHa: finalAreaHa,
         soilType,
         soilCharacteristics: {
           drainage,
@@ -386,6 +470,10 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
       setWizardOpen(false);
       resetWizardToBlank();
+    } catch (err: any) {
+      const parsed = extractReadableSaveError(err, lang);
+      setStepError(parsed.message);
+      setPermissionErrorHint(parsed.isPermissionError);
     } finally {
       setSavingField(false);
     }
@@ -761,9 +849,19 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
             {/* Step Body */}
             <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1 text-xs sm:text-sm">
               {stepError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>{stepError}</span>
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-semibold space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{stepError}</span>
+                  </div>
+                  {permissionErrorHint && (
+                    <div className="text-[11px] font-normal text-rose-800 pl-6">
+                      {t(
+                        'Mẹo: Nếu bạn là chủ dự án Firebase, hãy dán tệp firestore.rules trong mã nguồn vào Firebase Console → Firestore Database → Rules → Publish.',
+                        'Tip: If you own the Firebase project, publish your firestore.rules file in Firebase Console → Firestore Database → Rules.'
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -916,20 +1014,74 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     )}
                   </div>
 
-                  <div>
-                    <label className="font-bold text-stone-800 block mb-1">
-                      {t('Diện tích canh tác (hecta)', 'Cultivated area (hectares)')}
-                    </label>
-                    <div className="flex items-center gap-2">
+                  <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="font-bold text-stone-800">
+                        {t('Diện tích thửa ruộng của bạn *', 'Your custom field size *')}
+                      </label>
+                      <span className="text-[11px] font-mono font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
+                        {formatReadableArea(areaHa)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
-                        type="number"
-                        step="0.1"
-                        min="0.05"
-                        value={areaHa}
-                        onChange={e => setAreaHa(parseFloat(e.target.value) || 0.1)}
-                        className="w-32 px-3 py-2 border border-stone-300 rounded-xl text-stone-900"
+                        type="text"
+                        inputMode="decimal"
+                        value={areaValueInput}
+                        onChange={e => {
+                          setAreaValueInput(e.target.value);
+                          setStepError(null);
+                        }}
+                        placeholder={areaUnit === 'm2' ? 'VD: 1500' : 'VD: 1.5'}
+                        className="w-36 px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-mono font-semibold focus:outline-emerald-600"
                       />
-                      <span className="text-stone-600 text-xs">{t('Hecta (ha)', 'Hectares (ha)')}</span>
+                      <select
+                        value={areaUnit}
+                        onChange={e => {
+                          const nextUnit = e.target.value as FieldAreaUnit;
+                          const curHa = convertToHectares(areaValueInput, areaUnit);
+                          setAreaUnit(nextUnit);
+                          if (Number.isFinite(curHa) && curHa > 0) {
+                            const nextVal = curHa / AREA_UNIT_TO_HA[nextUnit];
+                            setAreaValueInput(
+                              nextUnit === 'm2'
+                                ? String(Math.round(nextVal))
+                                : Number(nextVal.toFixed(3)).toString()
+                            );
+                          }
+                        }}
+                        className="px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 text-xs font-semibold"
+                      >
+                        <option value="ha">{t('Hecta (ha)', 'Hectares (ha)')}</option>
+                        <option value="m2">{t('Mét vuông (m²)', 'Square meters (m²)')}</option>
+                        <option value="sao_bac">{t('Sào Bắc Bộ (360 m²)', 'Northern Sào (360 m²)')}</option>
+                        <option value="cong">{t('Công / Sào (1.000 m²)', 'Công / 1,000 m²')}</option>
+                        <option value="acre">{t('Mẫu Anh (Acre)', 'Acres')}</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-stone-500 mr-1">{t('Chọn nhanh:', 'Quick presets:')}</span>
+                      {[
+                        { label: '500 m²', val: '500', unit: 'm2' as FieldAreaUnit },
+                        { label: '1.000 m²', val: '1000', unit: 'm2' as FieldAreaUnit },
+                        { label: '0.5 ha', val: '0.5', unit: 'ha' as FieldAreaUnit },
+                        { label: '1 ha', val: '1', unit: 'ha' as FieldAreaUnit },
+                        { label: '2 ha', val: '2', unit: 'ha' as FieldAreaUnit },
+                        { label: '5 ha', val: '5', unit: 'ha' as FieldAreaUnit },
+                      ].map(preset => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setAreaUnit(preset.unit);
+                            setAreaValueInput(preset.val);
+                            setStepError(null);
+                          }}
+                          className="px-2 py-0.5 bg-white hover:bg-emerald-50 border border-stone-200 hover:border-emerald-300 rounded-lg text-stone-700 font-medium cursor-pointer transition"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>

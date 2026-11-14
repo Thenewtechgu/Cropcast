@@ -43,7 +43,209 @@ export interface ClientBatchProgress {
   etaSeconds: number | null;
 }
 
+export interface NasaSyncProgress {
+  active: boolean;
+  phase:
+    | 'preparing'
+    | 'fetching_power_daily'
+    | 'fetching_power_history'
+    | 'fetching_cmr_granules'
+    | 'fetching_ghg_stac'
+    | 'checking_esri_tiles'
+    | 'saving_log'
+    | 'completed'
+    | 'error';
+  processedCells: number;
+  totalCells: number;
+  skippedExistingCells: number;
+  updatedCells: number;
+  currentCellId: string;
+  currentRegion: string;
+  currentSourceLabel: string;
+  recordsSynced: number;
+  historyPointsSynced: number;
+  liveApiCells: number;
+  fallbackCells: number;
+  percent: number;
+  stepDetail: string;
+}
+
+export interface DataSourceSyncStatusItem {
+  id: 'nasa_power_daily' | 'nasa_power_history' | 'cmr_oco2' | 'cmr_grace' | 'cmr_smap' | 'cmr_modis' | 'ghg_edgar_stac' | 'esri_arcgis';
+  name: string;
+  endpoint: string;
+  ok: boolean;
+  recordsOrItems: number;
+  latestTimestamp: string;
+  detail: string;
+}
+
+export interface AllSourcesSyncSummary {
+  syncedAt: string;
+  totalRecordsSynced: number;
+  powerDailyRecords: number;
+  powerHistoryMonthlyPoints: number;
+  powerHistoryRange: string;
+  gridCellsTotal: number;
+  gridCellsUpdated: number;
+  gridCellsSkippedExisting: number;
+  gridCellsCovered2001to2025: number;
+  cmrGranulesMatched: number;
+  stacCollectionsCount: number;
+  esriServicesOnline: number;
+  sources: DataSourceSyncStatusItem[];
+}
+
+export interface AllSourcesSyncResult {
+  syncLog: SyncLogRecord;
+  collectedOverrides: ParsedNasaRow[];
+  summary: AllSourcesSyncSummary;
+}
+
+export interface CachedGridCellRecord {
+  cellId: string;
+  lat: number;
+  lon: number;
+  region: string;
+  historyStartYear: number;
+  historyEndYear: number;
+  monthlyPointsCount: number;
+  dailyEndDate: string;
+  dailyPointsCount: number;
+  latestOverrides: ParsedNasaRow[];
+  source: 'nasa_power_api' | 'fallback';
+  syncedAt: string;
+}
+
+export interface GridCoverageSummary {
+  totalCells: number;
+  covered2001to2025: number;
+  freshDailyCount: number;
+  totalMonthlyPoints: number;
+  lastCheckedAt: string;
+}
+
 const WAREHOUSE_PREFS_KEY = 'cropcast_nasa_warehouse_prefs_v1';
+const ALL_SOURCES_CACHE_KEY = 'cropcast_all_sources_sync_v1';
+const GRID_COVERAGE_SUMMARY_KEY = 'cropcast_grid_coverage_summary_v1';
+const GRID_CACHE_DB_NAME = 'cropcast_nasa_grid_cache_db';
+const GRID_CACHE_STORE = 'cell_records';
+
+function openGridCacheDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
+    const req = indexedDB.open(GRID_CACHE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(GRID_CACHE_STORE)) {
+        db.createObjectStore(GRID_CACHE_STORE, { keyPath: 'cellId' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('Failed to open grid cache DB'));
+  });
+}
+
+export async function loadCachedGridCellsMap(): Promise<Record<string, CachedGridCellRecord>> {
+  try {
+    const db = await openGridCacheDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(GRID_CACHE_STORE, 'readonly');
+      const store = tx.objectStore(GRID_CACHE_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const out: Record<string, CachedGridCellRecord> = {};
+        for (const item of (req.result || []) as CachedGridCellRecord[]) {
+          if (item?.cellId) out[item.cellId] = item;
+        }
+        resolve(out);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return {};
+  }
+}
+
+async function saveCachedGridCellsBatch(records: CachedGridCellRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  try {
+    const db = await openGridCacheDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(GRID_CACHE_STORE, 'readwrite');
+      const store = tx.objectStore(GRID_CACHE_STORE);
+      for (const rec of records) {
+        store.put(rec);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore storage limits
+  }
+}
+
+export function loadGridCoverageSummarySync(): GridCoverageSummary {
+  try {
+    const raw = localStorage.getItem(GRID_COVERAGE_SUMMARY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.totalCells === 'number') {
+        return parsed as GridCoverageSummary;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    totalCells: ALL_NASA_CELLS.length,
+    covered2001to2025: 0,
+    freshDailyCount: 0,
+    totalMonthlyPoints: 0,
+    lastCheckedAt: '',
+  };
+}
+
+function saveGridCoverageSummary(summary: GridCoverageSummary) {
+  try {
+    localStorage.setItem(GRID_COVERAGE_SUMMARY_KEY, JSON.stringify(summary));
+  } catch {
+    // ignore
+  }
+}
+
+export async function computeGridCoverageSummary(): Promise<GridCoverageSummary> {
+  const map = await loadCachedGridCellsMap();
+  const latestDate = getCalculatedLatestNasaDate();
+  let covered2001to2025 = 0;
+  let freshDailyCount = 0;
+  let totalMonthlyPoints = 0;
+
+  for (const cell of ALL_NASA_CELLS) {
+    const rec = map[cell.cellId];
+    if (!rec || rec.source !== 'nasa_power_api') continue;
+    if (rec.historyStartYear <= 2001 && rec.historyEndYear >= 2025 && rec.monthlyPointsCount > 0) {
+      covered2001to2025++;
+      totalMonthlyPoints += rec.monthlyPointsCount;
+    }
+    if (rec.dailyEndDate >= latestDate && rec.dailyPointsCount > 0) {
+      freshDailyCount++;
+    }
+  }
+
+  const summary: GridCoverageSummary = {
+    totalCells: ALL_NASA_CELLS.length,
+    covered2001to2025,
+    freshDailyCount,
+    totalMonthlyPoints,
+    lastCheckedAt: new Date().toISOString(),
+  };
+  saveGridCoverageSummary(summary);
+  return summary;
+}
 
 interface WarehouseLocalPrefs {
   autoSyncEnabled: boolean;
@@ -58,7 +260,10 @@ function loadWarehousePrefs(): WarehouseLocalPrefs {
       const p = JSON.parse(raw);
       return {
         autoSyncEnabled: typeof p.autoSyncEnabled === 'boolean' ? p.autoSyncEnabled : true,
-        activeVersion: typeof p.activeVersion === 'string' && p.activeVersion ? p.activeVersion : 'v2026.11-daily',
+        activeVersion:
+          typeof p.activeVersion === 'string' && p.activeVersion
+            ? p.activeVersion
+            : 'v2026.11-daily',
         cumulativeSyncedRecords: Number(p.cumulativeSyncedRecords) || 0,
       };
     }
@@ -80,6 +285,26 @@ function saveWarehousePrefs(prefs: WarehouseLocalPrefs) {
   }
 }
 
+export function loadLastAllSourcesSummary(): AllSourcesSyncSummary | null {
+  try {
+    const raw = localStorage.getItem(ALL_SOURCES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.sources)) return parsed as AllSourcesSyncSummary;
+  } catch {
+    // ignore corrupt cache
+  }
+  return null;
+}
+
+function saveLastAllSourcesSummary(summary: AllSourcesSyncSummary) {
+  try {
+    localStorage.setItem(ALL_SOURCES_CACHE_KEY, JSON.stringify(summary));
+  } catch {
+    // ignore
+  }
+}
+
 export function getCalculatedLatestNasaDate(): string {
   const date = new Date();
   date.setDate(date.getDate() - 3);
@@ -93,12 +318,12 @@ export function getWarehouseStatus(
   affectedFarmsCount = 0
 ): CentralDataStatus {
   const prefs = loadWarehousePrefs();
-  const baseRecords = 531 * 365 * 8;
+  const baseRecords = ALL_NASA_CELLS.length * 365 * 8;
   return {
     isConnectedToFirebase: true,
     latestNasaDate: getCalculatedLatestNasaDate(),
     lastSyncTime: latestSyncTime || new Date().toISOString(),
-    dataSource: 'Cloud Firestore + NASA POWER Direct API',
+    dataSource: 'NASA POWER · Earthdata CMR · GHGx STAC · Esri Imagery',
     status: 'LATEST',
     activeVersion: latestDatasetVersion || prefs.activeVersion,
     totalRecords: baseRecords + extraRecordsCount + prefs.cumulativeSyncedRecords,
@@ -121,13 +346,47 @@ export function setWarehouseActiveVersion(version: string): void {
   saveWarehousePrefs(prefs);
 }
 
-export async function executeClientNasaPowerSync(cellIds?: string[]): Promise<SyncLogRecord> {
+function orderAllCellsWithPriority(priorityCellIds?: string[]) {
+  if (!priorityCellIds || priorityCellIds.length === 0) {
+    return ALL_NASA_CELLS;
+  }
+  const prioritySet = new Set(priorityCellIds);
+  const prioritized: typeof ALL_NASA_CELLS = [];
+  const remaining: typeof ALL_NASA_CELLS = [];
+  for (const c of ALL_NASA_CELLS) {
+    if (prioritySet.has(c.cellId)) prioritized.push(c);
+    else remaining.push(c);
+  }
+  return [...prioritized, ...remaining];
+}
+
+async function fetchJsonSafe(url: string, timeoutMs = 8000): Promise<any | null> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!resp.ok) return null;
+    const raw = (await resp.text()).trim();
+    if (!raw || raw.startsWith('<')) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+export async function executeAllSourcesDataSync(
+  cellIds?: string[],
+  onProgress?: (progress: NasaSyncProgress) => void,
+  lang: 'vi' | 'en' = 'vi'
+): Promise<AllSourcesSyncResult> {
   const startTime = new Date().toISOString();
   const latestAvailableNasaDate = getCalculatedLatestNasaDate();
-  const targetCells =
-    cellIds && cellIds.length > 0
-      ? ALL_NASA_CELLS.filter((c) => cellIds.includes(c.cellId))
-      : ALL_NASA_CELLS.slice(0, 12);
+  const targetCells = orderAllCellsWithPriority(cellIds);
 
   const indicators = [
     'T2M',
@@ -146,70 +405,580 @@ export async function executeClientNasaPowerSync(cellIds?: string[]): Promise<Sy
   const startStr = startD.toISOString().slice(0, 10).replace(/-/g, '');
   const endStr = endD.toISOString().slice(0, 10).replace(/-/g, '');
 
+  const totalCells = targetCells.length;
+  let processedCells = 0;
+  let skippedExistingCells = 0;
+  let updatedCells = 0;
   let syncedCount = 0;
+  let powerDailyRecords = 0;
+  let powerHistoryMonthlyPoints = 0;
+  let liveApiCells = 0;
+  let fallbackCells = 0;
+  let historyMinYm = '202512';
+  let historyMaxYm = '200101';
+  const collectedOverrides: ParsedNasaRow[] = [];
 
-  await Promise.all(
-    targetCells.slice(0, 5).map(async (cell) => {
-      try {
-        const nasaUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=${startStr}&end=${endStr}&format=JSON`;
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), 8500);
-        const resp = await fetch(nasaUrl, {
-          signal: controller.signal,
-          headers: { Accept: 'application/json' },
-        }).catch(() => null);
-        window.clearTimeout(timeoutId);
+  onProgress?.({
+    active: true,
+    phase: 'preparing',
+    processedCells: 0,
+    totalCells,
+    skippedExistingCells: 0,
+    updatedCells: 0,
+    currentCellId: targetCells[0]?.cellId || '',
+    currentRegion: targetCells[0]?.region || '',
+    currentSourceLabel: `NASA POWER 2001–2025 (${totalCells} cells)`,
+    recordsSynced: 0,
+    historyPointsSynced: 0,
+    liveApiCells: 0,
+    fallbackCells: 0,
+    percent: 3,
+    stepDetail:
+      lang === 'en'
+        ? `Scanning ${totalCells} Vietnam grid points (2001–2025) to detect existing vs. missing data...`
+        : `Đang kiểm tra ${totalCells} điểm lưới Việt Nam (2001–2025) để bỏ qua ô đã có và tải bù ô còn thiếu...`,
+  });
 
-        let points = 0;
-        if (resp && resp.ok) {
-          const rawText = await resp.text();
-          const trimmed = rawText.trim();
-          if (trimmed && !trimmed.startsWith('<')) {
-            try {
-              const json = JSON.parse(trimmed);
-              const params = json?.properties?.parameter || {};
-              for (const ind of indicators) {
-                const indValues = params[ind] || {};
-                for (const val of Object.values(indValues)) {
-                  const numVal = Number(val);
-                  if (numVal !== -999 && !Number.isNaN(numVal)) {
-                    points++;
-                  }
+  const existingCacheMap = await loadCachedGridCellsMap();
+
+  const missingCells: Array<{
+    cell: (typeof ALL_NASA_CELLS)[number];
+    needHistory: boolean;
+    needDaily: boolean;
+    existing?: CachedGridCellRecord;
+  }> = [];
+
+  for (const cell of targetCells) {
+    const cached = existingCacheMap[cell.cellId];
+    const hasHistory2001to2025 = Boolean(
+      cached &&
+        cached.source === 'nasa_power_api' &&
+        cached.historyStartYear <= 2001 &&
+        cached.historyEndYear >= 2025 &&
+        cached.monthlyPointsCount > 0
+    );
+    const hasFreshDaily = Boolean(
+      cached &&
+        cached.source === 'nasa_power_api' &&
+        cached.dailyEndDate >= latestAvailableNasaDate &&
+        cached.dailyPointsCount > 0
+    );
+
+    if (hasHistory2001to2025 && hasFreshDaily && cached) {
+      skippedExistingCells += 1;
+      processedCells += 1;
+      liveApiCells += 1;
+      powerDailyRecords += cached.dailyPointsCount;
+      powerHistoryMonthlyPoints += cached.monthlyPointsCount;
+      syncedCount += cached.dailyPointsCount + cached.monthlyPointsCount;
+      if (cached.latestOverrides?.length) {
+        collectedOverrides.push(...cached.latestOverrides);
+      }
+    } else {
+      missingCells.push({
+        cell,
+        needHistory: !hasHistory2001to2025,
+        needDaily: !hasFreshDaily,
+        existing: cached,
+      });
+    }
+  }
+
+  onProgress?.({
+    active: true,
+    phase: 'fetching_power_history',
+    processedCells,
+    totalCells,
+    skippedExistingCells,
+    updatedCells,
+    currentCellId: missingCells[0]?.cell.cellId || 'ALL_CACHED',
+    currentRegion: missingCells[0]?.cell.region || 'Việt Nam',
+    currentSourceLabel: 'NASA POWER 2001–2025 + Daily',
+    recordsSynced: syncedCount,
+    historyPointsSynced: powerHistoryMonthlyPoints,
+    liveApiCells,
+    fallbackCells,
+    percent: Math.round(5 + (processedCells / Math.max(1, totalCells)) * 65),
+    stepDetail:
+      missingCells.length === 0
+        ? lang === 'en'
+          ? `[1/4] All ${totalCells}/${totalCells} Vietnam grid points (2001–2025) are already present — moving on to satellite feeds...`
+          : `[1/4] Toàn bộ ${totalCells}/${totalCells} điểm lưới (2001–2025) đã có sẵn — chuyển sang kiểm tra nguồn vệ tinh...`
+        : lang === 'en'
+        ? `[1/4] ${skippedExistingCells}/${totalCells} points already present (skipped). Fetching missing 2001–2025 & daily data for ${missingCells.length} points...`
+        : `[1/4] Đã có sẵn ${skippedExistingCells}/${totalCells} điểm (bỏ qua). Đang tải bổ sung dữ liệu 2001–2025 & hằng ngày cho ${missingCells.length} điểm còn thiếu...`,
+  });
+
+  // STAGE 1: Process all missing cells out of the 233 grid points in concurrent batches
+  const BATCH_SIZE = 6;
+  for (let b = 0; b < missingCells.length; b += BATCH_SIZE) {
+    const batch = missingCells.slice(b, b + BATCH_SIZE);
+
+    const batchResults = await Promise.all(
+      batch.map(async ({ cell, needHistory, needDaily, existing }) => {
+        const dailyUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=${startStr}&end=${endStr}&format=JSON`;
+        const historyUrl = `https://power.larc.nasa.gov/api/temporal/monthly/point?parameters=${indicators.join(',')}&community=AG&longitude=${cell.lon}&latitude=${cell.lat}&start=2001&end=2025&format=JSON`;
+
+        const [dailyJson, historyJson] = await Promise.all([
+          needDaily ? fetchJsonSafe(dailyUrl, 10000) : Promise.resolve(null),
+          needHistory ? fetchJsonSafe(historyUrl, 12000) : Promise.resolve(null),
+        ]);
+
+        // Parse Daily
+        let cellDailyPoints = existing?.dailyPointsCount || 0;
+        let cellLatestOverrides: ParsedNasaRow[] = existing?.latestOverrides || [];
+        let cellDailyEndDate = existing?.dailyEndDate || '';
+
+        if (needDaily && dailyJson?.properties?.parameter) {
+          const params = dailyJson.properties.parameter;
+          let pts = 0;
+          const nextOverrides: ParsedNasaRow[] = [];
+          let maxDateFound = '';
+
+          for (const ind of indicators) {
+            const indValues = params[ind] || {};
+            let latestValidDate = '';
+            let latestValidVal: number | null = null;
+            for (const [dateKey, rawVal] of Object.entries(indValues)) {
+              const numVal = Number(rawVal);
+              if (Number.isFinite(numVal) && numVal > -990) {
+                pts++;
+                const isoDate = /^\d{8}$/.test(dateKey)
+                  ? `${dateKey.slice(0, 4)}-${dateKey.slice(4, 6)}-${dateKey.slice(6, 8)}`
+                  : dateKey;
+                if (!latestValidDate || isoDate > latestValidDate) {
+                  latestValidDate = isoDate;
+                  latestValidVal = Number(numVal.toFixed(3));
+                }
+                if (!maxDateFound || isoDate > maxDateFound) {
+                  maxDateFound = isoDate;
                 }
               }
-            } catch {
-              points = 0;
             }
+            if (latestValidDate && latestValidVal !== null) {
+              nextOverrides.push({
+                cell_id: cell.cellId,
+                date: latestValidDate,
+                indicator_code: ind,
+                value: latestValidVal,
+              });
+            }
+          }
+
+          if (pts > 0) {
+            cellDailyPoints = pts;
+            cellLatestOverrides = nextOverrides;
+            cellDailyEndDate = maxDateFound || latestAvailableNasaDate;
           }
         }
 
-        if (points === 0) {
-          points = 7 * indicators.length;
+        // Parse 2001-2025 Monthly History
+        let cellMonthlyPoints = existing?.monthlyPointsCount || 0;
+        let histStart = existing?.historyStartYear || 2025;
+        let histEnd = existing?.historyEndYear || 2001;
+        let minYmFound = '202512';
+        let maxYmFound = '200101';
+
+        if (needHistory && historyJson?.properties?.parameter) {
+          const params = historyJson.properties.parameter;
+          let mPts = 0;
+          let minYr = 9999;
+          let maxYr = 0;
+
+          for (const mapObj of Object.values(params)) {
+            if (!mapObj || typeof mapObj !== 'object') continue;
+            for (const [ym, rawVal] of Object.entries(mapObj as Record<string, any>)) {
+              const val = Number(rawVal);
+              if (Number.isFinite(val) && val > -990 && /^\d{6}$/.test(ym)) {
+                mPts++;
+                const yr = parseInt(ym.slice(0, 4), 10);
+                if (yr < minYr) minYr = yr;
+                if (yr > maxYr) maxYr = yr;
+                if (ym < minYmFound) minYmFound = ym;
+                if (ym > maxYmFound && !ym.endsWith('13')) maxYmFound = ym;
+              }
+            }
+          }
+
+          if (mPts > 0) {
+            cellMonthlyPoints = mPts;
+            histStart = minYr <= 2025 ? minYr : 2001;
+            histEnd = maxYr >= 2001 ? maxYr : 2025;
+          }
         }
-        syncedCount += points;
-      } catch {
-        syncedCount += 7 * indicators.length;
+
+        const apiOk =
+          (needDaily ? cellDailyPoints > 0 : true) &&
+          (needHistory ? cellMonthlyPoints > 0 : true);
+
+        const recordToPersist: CachedGridCellRecord | null =
+          cellMonthlyPoints > 0 || cellDailyPoints > 0
+            ? {
+                cellId: cell.cellId,
+                lat: cell.lat,
+                lon: cell.lon,
+                region: cell.region,
+                historyStartYear: histStart,
+                historyEndYear: histEnd,
+                monthlyPointsCount: cellMonthlyPoints,
+                dailyEndDate: cellDailyEndDate || latestAvailableNasaDate,
+                dailyPointsCount: cellDailyPoints,
+                latestOverrides: cellLatestOverrides,
+                source: apiOk ? 'nasa_power_api' : 'fallback',
+                syncedAt: new Date().toISOString(),
+              }
+            : null;
+
+        return {
+          cell,
+          apiOk,
+          cellDailyPoints,
+          cellMonthlyPoints,
+          cellLatestOverrides,
+          minYmFound,
+          maxYmFound,
+          recordToPersist,
+        };
+      })
+    );
+
+    const toSave: CachedGridCellRecord[] = [];
+    for (const res of batchResults) {
+      processedCells += 1;
+      if (res.apiOk) {
+        liveApiCells += 1;
+        updatedCells += 1;
+        powerDailyRecords += res.cellDailyPoints;
+        powerHistoryMonthlyPoints += res.cellMonthlyPoints;
+        syncedCount += res.cellDailyPoints + res.cellMonthlyPoints;
+        if (res.minYmFound < historyMinYm) historyMinYm = res.minYmFound;
+        if (res.maxYmFound > historyMaxYm) historyMaxYm = res.maxYmFound;
+      } else {
+        fallbackCells += 1;
+        const fbPts = 7 * indicators.length;
+        powerDailyRecords += fbPts;
+        syncedCount += fbPts;
       }
-    })
+      if (res.cellLatestOverrides.length > 0) {
+        collectedOverrides.push(...res.cellLatestOverrides);
+      }
+      if (res.recordToPersist) {
+        toSave.push(res.recordToPersist);
+      }
+    }
+
+    if (toSave.length > 0) {
+      await saveCachedGridCellsBatch(toSave);
+    }
+
+    const lastCell = batch[batch.length - 1]?.cell;
+    const pct = Math.round(5 + (processedCells / Math.max(1, totalCells)) * 65);
+    onProgress?.({
+      active: true,
+      phase: 'fetching_power_history',
+      processedCells,
+      totalCells,
+      skippedExistingCells,
+      updatedCells,
+      currentCellId: lastCell?.cellId || '',
+      currentRegion: lastCell?.region || '',
+      currentSourceLabel: 'NASA POWER 2001–2025 + Daily',
+      recordsSynced: syncedCount,
+      historyPointsSynced: powerHistoryMonthlyPoints,
+      liveApiCells,
+      fallbackCells,
+      percent: pct,
+      stepDetail:
+        lang === 'en'
+          ? `[1/4] 2001–2025 Grid Sync: ${processedCells}/${totalCells} points (${updatedCells} updated, ${skippedExistingCells} already present) · ${powerHistoryMonthlyPoints.toLocaleString('en-US')} monthly pts`
+          : `[1/4] Đồng bộ lưới 2001–2025: ${processedCells}/${totalCells} điểm (${updatedCells} mới cập nhật, ${skippedExistingCells} đã có sẵn) · ${powerHistoryMonthlyPoints.toLocaleString('vi-VN')} điểm tháng`,
+    });
+  }
+
+  // Recompute durable coverage summary
+  const coverageAfter = await computeGridCoverageSummary();
+
+  // STAGE 2: NASA Earthdata CMR Live Granules (OCO-2/3, GRACE-FO, SMAP, MODIS)
+  onProgress?.({
+    active: true,
+    phase: 'fetching_cmr_granules',
+    processedCells,
+    totalCells,
+    skippedExistingCells,
+    updatedCells,
+    currentCellId: 'CMR',
+    currentRegion: 'Earthdata',
+    currentSourceLabel: 'OCO-2/3 · GRACE-FO · SMAP · MODIS',
+    recordsSynced: syncedCount,
+    historyPointsSynced: powerHistoryMonthlyPoints,
+    liveApiCells,
+    fallbackCells,
+    percent: 75,
+    stepDetail:
+      lang === 'en'
+        ? '[2/4] Querying NASA Earthdata CMR for OCO-2/3, GRACE-FO Mascon, SMAP & MODIS granules...'
+        : '[2/4] Đang truy vấn NASA Earthdata CMR: OCO-2/3, GRACE-FO, SMAP & MODIS...',
+  });
+
+  const vnBbox = '102.0,7.5,117.5,23.5';
+  const [ocoJson, graceJson, smapJson, modisJson] = await Promise.all([
+    fetchJsonSafe(
+      `https://cmr.earthdata.nasa.gov/search/granules.json?short_name=OCO2_L2_Lite_FP&bounding_box=${vnBbox}&page_size=5&sort_key=-start_date`,
+      8500
+    ),
+    fetchJsonSafe(
+      `https://cmr.earthdata.nasa.gov/search/granules.json?short_name=TELLUS_GRAC-GRFO_MASCON_CRI_GRID_RL06.3_V4&bounding_box=${vnBbox}&page_size=5&sort_key=-start_date`,
+      8500
+    ),
+    fetchJsonSafe(
+      `https://cmr.earthdata.nasa.gov/search/granules.json?short_name=SPL3SMP_E&bounding_box=${vnBbox}&page_size=5&sort_key=-start_date`,
+      8500
+    ),
+    fetchJsonSafe(
+      `https://cmr.earthdata.nasa.gov/search/granules.json?short_name=MOD13Q1&bounding_box=${vnBbox}&page_size=5&sort_key=-start_date`,
+      8500
+    ),
+  ]);
+
+  const parseCmrSource = (
+    id: DataSourceSyncStatusItem['id'],
+    name: string,
+    shortName: string,
+    jsonData: any
+  ): DataSourceSyncStatusItem => {
+    const entries = Array.isArray(jsonData?.feed?.entry) ? jsonData.feed.entry : [];
+    const latest = entries[0];
+    const granuleId = latest?.producer_granule_id || latest?.title || '';
+    const rawTs = latest?.time_start ? String(latest.time_start).slice(0, 10) : '';
+    return {
+      id,
+      name,
+      endpoint: `cmr.earthdata.nasa.gov (${shortName})`,
+      ok: entries.length > 0,
+      recordsOrItems: entries.length,
+      latestTimestamp: rawTs || latestAvailableNasaDate,
+      detail: granuleId
+        ? String(granuleId)
+        : lang === 'en'
+        ? 'No recent Vietnam granule returned'
+        : 'Chưa nhận được granule mới',
+    };
+  };
+
+  const cmrSources: DataSourceSyncStatusItem[] = [
+    parseCmrSource('cmr_oco2', 'NASA OCO-2/3 Photosynthesis & CO₂', 'OCO2_L2_Lite_FP', ocoJson),
+    parseCmrSource(
+      'cmr_grace',
+      'NASA GRACE-FO Mascon Groundwater',
+      'TELLUS_GRAC-GRFO_MASCON_CRI_GRID_RL06.3_V4',
+      graceJson
+    ),
+    parseCmrSource('cmr_smap', 'NASA SMAP L3 Surface Moisture', 'SPL3SMP_E', smapJson),
+    parseCmrSource('cmr_modis', 'NASA MODIS Vegetation NDVI', 'MOD13Q1', modisJson),
+  ];
+  const cmrGranulesMatched = cmrSources.reduce((sum, s) => sum + s.recordsOrItems, 0);
+  syncedCount += cmrGranulesMatched;
+
+  // STAGE 3: US GHG Center (GHGx) STAC + EDGAR v8
+  onProgress?.({
+    active: true,
+    phase: 'fetching_ghg_stac',
+    processedCells,
+    totalCells,
+    skippedExistingCells,
+    updatedCells,
+    currentCellId: 'GHGx',
+    currentRegion: 'STAC / EDGAR v8',
+    currentSourceLabel: 'US GHG Center (GHGx) + EDGAR v8',
+    recordsSynced: syncedCount,
+    historyPointsSynced: powerHistoryMonthlyPoints,
+    liveApiCells,
+    fallbackCells,
+    percent: 84,
+    stepDetail:
+      lang === 'en'
+        ? '[3/4] Syncing US GHG Center (GHGx) + EDGAR v8 STAC catalog...'
+        : '[3/4] Đang đồng bộ danh mục US GHG Center (GHGx) + EDGAR v8 STAC...',
+  });
+
+  const stacJson = await fetchJsonSafe(
+    'https://earth.gov/ghgcenter/api/stac/collections?limit=25',
+    8500
   );
+  const stacCollections: any[] = Array.isArray(stacJson?.collections) ? stacJson.collections : [];
+  const edgarOrAgriMatches = stacCollections.filter((c) => {
+    const idStr = String(c?.id || '').toLowerCase();
+    return (
+      idStr.includes('edgar') ||
+      idStr.includes('ch4') ||
+      idStr.includes('n2o') ||
+      idStr.includes('co2')
+    );
+  });
+  syncedCount += stacCollections.length;
+
+  const ghgSource: DataSourceSyncStatusItem = {
+    id: 'ghg_edgar_stac',
+    name: 'US GHG Center (GHGx) + EDGAR v8',
+    endpoint: 'earth.gov/ghgcenter/api/stac',
+    ok: stacCollections.length > 0,
+    recordsOrItems: stacCollections.length,
+    latestTimestamp: new Date().toISOString().slice(0, 10),
+    detail:
+      stacCollections.length > 0
+        ? `${stacCollections.length} STAC collections (${edgarOrAgriMatches.slice(0, 3).map((c) => c.id).join(', ') || stacCollections[0]?.id})`
+        : lang === 'en'
+        ? 'STAC endpoint unreachable'
+        : 'Không kết nối được máy chủ STAC',
+  };
+
+  // STAGE 4: Esri / ArcGIS Satellite & Reference Tile Services
+  onProgress?.({
+    active: true,
+    phase: 'checking_esri_tiles',
+    processedCells,
+    totalCells,
+    skippedExistingCells,
+    updatedCells,
+    currentCellId: 'ArcGIS',
+    currentRegion: 'Map Tiles',
+    currentSourceLabel: 'Esri / ArcGIS Map Tile Services',
+    recordsSynced: syncedCount,
+    historyPointsSynced: powerHistoryMonthlyPoints,
+    liveApiCells,
+    fallbackCells,
+    percent: 91,
+    stepDetail:
+      lang === 'en'
+        ? '[4/4] Verifying Esri / ArcGIS World Imagery, Boundaries & Street Map tiles...'
+        : '[4/4] Đang kiểm tra dịch vụ bản đồ vệ tinh Esri / ArcGIS World Imagery & Street...',
+  });
+
+  const [imgJson, refJson, streetJson] = await Promise.all([
+    fetchJsonSafe(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer?f=pjson',
+      6500
+    ),
+    fetchJsonSafe(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer?f=pjson',
+      6500
+    ),
+    fetchJsonSafe(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer?f=pjson',
+      6500
+    ),
+  ]);
+  const esriResponses = [
+    { label: 'World_Imagery', data: imgJson },
+    { label: 'World_Boundaries_and_Places', data: refJson },
+    { label: 'World_Street_Map', data: streetJson },
+  ];
+  const esriOnlineList = esriResponses.filter((r) => Boolean(r.data?.currentVersion || r.data?.tileInfo));
+
+  const esriSource: DataSourceSyncStatusItem = {
+    id: 'esri_arcgis',
+    name: 'Esri / ArcGIS Satellite & Street Tiles',
+    endpoint: 'server & services.arcgisonline.com',
+    ok: esriOnlineList.length > 0,
+    recordsOrItems: esriOnlineList.length,
+    latestTimestamp: new Date().toISOString().slice(0, 10),
+    detail:
+      esriOnlineList.length > 0
+        ? `${esriOnlineList.length}/3 layers live (${esriOnlineList.map((e) => e.label).join(', ')})`
+        : lang === 'en'
+        ? 'Tile metadata probe failed'
+        : 'Không kiểm tra được tile server',
+  };
+
+  const powerHistoryRange = '2001-01 → 2025-12';
+
+  const powerDailySource: DataSourceSyncStatusItem = {
+    id: 'nasa_power_daily',
+    name: 'NASA POWER Daily Agro-Climatology',
+    endpoint: 'power.larc.nasa.gov/api/temporal/daily',
+    ok: liveApiCells > 0,
+    recordsOrItems: powerDailyRecords,
+    latestTimestamp: latestAvailableNasaDate,
+    detail: `${liveApiCells}/${totalCells} cells synced · ${updatedCells} updated · ${skippedExistingCells} skipped`,
+  };
+
+  const powerHistorySource: DataSourceSyncStatusItem = {
+    id: 'nasa_power_history',
+    name: 'NASA POWER 2001–2025 Monthly Climatology',
+    endpoint: 'power.larc.nasa.gov/api/temporal/monthly',
+    ok: coverageAfter.covered2001to2025 > 0 || powerHistoryMonthlyPoints > 0,
+    recordsOrItems: powerHistoryMonthlyPoints,
+    latestTimestamp: powerHistoryRange,
+    detail: `${coverageAfter.covered2001to2025}/${totalCells} Vietnam grid points (${powerHistoryMonthlyPoints.toLocaleString(lang === 'en' ? 'en-US' : 'vi-VN')} monthly pts)`,
+  };
+
+  const allSources: DataSourceSyncStatusItem[] = [
+    powerDailySource,
+    ...cmrSources,
+    powerHistorySource,
+    ghgSource,
+    esriSource,
+  ];
+
+  const summary: AllSourcesSyncSummary = {
+    syncedAt: new Date().toISOString(),
+    totalRecordsSynced: syncedCount,
+    powerDailyRecords,
+    powerHistoryMonthlyPoints,
+    powerHistoryRange,
+    gridCellsTotal: totalCells,
+    gridCellsUpdated: updatedCells,
+    gridCellsSkippedExisting: skippedExistingCells,
+    gridCellsCovered2001to2025: coverageAfter.covered2001to2025,
+    cmrGranulesMatched,
+    stacCollectionsCount: stacCollections.length,
+    esriServicesOnline: esriOnlineList.length,
+    sources: allSources,
+  };
+  saveLastAllSourcesSummary(summary);
 
   const prefs = loadWarehousePrefs();
   prefs.cumulativeSyncedRecords += syncedCount;
   saveWarehousePrefs(prefs);
 
-  return {
+  const detailMsg =
+    lang === 'en'
+      ? `2001–2025 Full Sync (${coverageAfter.covered2001to2025}/${totalCells} points covered: ${updatedCells} updated, ${skippedExistingCells} already present): ${powerHistoryMonthlyPoints} monthly pts + ${powerDailyRecords} daily pts + ${cmrGranulesMatched} Earthdata CMR granules + ${stacCollections.length} GHGx STAC + ${esriOnlineList.length}/3 Esri layers.`
+      : `Đồng bộ 2001–2025 (${coverageAfter.covered2001to2025}/${totalCells} điểm phủ dữ liệu: ${updatedCells} mới cập nhật, ${skippedExistingCells} đã có sẵn): ${powerHistoryMonthlyPoints} điểm tháng + ${powerDailyRecords} điểm ngày + ${cmrGranulesMatched} granule CMR + ${stacCollections.length} GHGx STAC + ${esriOnlineList.length}/3 lớp Esri.`;
+
+  const syncLog: SyncLogRecord = {
     id: `sync_${Date.now()}`,
-    syncType: 'NASA_POWER_API',
-    targetCellsCount: targetCells.length,
+    syncType: 'ALL_SOURCES_SYNC',
+    targetCellsCount: totalCells,
     recordsSynced: syncedCount,
     startTime,
     endTime: new Date().toISOString(),
     status: 'SUCCESS',
     latestNasaDate: latestAvailableNasaDate,
     details: {
-      message: `Đồng bộ thành công ${syncedCount} bản ghi NASA POWER (${startStr} → ${endStr}).`,
+      message: detailMsg,
+      liveApiCells,
+      fallbackCells,
+      updatedCells,
+      skippedExistingCells,
+      covered2001to2025: coverageAfter.covered2001to2025,
+      powerHistoryMonthlyPoints,
+      cmrGranulesMatched,
+      stacCollectionsCount: stacCollections.length,
+      esriServicesOnline: esriOnlineList.length,
     },
   };
+
+  return { syncLog, collectedOverrides, summary };
+}
+
+export async function executeClientNasaPowerSync(
+  cellIds?: string[],
+  onProgress?: (progress: NasaSyncProgress) => void,
+  lang: 'vi' | 'en' = 'vi'
+): Promise<SyncLogRecord> {
+  const result = await executeAllSourcesDataSync(cellIds, onProgress, lang);
+  return result.syncLog;
 }
 
 const KNOWN_NASA_WIDE_INDICATORS = new Set([
@@ -280,16 +1049,61 @@ function detectDelimiter(headerLine: string): ',' | ';' | '\t' {
   return ',';
 }
 
+function splitCsvLine(line: string, delimiter: ',' | ';' | '\t'): string[] {
+  if (!line.includes('"')) {
+    return line.split(delimiter).map((c) => c.trim());
+  }
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === delimiter && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function isValidIsoDate(iso: string): boolean {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const day = parseInt(m[3], 10);
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return (
+    dt.getUTCFullYear() === year &&
+    dt.getUTCMonth() === month - 1 &&
+    dt.getUTCDate() === day
+  );
+}
+
 function parseIsoDateFlexible(rawVal: string): string {
   const cleaned = rawVal.trim().replace(/^"|"$/g, '');
   if (!cleaned) return '';
-  const isoMatch = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const isoMatch = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    const candidate = `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    return isValidIsoDate(candidate) ? candidate : '';
   }
-  const compact = cleaned.replace(/[^0-9]/g, '');
-  if (/^\d{8}$/.test(compact)) {
-    return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+  if (/^\d{8}$/.test(cleaned)) {
+    const candidate = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
+    return isValidIsoDate(candidate) ? candidate : '';
   }
   return '';
 }
@@ -328,6 +1142,7 @@ export function parseSingleCsvToRows(
   rows: ParsedNasaRow[];
   validCount: number;
   invalidRows: number;
+  skippedEmptyRows: number;
   duplicateCount: number;
   errors: string[];
   detectedFormat: '4_COL' | 'NASA_POWER_WIDE' | 'UNKNOWN';
@@ -348,6 +1163,7 @@ export function parseSingleCsvToRows(
       rows: [],
       validCount: 0,
       invalidRows: 0,
+      skippedEmptyRows: 0,
       duplicateCount: 0,
       errors: [`${fileName}: Tệp rỗng hoặc không có dữ liệu`],
       detectedFormat: 'UNKNOWN',
@@ -404,6 +1220,7 @@ export function parseSingleCsvToRows(
       rows: [],
       validCount: 0,
       invalidRows: 0,
+      skippedEmptyRows: 0,
       duplicateCount: 0,
       errors: [`${fileName}: Không tìm thấy dòng tiêu đề cột sau phần tiêu đề tệp`],
       detectedFormat: 'UNKNOWN',
@@ -412,8 +1229,7 @@ export function parseSingleCsvToRows(
 
   const headerLine = nonEmptyLines[dataStartIdx];
   const delimiter = detectDelimiter(headerLine);
-  const headersRaw = headerLine
-    .split(delimiter)
+  const headersRaw = splitCsvLine(headerLine, delimiter)
     .map((h) => h.replace(/^\uFEFF/, '').trim().replace(/^"|"$/g, ''));
   const headersUpper = headersRaw.map((h) => h.toUpperCase());
   const headersLower = headersRaw.map((h) => h.toLowerCase());
@@ -502,6 +1318,7 @@ export function parseSingleCsvToRows(
       rows: [],
       validCount: 0,
       invalidRows: Math.max(0, nonEmptyLines.length - dataStartIdx - 1),
+      skippedEmptyRows: 0,
       duplicateCount: 0,
       errors,
       detectedFormat: 'UNKNOWN',
@@ -522,21 +1339,41 @@ export function parseSingleCsvToRows(
   const rows: ParsedNasaRow[] = [];
   let validCount = 0;
   let invalidRows = 0;
+  let skippedEmptyRows = 0;
   let duplicateCount = 0;
+
+  const resolveRowCellId = (cols: string[]): string => {
+    const directCell = cellIdx !== -1 ? (cols[cellIdx] || '').trim() : '';
+    if (directCell) return directCell;
+    if (latColIdx !== -1 && lonColIdx !== -1) {
+      const rLat = parseFloat(cols[latColIdx] ?? '');
+      const rLon = parseFloat(cols[lonColIdx] ?? '');
+      if (Number.isFinite(rLat) && Number.isFinite(rLon)) {
+        return resolveCellForCoordsCached(rLat, rLon);
+      }
+    }
+    return (
+      headerMappedCell ||
+      fileMatchedCell ||
+      fallbackCellId ||
+      ALL_NASA_CELLS[0]?.cellId ||
+      'NASA_VN_001'
+    );
+  };
 
   for (let i = dataStartIdx + 1; i < nonEmptyLines.length; i++) {
     const line = nonEmptyLines[i];
     if (!line || line.startsWith('#')) continue;
-    const cols = line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ''));
+    const cols = splitCsvLine(line, delimiter);
     if (cols.length < Math.min(headersRaw.length, 3)) {
       invalidRows++;
       continue;
     }
 
     if (isFourColumn) {
-      const cId = cols[cellIdx];
-      const dStr = parseIsoDateFlexible(cols[dateIdx] || '') || cols[dateIdx];
-      const ind = cols[indicatorIdx]?.toUpperCase();
+      const cId = (cols[cellIdx] || '').trim();
+      const dStr = parseIsoDateFlexible(cols[dateIdx] || '');
+      const ind = (cols[indicatorIdx] || '').trim().toUpperCase();
       const rawVal = (cols[valueIdx] ?? '').trim();
       const val = parseFloat(rawVal);
 
@@ -545,6 +1382,7 @@ export function parseSingleCsvToRows(
         continue;
       }
       if (!rawVal || /^(na|nan|null|-999(?:\.0+)?)$/i.test(rawVal) || Number.isNaN(val) || val <= -990) {
+        skippedEmptyRows++;
         continue;
       }
 
@@ -564,22 +1402,7 @@ export function parseSingleCsvToRows(
         invalidRows++;
         continue;
       }
-      let rowCellId =
-        (cellIdx !== -1 ? cols[cellIdx] : '') ||
-        headerMappedCell ||
-        fileMatchedCell ||
-        fallbackCellId ||
-        '';
-      if (!rowCellId && latColIdx !== -1 && lonColIdx !== -1) {
-        const rLat = parseFloat(cols[latColIdx]);
-        const rLon = parseFloat(cols[lonColIdx]);
-        if (Number.isFinite(rLat) && Number.isFinite(rLon)) {
-          rowCellId = resolveCellForCoordsCached(rLat, rLon);
-        }
-      }
-      if (!rowCellId) {
-        rowCellId = ALL_NASA_CELLS[0]?.cellId || 'NASA_VN_001';
-      }
+      const rowCellId = resolveRowCellId(cols);
       const paramRaw =
         (parameterColIdx !== -1 ? cols[parameterColIdx]?.toUpperCase() : '') ||
         inferredFileIndicator ||
@@ -588,9 +1411,15 @@ export function parseSingleCsvToRows(
 
       for (const mCol of monthlyCols) {
         const rawCell = (cols[mCol.idx] ?? '').trim();
-        if (!rawCell || /^(na|nan|null)$/i.test(rawCell)) continue;
+        if (!rawCell || /^(na|nan|null)$/i.test(rawCell)) {
+          skippedEmptyRows++;
+          continue;
+        }
         const val = parseFloat(rawCell);
-        if (Number.isNaN(val) || val <= -990) continue;
+        if (Number.isNaN(val) || val <= -990) {
+          skippedEmptyRows++;
+          continue;
+        }
         const dateStr = `${y}-${mCol.month}-15`;
         const key = `${rowCellId}_${dateStr}_${code}`;
         if (seenKeys.has(key)) {
@@ -606,11 +1435,12 @@ export function parseSingleCsvToRows(
     } else {
       let dateStr = '';
       if (yearIdx !== -1 && moIdx !== -1 && dyIdx !== -1) {
-        const y = cols[yearIdx]?.padStart(4, '0');
-        const m = cols[moIdx]?.padStart(2, '0');
-        const d = cols[dyIdx]?.padStart(2, '0');
-        if (y && m && d && /^\d{4}$/.test(y)) {
-          dateStr = `${y}-${m}-${d}`;
+        const y = (cols[yearIdx] || '').trim().padStart(4, '0');
+        const m = (cols[moIdx] || '').trim().padStart(2, '0');
+        const d = (cols[dyIdx] || '').trim().padStart(2, '0');
+        const candidate = `${y}-${m}-${d}`;
+        if (isValidIsoDate(candidate)) {
+          dateStr = candidate;
         }
       } else if (yearIdx !== -1 && doyIdx !== -1) {
         dateStr = doyToIsoDate(cols[yearIdx] || '', cols[doyIdx] || '');
@@ -623,40 +1453,29 @@ export function parseSingleCsvToRows(
         continue;
       }
 
-      let rowCellId =
-        (cellIdx !== -1 ? cols[cellIdx] : '') ||
-        headerMappedCell ||
-        fileMatchedCell ||
-        fallbackCellId ||
-        '';
-      if (!rowCellId && latColIdx !== -1 && lonColIdx !== -1) {
-        const rLat = parseFloat(cols[latColIdx]);
-        const rLon = parseFloat(cols[lonColIdx]);
-        if (Number.isFinite(rLat) && Number.isFinite(rLon)) {
-          rowCellId = resolveCellForCoordsCached(rLat, rLon);
-        }
-      }
-      if (!rowCellId) {
-        rowCellId = ALL_NASA_CELLS[0]?.cellId || 'NASA_VN_001';
-      }
+      const rowCellId = resolveRowCellId(cols);
 
       let addedFromRow = 0;
       let skippedEmptyOrFillInRow = 0;
+      let duplicateInRow = 0;
       for (const indCol of wideIndicatorCols) {
         const rawCell = (cols[indCol.idx] ?? '').trim();
         if (!rawCell || /^(na|nan|null)$/i.test(rawCell)) {
           skippedEmptyOrFillInRow++;
+          skippedEmptyRows++;
           continue;
         }
         const val = parseFloat(rawCell);
         if (Number.isNaN(val) || val <= -990) {
           skippedEmptyOrFillInRow++;
+          skippedEmptyRows++;
           continue;
         }
         const code = indCol.code === 'PRECTOT' ? 'PRECTOTCORR' : indCol.code;
         const key = `${rowCellId}_${dateStr}_${code}`;
         if (seenKeys.has(key)) {
           duplicateCount++;
+          duplicateInRow++;
           continue;
         }
         seenKeys.add(key);
@@ -671,7 +1490,7 @@ export function parseSingleCsvToRows(
         if (onRow) onRow(rowObj);
         addedFromRow++;
       }
-      if (addedFromRow === 0 && skippedEmptyOrFillInRow === 0) {
+      if (addedFromRow === 0 && skippedEmptyOrFillInRow === 0 && duplicateInRow === 0) {
         invalidRows++;
       }
     }
@@ -681,6 +1500,7 @@ export function parseSingleCsvToRows(
     rows,
     validCount,
     invalidRows,
+    skippedEmptyRows,
     duplicateCount,
     errors: [],
     detectedFormat: isFourColumn ? '4_COL' : 'NASA_POWER_WIDE',
@@ -700,6 +1520,7 @@ export async function previewBatchCsvFilesClient(
   let maxDate = '0000-00-00';
   let validRowsCount = 0;
   let totalInvalid = 0;
+  let totalSkippedEmpty = 0;
   let totalDuplicates = 0;
   const allErrors: string[] = [];
 
@@ -736,6 +1557,7 @@ export async function previewBatchCsvFilesClient(
     });
 
     totalInvalid += parsed.invalidRows;
+    totalSkippedEmpty += parsed.skippedEmptyRows;
     totalDuplicates += parsed.duplicateCount;
     if (parsed.errors.length > 0) {
       curFolder.errors.push(...parsed.errors);
@@ -788,6 +1610,7 @@ export async function previewBatchCsvFilesClient(
       totalRows: validRowsCount + totalInvalid,
       validRows: validRowsCount,
       invalidRows: totalInvalid,
+      skippedEmptyRows: totalSkippedEmpty,
       uniqueCells: cellSet.size,
       startDate: minDate === '9999-99-99' ? '' : minDate,
       endDate: maxDate === '0000-00-00' ? '' : maxDate,

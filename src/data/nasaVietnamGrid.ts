@@ -2,10 +2,10 @@ import { NasaGridCell } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
 
 /**
- * 531 NASA POWER 0.5° Grid Cells covering Vietnam (2005-2025: 21 Years)
+ * 233 NASA POWER 0.5° Grid Cells covering Vietnam (2001-2025: 25 Years)
  * Latitude range: ~8.5°N to 23.5°N
- * Longitude range: ~102.0°E to 110.0°E + Hoàng Sa (16.5°N, 112.0°E), Trường Sa (8.5-11.5°N, 114.0°E)
- * Divided across 10 agro-ecological download zones
+ * Longitude range: ~102.0°E to 109.5°E + Hoàng Sa (16.5°N, 112.0°E), Trường Sa (9.0°N, 114.0°E)
+ * Divided across 10 agro-ecological zones
  */
 
 export interface AgroRegionInfo {
@@ -31,7 +31,7 @@ export const AGRO_REGIONS: AgroRegionInfo[] = [
 ];
 
 /**
- * Generate 531 grid cells covering Vietnam territory with accurate 21-yr climatological baselines
+ * Generate 233 grid cells covering Vietnam territory with 2001-2025 climatological baselines
  */
 export function generateVietnamNasaGrid(): NasaGridCell[] {
   const cells: NasaGridCell[] = [];
@@ -182,6 +182,156 @@ export function findNearestNasaGrid(lat: number, lon: number): { cell: NasaGridC
   return {
     cell: nearestCell,
     distanceKm: minDistance,
+  };
+}
+
+export interface VietnamTerritoryCheckResult {
+  valid: boolean;
+  zone?: 'mainland' | 'coastal_island' | 'hoang_sa' | 'truong_sa';
+  reasonVi?: string;
+  reasonEn?: string;
+}
+
+// Clockwise boundary polygon [lat, lon] of Mainland Vietnam (including ~3-6km coastal margin)
+const MAINLAND_VIETNAM_POLYGON: ReadonlyArray<readonly [number, number]> = [
+  [22.42, 102.12], // A Pa Chải (Điện Biên)
+  [22.80, 102.85], // Lai Châu
+  [22.66, 103.80], // Lào Cai
+  [22.95, 104.50], // Hà Giang Tây
+  [23.42, 105.33], // Lũng Cú (Hà Giang)
+  [23.02, 105.90], // Cao Bằng Tây
+  [22.98, 106.76], // Cao Bằng Đông
+  [22.15, 106.66], // Lạng Sơn Bắc
+  [21.60, 107.18], // Lạng Sơn Đông
+  [21.56, 108.10], // Móng Cái (Quảng Ninh)
+  [21.05, 107.60], // Hạ Long / Vân Đồn
+  [20.75, 106.88], // Hải Phòng / Đồ Sơn
+  [20.20, 106.62], // Thái Bình / Nam Định
+  [19.90, 106.06], // Thanh Hóa
+  [18.95, 105.78], // Nghệ An
+  [18.10, 106.48], // Hà Tĩnh
+  [17.45, 106.70], // Quảng Bình
+  [16.85, 107.28], // Quảng Trị
+  [16.10, 108.30], // Đà Nẵng
+  [15.35, 108.96], // Quảng Ngãi
+  [14.15, 109.26], // Bình Định
+  [13.05, 109.42], // Phú Yên
+  [12.60, 109.50], // Mũi Đôi (Khánh Hòa)
+  [11.85, 109.26], // Cam Ranh
+  [11.40, 109.08], // Ninh Thuận
+  [10.88, 108.36], // Phan Thiết (Bình Thuận)
+  [10.35, 107.16], // Vũng Tàu
+  [10.10, 106.80], // Bến Tre
+  [9.55, 106.56],  // Trà Vinh / Sóc Trăng
+  [9.15, 105.86],  // Bạc Liêu
+  [8.52, 104.82],  // Đất Mũi (Cà Mau)
+  [9.25, 104.76],  // Cà Mau Tây
+  [9.95, 104.96],  // Kiên Giang
+  [10.42, 104.40], // Hà Tiên (VN-Cambodia coast)
+  [10.75, 105.08], // Châu Đốc (An Giang)
+  [11.00, 105.88], // Đồng Tháp / Long An
+  [11.58, 105.84], // Tây Ninh
+  [11.82, 106.35], // Bình Phước
+  [12.30, 107.45], // Đắk Nông
+  [13.40, 107.55], // Đắk Lắk
+  [14.68, 107.53], // Bờ Y (Kon Tum)
+  [15.55, 107.28], // Quảng Nam Tây
+  [16.18, 106.98], // Thừa Thiên Huế Tây
+  [16.65, 106.53], // Lao Bảo (Quảng Trị)
+  [17.55, 105.73], // Quảng Bình Tây
+  [18.35, 105.16], // Hà Tĩnh Tây
+  [19.15, 104.00], // Kỳ Sơn (Nghệ An)
+  [19.85, 104.58], // Thanh Hóa Tây
+  [20.68, 104.33], // Mộc Châu (Sơn La)
+  [20.95, 102.93], // Tây Trang (Điện Biên)
+  [21.95, 102.72], // Điện Biên Tây Bắc
+];
+
+const VIETNAM_ISLAND_BOXES: ReadonlyArray<{
+  zone: 'coastal_island' | 'hoang_sa' | 'truong_sa';
+  latMin: number;
+  latMax: number;
+  lonMin: number;
+  lonMax: number;
+}> = [
+  // Phú Quốc
+  { zone: 'coastal_island', latMin: 9.95, latMax: 10.48, lonMin: 103.80, lonMax: 104.12 },
+  // Thổ Chu
+  { zone: 'coastal_island', latMin: 9.20, latMax: 9.36, lonMin: 103.38, lonMax: 103.54 },
+  // Nam Du / Kiên Hải
+  { zone: 'coastal_island', latMin: 9.58, latMax: 9.90, lonMin: 104.28, lonMax: 104.66 },
+  // Hòn Khoai
+  { zone: 'coastal_island', latMin: 8.38, latMax: 8.50, lonMin: 104.78, lonMax: 104.90 },
+  // Côn Đảo
+  { zone: 'coastal_island', latMin: 8.58, latMax: 8.80, lonMin: 106.48, lonMax: 106.74 },
+  // Phú Quý
+  { zone: 'coastal_island', latMin: 10.46, latMax: 10.60, lonMin: 108.88, lonMax: 109.02 },
+  // Lý Sơn
+  { zone: 'coastal_island', latMin: 15.34, latMax: 15.44, lonMin: 109.05, lonMax: 109.18 },
+  // Cù Lao Chàm
+  { zone: 'coastal_island', latMin: 15.90, latMax: 16.00, lonMin: 108.46, lonMax: 108.56 },
+  // Cồn Cỏ
+  { zone: 'coastal_island', latMin: 17.12, latMax: 17.20, lonMin: 107.30, lonMax: 107.38 },
+  // Bạch Long Vĩ
+  { zone: 'coastal_island', latMin: 20.10, latMax: 20.18, lonMin: 107.68, lonMax: 107.78 },
+  // Cát Bà, Vịnh Hạ Long, Cô Tô
+  { zone: 'coastal_island', latMin: 20.68, latMax: 21.25, lonMin: 106.95, lonMax: 107.95 },
+  // Quần đảo Hoàng Sa (Việt Nam)
+  { zone: 'hoang_sa', latMin: 15.60, latMax: 17.20, lonMin: 111.10, lonMax: 112.95 },
+  // Quần đảo Trường Sa (Việt Nam)
+  { zone: 'truong_sa', latMin: 7.60, latMax: 11.70, lonMin: 111.75, lonMax: 117.25 },
+];
+
+function isPointInPolygon(
+  lat: number,
+  lon: number,
+  polygon: ReadonlyArray<readonly [number, number]>
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0];
+    const yi = polygon[i][1];
+    const xj = polygon[j][0];
+    const yj = polygon[j][1];
+
+    const intersect =
+      yi > lon !== yj > lon &&
+      lat < ((xj - xi) * (lon - yi)) / (yj - yi + Number.EPSILON) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Checks whether coordinates lie within Vietnamese territory (mainland, coastal islands, Hoàng Sa, Trường Sa).
+ */
+export function isWithinVietnamTerritory(lat: number, lon: number): VietnamTerritoryCheckResult {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return {
+      valid: false,
+      reasonVi:
+        'Tọa độ không hợp lệ. Vị trí thửa ruộng phải nằm trong lãnh thổ Việt Nam — vui lòng thử lại.',
+      reasonEn:
+        'Invalid coordinates. The selected field location must be within Vietnamese territory — please try again.',
+    };
+  }
+
+  if (isPointInPolygon(lat, lon, MAINLAND_VIETNAM_POLYGON)) {
+    return { valid: true, zone: 'mainland' };
+  }
+
+  for (const box of VIETNAM_ISLAND_BOXES) {
+    if (lat >= box.latMin && lat <= box.latMax && lon >= box.lonMin && lon <= box.lonMax) {
+      return { valid: true, zone: box.zone };
+    }
+  }
+
+  return {
+    valid: false,
+    reasonVi:
+      'Vị trí bạn chọn nằm ngoài lãnh thổ Việt Nam (đất liền và hải đảo Việt Nam). Hệ thống không cho phép tạo/cập nhật thửa ruộng ngoài lãnh thổ Việt Nam — vui lòng chọn lại vị trí trong Việt Nam và thử lại.',
+    reasonEn:
+      'The selected location is outside Vietnamese territory (mainland & Vietnamese islands). Fields outside Vietnam are not allowed — please select a location inside Vietnam and try again.',
   };
 }
 

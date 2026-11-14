@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import {
   FieldProfile,
   WeatherObservation,
@@ -30,31 +29,6 @@ export interface AdvisorApiResponse {
   };
   fallback?: boolean;
   message?: string;
-}
-
-function getOptionalClientAi(): GoogleGenAI | null {
-  const key = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
-  if (!key) return null;
-  try {
-    return new GoogleGenAI({ apiKey: key });
-  } catch {
-    return null;
-  }
-}
-
-function extractGeminiText(response: any): string {
-  if (typeof response?.text === 'string' && response.text.trim()) {
-    return response.text.trim();
-  }
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const joined = parts
-      .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-      .join('')
-      .trim();
-    if (joined) return joined;
-  }
-  return '';
 }
 
 function buildLocalAgronomyReply(
@@ -331,30 +305,31 @@ export const GeminiService = {
         ? 'Hello, what should I check on my field today?'
         : 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?');
 
-    const ai = getOptionalClientAi();
-    if (ai) {
-      try {
-        const isEn = language === 'en';
-        const earthSummary = earth
-          ? `\n- OCO-2 Carbon: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} t CO2/ha\n- GRACE Groundwater: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE\n- GHGx Emissions: ${earth.greenhouseGasEdgar?.co2eqTonHa} t CO2e/ha`
-          : '';
-        const systemPrompt = `You are CropCast, an expert agronomic assistant. Reply concisely in ${isEn ? 'English' : 'Vietnamese'} with bullet points.\nField: ${field.name} (${field.province}), Crop: ${field.crop.name} (${field.crop.currentStage}), Soil: ${field.soilType}.\nWeather: ${weather?.temp ?? '--'}°C, Rain ${weather?.rain ?? '--'} mm, Humidity ${weather?.humidity ?? '--'}%, Root moisture ${weather ? Math.round(weather.gwetroot * 100) : '--'}%.${earthSummary}`;
-        const historyText = conversationHistory
-          .slice(-4)
-          .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.parts}`)
-          .join('\n');
-        const res = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: historyText ? `${historyText}\nUser: ${promptText}` : promptText,
-          config: { systemInstruction: systemPrompt },
-        });
-        const text = extractGeminiText(res);
-        if (text) {
-          return { reply: text, isError: false, fromFallback: false };
+    try {
+      const isEn = language === 'en';
+      const earthSummary = earth
+        ? `\n- OCO-2 Carbon: ${earth.carbonFluxOco2?.carbonUptakeTonHaYr} t CO2/ha\n- GRACE Groundwater: ${earth.groundwaterAnomalyGrace?.lweThicknessCm} cm LWE\n- GHGx Emissions: ${earth.greenhouseGasEdgar?.co2eqTonHa} t CO2e/ha`
+        : '';
+      const systemPrompt = `You are CropCast, an expert agronomic assistant. Reply concisely in ${isEn ? 'English' : 'Vietnamese'} with bullet points.\nField: ${field.name} (${field.province}), Crop: ${field.crop.name} (${field.crop.currentStage}), Soil: ${field.soilType}.\nWeather: ${weather?.temp ?? '--'}°C, Rain ${weather?.rain ?? '--'} mm, Humidity ${weather?.humidity ?? '--'}%, Root moisture ${weather ? Math.round(weather.gwetroot * 100) : '--'}%.${earthSummary}`;
+      const historyText = conversationHistory
+        .slice(-4)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.parts}`)
+        .join('\n');
+
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptText, systemPrompt, historyText }),
+      });
+
+      if (resp.ok) {
+        const data = (await resp.json()) as { ok?: boolean; reply?: string };
+        if (data?.ok && typeof data.reply === 'string' && data.reply.trim()) {
+          return { reply: data.reply.trim(), isError: false, fromFallback: false };
         }
-      } catch {
-        // fall through cleanly to deterministic agronomy engine
       }
+    } catch {
+      // fall through cleanly to deterministic agronomy engine
     }
 
     return {

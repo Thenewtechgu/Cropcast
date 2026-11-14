@@ -45,8 +45,11 @@ import {
 import { auth, BOOTSTRAP_ADMIN_EMAILS, isBootstrapAdminEmail } from '../firebase';
 import { FirestoreService } from '../services/firestoreService';
 import {
-  executeClientNasaPowerSync,
+  AllSourcesSyncSummary,
+  executeAllSourcesDataSync,
   getWarehouseStatus,
+  loadLastAllSourcesSummary,
+  NasaSyncProgress,
   previewBatchCsvFilesClient,
   runClientBatchImport,
   setWarehouseActiveVersion,
@@ -64,6 +67,156 @@ import { useLanguage, AppLanguage } from '../contexts/LanguageContext';
 import { SatelliteMap } from './SatelliteMap';
 
 const ADMIN_TAB_STORAGE_KEY = 'cropcast_admin_tab';
+
+const FIRESTORE_RULES_TEMPLATE = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email_verified == true &&
+          request.auth.token.email in ['vanha.uow@gmail.com', 'fss01211cg@gmail.com']) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) && isOwner(userId);
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      match /plots/{plotId} {
+        allow get: if isValidId(userId) && isValidId(plotId) && (
+          isOwner(userId) ||
+          isAdmin() ||
+          (isSignedIn() && (
+            ('sharedWithUids' in resource.data && request.auth.uid in resource.data.sharedWithUids) ||
+            ('sharedWithEmails' in resource.data &&
+              request.auth.token.email_verified == true &&
+              request.auth.token.email != null &&
+              request.auth.token.email in resource.data.sharedWithEmails)
+          ))
+        );
+        allow list: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(userId) && isValidId(plotId) && isOwner(userId) &&
+          request.resource.data.ownerId == request.auth.uid;
+        allow update: if isValidId(userId) && isValidId(plotId) && (
+          (isOwner(userId) && request.resource.data.ownerId == resource.data.ownerId) ||
+          (isSignedIn() &&
+            !isOwner(userId) &&
+            'activeShareToken' in resource.data &&
+            resource.data.activeShareToken is string &&
+            resource.data.activeShareToken.size() >= 12 &&
+            request.resource.data.presentedShareToken == resource.data.activeShareToken &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'presentedShareToken', 'updatedAt']) &&
+            request.resource.data.sharedWithUids.hasAll(resource.data.sharedWithUids) &&
+            request.auth.uid in request.resource.data.sharedWithUids &&
+            request.resource.data.sharedWithUids.size() <= resource.data.sharedWithUids.size() + 1)
+        );
+        allow delete: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
+      }
+
+      match /plans/{planId} {
+        allow get: if isValidId(userId) && isValidId(planId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(planId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(planId) && (isOwner(userId) || isAdmin());
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isValidId(userId) && isValidId(taskId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(taskId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(taskId) && (isOwner(userId) || isAdmin());
+      }
+
+      match /feedbacks/{feedbackId} {
+        allow get: if isValidId(userId) && isValidId(feedbackId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(feedbackId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(feedbackId) && (isOwner(userId) || isAdmin());
+      }
+
+      match /earth_metrics/{metricId} {
+        allow get: if isValidId(userId) && isValidId(metricId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(metricId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(metricId) && (isOwner(userId) || isAdmin());
+      }
+
+      match /shared_refs/{plotId} {
+        allow get: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(plotId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isValidId(userId) && isAdmin();
+    }
+
+    match /field_shares/{shareId} {
+      allow get: if isValidId(shareId) && isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.isActive == true ||
+        (resource.data.targetEmail != null &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email != null &&
+          resource.data.targetEmail == request.auth.token.email) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (resource.data.targetEmail != null &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email != null &&
+          resource.data.targetEmail == request.auth.token.email) ||
+        isAdmin()
+      );
+      allow create: if isValidId(shareId) && isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isValidId(shareId) && isSignedIn() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /nasa_datasets/{datasetId} {
+      allow get: if isValidId(datasetId) && (resource.data.isPublic == true || isAdmin());
+      allow list: if resource.data.isPublic == true || isAdmin();
+      allow write: if isValidId(datasetId) && isAdmin();
+    }
+
+    match /nasa_sync_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow write: if isValidId(logId) && isAdmin();
+    }
+  }
+}`;
+
+function isPermissionErrorMessage(msg?: string | null): boolean {
+  if (!msg) return false;
+  const lower = msg.toLowerCase();
+  return lower.includes('missing or insufficient permissions') || lower.includes('permission-denied');
+}
 
 interface CsvProgressState {
   active: boolean;
@@ -260,7 +413,9 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [togglingAdminUid, setTogglingAdminUid] = useState<string | null>(null);
+  const [confirmDeleteUserUid, setConfirmDeleteUserUid] = useState<string | null>(null);
   const [deletingUserUid, setDeletingUserUid] = useState<string | null>(null);
+  const [copiedRules, setCopiedRules] = useState(false);
   const [adminEmailInput, setAdminEmailInput] = useState('');
   const [adminActionSuccess, setAdminActionSuccess] = useState<string | null>(null);
 
@@ -275,7 +430,11 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const [imports, setImports] = useState<DataImportRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<NasaSyncProgress | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [allSourcesSummary, setAllSourcesSummary] = useState<AllSourcesSyncSummary | null>(() =>
+    loadLastAllSourcesSummary()
+  );
 
   // Manual single NASA observation state
   const [manualCellId, setManualCellId] = useState(ALL_NASA_CELLS[0]?.cellId || 'NASA_VN_001');
@@ -591,16 +750,7 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   };
 
   const handleDeleteUserAccount = async (uid: string, email: string) => {
-    if (
-      !window.confirm(
-        t(
-          `Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản ${email || uid} và toàn bộ dữ liệu ruộng của người dùng này?`,
-          `Are you sure you want to permanently delete account ${email || uid} and all their field data?`
-        )
-      )
-    ) {
-      return;
-    }
+    setConfirmDeleteUserUid(null);
     setDeletingUserUid(uid);
     setActionErrorMsg(null);
     setAdminActionSuccess(null);
@@ -717,36 +867,139 @@ export const AdminDataManagementView: React.FC<AdminDataManagementViewProps> = (
   const handleTriggerSync = async () => {
     setSyncing(true);
     setActionErrorMsg(null);
-    setSyncMessage(
-      t(
-        'Đang kết nối trực tiếp NASA POWER Daily API và đồng bộ dữ liệu cho các ô lưới Việt Nam...',
-        'Connecting directly to NASA POWER Daily API and syncing Vietnam grid cells...'
-      )
+    setSyncMessage(null);
+    setSyncProgress({
+      active: true,
+      phase: 'preparing',
+      processedCells: 0,
+      totalCells: 14,
+      currentCellId: '...',
+      currentRegion: '',
+      currentSourceLabel: 'NASA POWER · Earthdata CMR · GHGx · Esri',
+      recordsSynced: 0,
+      liveApiCells: 0,
+      fallbackCells: 0,
+      percent: 4,
+      stepDetail: t(
+        'Đang khởi tạo đồng bộ đa nguồn (NASA POWER 2001–2025, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...',
+        'Initializing multi-source sync (NASA POWER 2001–2025, OCO-2/3, GRACE-FO, SMAP, MODIS, GHGx/EDGAR, Esri)...'
+      ),
+    });
+
+    const activeFieldCellIds = Array.from(
+      new Set((platformStats?.allFields || []).map((f) => f.nasaCellId).filter(Boolean))
     );
+
     try {
-      const syncLog = await executeClientNasaPowerSync();
-      setSyncMessage(
-        t(
-          `Đồng bộ thành công! Đã xử lý ${syncLog.recordsSynced} bản ghi. Dữ liệu mới nhất: ${syncLog.latestNasaDate}`,
-          `Sync completed! Processed ${syncLog.recordsSynced} records. Latest data date: ${syncLog.latestNasaDate}`
-        )
+      const { syncLog, collectedOverrides, summary } = await executeAllSourcesDataSync(
+        activeFieldCellIds,
+        (progress) => setSyncProgress(progress),
+        lang
       );
+
+      setAllSourcesSummary(summary);
+      let firestoreWarning: string | null = null;
+
       if (auth.currentUser) {
-        await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
-          syncType: 'NASA_POWER_API',
-          targetCellsCount: syncLog.targetCellsCount,
-          recordsSynced: Number(syncLog.recordsSynced) || 0,
-          status: 'SUCCESS',
-          latestNasaDate: syncLog.latestNasaDate,
-        });
+        setSyncProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                active: true,
+                phase: 'saving_log',
+                currentSourceLabel: 'Cloud Firestore',
+                percent: 94,
+                stepDetail: t(
+                  `Đang lưu ${collectedOverrides.length} chỉ số khí hậu mới & nhật ký 8 nguồn vào Cloud Firestore...`,
+                  `Saving ${collectedOverrides.length} climate overrides & 8-source audit log to Cloud Firestore...`
+                ),
+              }
+            : prev
+        );
+
+        try {
+          if (collectedOverrides.length > 0) {
+            const syncVer = `v${Date.now()}-all`;
+            const uniqueOverrideCells = new Set(collectedOverrides.map((r) => r.cell_id)).size;
+            await FirestoreService.saveNasaDatasetUpload(auth.currentUser.uid, {
+              version: syncVer,
+              fileName: `Multi-Source Live Sync (${summary.powerHistoryRange})`,
+              recordCount: summary.totalRecordsSynced,
+              cellCount: uniqueOverrideCells,
+              startDate: collectedOverrides.reduce(
+                (min, r) => (r.date < min ? r.date : min),
+                collectedOverrides[0].date
+              ),
+              endDate: syncLog.latestNasaDate || collectedOverrides[0].date,
+              status: 'COMPLETED',
+              sampleOverrides: collectedOverrides.slice(0, 300),
+            });
+            setWarehouseActiveVersion(syncVer);
+          }
+
+          await FirestoreService.saveNasaSyncLog(auth.currentUser.uid, {
+            syncType: 'ALL_SOURCES_SYNC',
+            targetCellsCount: syncLog.targetCellsCount,
+            recordsSynced: Number(syncLog.recordsSynced) || 0,
+            status: 'SUCCESS',
+            latestNasaDate: syncLog.latestNasaDate,
+          });
+        } catch (fsErr: any) {
+          const fsMsg = fsErr?.message || '';
+          firestoreWarning = fsMsg;
+        }
       }
-      await fetchStatus();
-      onDatasetUpdated?.();
+
+      if (!firestoreWarning) {
+        await fetchStatus();
+        onDatasetUpdated?.();
+      }
+
+      const liveCount = Number(syncLog.details?.liveApiCells ?? 0);
+      const fallbackCount = Number(syncLog.details?.fallbackCells ?? 0);
+      const doneText = t(
+        `Đã cập nhật toàn bộ dữ liệu! (${summary.powerDailyRecords} điểm POWER hằng ngày, ${summary.powerHistoryMonthlyPoints} điểm 2001–2025, ${summary.cmrGranulesMatched} granule OCO-2/3·GRACE·SMAP·MODIS, ${summary.stacCollectionsCount} GHGx STAC, ${summary.esriServicesOnline}/3 Esri Tile).`,
+        `All data sources updated! (${summary.powerDailyRecords} POWER daily pts, ${summary.powerHistoryMonthlyPoints} 2001–2025 pts, ${summary.cmrGranulesMatched} OCO-2/3·GRACE·SMAP·MODIS granules, ${summary.stacCollectionsCount} GHGx STAC collections, ${summary.esriServicesOnline}/3 Esri layers).`
+      );
+
+      setSyncProgress({
+        active: false,
+        phase: 'completed',
+        processedCells: syncLog.targetCellsCount,
+        totalCells: syncLog.targetCellsCount,
+        currentCellId: 'DONE',
+        currentRegion: '',
+        currentSourceLabel: 'All Sources Updated',
+        recordsSynced: syncLog.recordsSynced,
+        liveApiCells: liveCount,
+        fallbackCells: fallbackCount,
+        percent: 100,
+        stepDetail: doneText,
+      });
+      setSyncMessage(doneText);
+
+      if (firestoreWarning) {
+        setActionErrorMsg(firestoreWarning);
+      }
     } catch (err: any) {
-      setSyncMessage(t(`Lỗi kết nối NASA POWER: ${err?.message || 'Unknown error'}`, `NASA POWER connection error: ${err?.message || 'Unknown error'}`));
+      const errMsg = err?.message || 'Unknown error';
+      setSyncProgress((prev) => ({
+        active: false,
+        phase: 'error',
+        processedCells: prev?.processedCells || 0,
+        totalCells: prev?.totalCells || 14,
+        currentCellId: prev?.currentCellId || '',
+        currentRegion: prev?.currentRegion || '',
+        currentSourceLabel: prev?.currentSourceLabel || '',
+        recordsSynced: prev?.recordsSynced || 0,
+        liveApiCells: prev?.liveApiCells || 0,
+        fallbackCells: prev?.fallbackCells || 0,
+        percent: prev?.percent || 0,
+        stepDetail: t(`Lỗi đồng bộ dữ liệu: ${errMsg}`, `Data sync error: ${errMsg}`),
+      }));
+      setActionErrorMsg(errMsg);
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMessage(null), 8000);
     }
   };
 
@@ -1170,7 +1423,7 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? t('Đang đồng bộ...', 'Syncing...') : t('Đồng bộ NASA ngay', 'Sync NASA Now')}
+            {syncing ? t('Đang cập nhật tất cả nguồn...', 'Updating all data...') : t('Cập nhật toàn bộ dữ liệu', 'Update All Data')}
           </button>
         </div>
       </div>
@@ -1223,7 +1476,137 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
         </button>
       </div>
 
-      {syncMessage && (
+      {syncProgress && (
+        <div
+          className={`p-4 rounded-2xl border space-y-2.5 shadow-2xs ${
+            syncProgress.phase === 'error'
+              ? 'bg-rose-50 border-rose-300 text-rose-950'
+              : syncProgress.phase === 'completed'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+              : 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 font-bold">
+              {syncProgress.active ? (
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-700 shrink-0" />
+              ) : syncProgress.phase === 'error' ? (
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              )}
+              <span>{syncProgress.stepDetail}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-black font-mono text-sm tabular-nums">
+                {syncProgress.percent}%
+              </span>
+              {!syncProgress.active && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSyncProgress(null);
+                    setSyncMessage(null);
+                  }}
+                  className="text-stone-500 hover:text-stone-900 font-bold cursor-pointer px-1"
+                  title={t('Đóng thanh tiến trình', 'Dismiss progress')}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="w-full h-3 bg-white/80 border border-emerald-200 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                syncProgress.phase === 'error'
+                  ? 'bg-rose-600'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-500'
+              }`}
+              style={{ width: `${Math.max(4, syncProgress.percent)}%` }}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <span className="font-medium">
+              {syncProgress.currentSourceLabel && (
+                <strong className="mr-1.5 text-emerald-800">{syncProgress.currentSourceLabel} ·</strong>
+              )}
+              {syncProgress.currentCellId && syncProgress.currentCellId !== 'DONE' && syncProgress.currentCellId !== '...' ? (
+                <>
+                  {t('Mục hiện tại:', 'Target:')}{' '}
+                  <strong className="font-mono">{syncProgress.currentCellId}</strong>
+                  {syncProgress.currentRegion
+                    ? ` (${getLocalizedRegionName(syncProgress.currentRegion, lang)})`
+                    : ''}
+                </>
+              ) : (
+                <>
+                  {t('Phạm vi:', 'Scope:')}{' '}
+                  <strong>
+                    {syncProgress.processedCells}/{syncProgress.totalCells} {t('ô lưới + CMR + STAC + Esri', 'cells + CMR + STAC + Esri')}
+                  </strong>
+                </>
+              )}
+            </span>
+            <span className="font-mono font-semibold tabular-nums">
+              {syncProgress.processedCells}/{syncProgress.totalCells} {t('ô lưới', 'cells')} ·{' '}
+              {syncProgress.recordsSynced.toLocaleString(locale)} {t('bản ghi', 'records')} (API:{' '}
+              {syncProgress.liveApiCells}, {t('dự phòng', 'fallback')}: {syncProgress.fallbackCells})
+            </span>
+          </div>
+        </div>
+      )}
+
+      {allSourcesSummary && (
+        <div className="p-4 sm:p-5 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2.5">
+            <div>
+              <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                <Server className="w-4 h-4 text-emerald-700" />
+                {t('Trạng thái Đồng bộ Đa nguồn Trực tiếp (NASA · Earthdata · GHGx · Esri)', 'Live Multi-Source Sync Status (NASA · Earthdata · GHGx · Esri)')}
+              </h3>
+              <p className="text-[11px] text-stone-500">
+                {t('Cập nhật lúc:', 'Synced at:')} {new Date(allSourcesSummary.syncedAt).toLocaleString(locale)} ·{' '}
+                {t('Tổng điểm dữ liệu:', 'Total points:')} <strong>{allSourcesSummary.totalRecordsSynced.toLocaleString(locale)}</strong>
+              </p>
+            </div>
+            <span className="text-[11px] font-mono bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold">
+              {allSourcesSummary.sources.filter((s) => s.ok).length}/{allSourcesSummary.sources.length} LIVE
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+            {allSourcesSummary.sources.map((src) => (
+              <div
+                key={src.id}
+                className={`p-3 rounded-xl border space-y-1 ${
+                  src.ok ? 'bg-emerald-50/40 border-emerald-200' : 'bg-amber-50/50 border-amber-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="font-bold text-stone-900 text-[11px] truncate">{src.name}</span>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                      src.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {src.ok ? 'LIVE' : 'WARN'}
+                  </span>
+                </div>
+                <div className="text-[10px] font-mono text-stone-500 truncate">{src.endpoint}</div>
+                <div className="text-[11px] text-stone-700 font-medium line-clamp-2">{src.detail}</div>
+                <div className="text-[10px] font-mono text-emerald-800 pt-0.5">
+                  {t('Mốc:', 'Timestamp:')} <strong>{src.latestTimestamp}</strong>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {syncMessage && !syncProgress && (
         <div className="p-3.5 bg-emerald-100 border border-emerald-300 text-emerald-950 rounded-xl text-xs font-semibold flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Info className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -1236,20 +1619,93 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
       )}
 
       {statsError && (
-        <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold flex items-center justify-between">
-          <span>{statsError}</span>
-          <button type="button" onClick={() => setStatsError(null)} className="cursor-pointer font-bold">
-            ✕
-          </button>
+        <div className="p-4 bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl text-xs space-y-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold">
+                  {isPermissionErrorMessage(statsError)
+                    ? t(
+                        'Cloud Firestore chưa được xuất bản bộ Firestore Rules mới nhất cho dự án Firebase đang chạy.',
+                        'The active Firebase project does not yet have the updated Firestore Security Rules published.'
+                      )
+                    : statsError}
+                </div>
+                {isPermissionErrorMessage(statsError) && (
+                  <p className="text-[11px] text-amber-900 leading-relaxed">
+                    {t(
+                      'Mở Firebase Console → Firestore Database → tab Rules, dán nội dung tệp firestore.rules và bấm Publish (hoặc chạy GitHub Actions deploy) để tài khoản Admin có quyền đọc danh sách người dùng và thửa ruộng.',
+                      'Open Firebase Console → Firestore Database → Rules tab, paste the updated firestore.rules content and click Publish (or run the GitHub Actions workflow) so Admin accounts can list users and fields.'
+                    )}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button type="button" onClick={() => setStatsError(null)} className="cursor-pointer font-bold shrink-0">
+              ✕
+            </button>
+          </div>
+          {isPermissionErrorMessage(statsError) && (
+            <div className="flex flex-wrap items-center gap-2 pl-6">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(FIRESTORE_RULES_TEMPLATE);
+                  setCopiedRules(true);
+                  setTimeout(() => setCopiedRules(false), 3000);
+                }}
+                className="px-3 py-1.5 bg-amber-900 hover:bg-stone-900 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+              >
+                {copiedRules ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedRules ? t('Đã sao chép firestore.rules!', 'Copied firestore.rules!') : t('Sao chép firestore.rules', 'Copy firestore.rules')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  fetchPlatformStats();
+                  fetchStatus();
+                }}
+                className="px-3 py-1.5 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> {t('Thử tải lại', 'Retry')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {actionErrorMsg && (
-        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-semibold flex items-center justify-between">
-          <span>{actionErrorMsg}</span>
-          <button type="button" onClick={() => setActionErrorMsg(null)} className="cursor-pointer font-bold">
-            ✕
-          </button>
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-semibold space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {isPermissionErrorMessage(actionErrorMsg)
+                ? t(
+                    'Không lưu được vào Cloud Firestore (Missing or insufficient permissions). Các API bên ngoài vẫn đồng bộ bình thường, nhưng dự án Firebase đang chạy chưa Publish bộ firestore.rules mới nhất. Hãy bấm "Sao chép firestore.rules" và Publish trong Firebase Console → Firestore Database → Rules.',
+                    'Firestore write rejected (Missing or insufficient permissions). External APIs synced, but your active Firebase project does not yet have the updated firestore.rules published. Copy firestore.rules below and click Publish in Firebase Console → Firestore Database → Rules.'
+                  )
+                : actionErrorMsg}
+            </span>
+            <button type="button" onClick={() => setActionErrorMsg(null)} className="cursor-pointer font-bold shrink-0">
+              ✕
+            </button>
+          </div>
+          {isPermissionErrorMessage(actionErrorMsg) && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(FIRESTORE_RULES_TEMPLATE);
+                  setCopiedRules(true);
+                  setTimeout(() => setCopiedRules(false), 3000);
+                }}
+                className="px-3 py-1.5 bg-rose-900 hover:bg-stone-900 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+              >
+                {copiedRules ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedRules ? t('Đã sao chép firestore.rules!', 'Copied firestore.rules!') : t('Sao chép firestore.rules', 'Copy firestore.rules')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1717,16 +2173,36 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                                   : t('Cấp quyền Admin', 'Grant Admin')}
                               </button>
                             )}
-                            <button
-                              type="button"
-                              disabled={deletingUserUid === u.uid}
-                              onClick={() => handleDeleteUserAccount(u.uid, u.email)}
-                              className="px-2.5 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
-                              title={t('Xóa vĩnh viễn tài khoản', 'Delete account permanently')}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              {deletingUserUid === u.uid ? t('Đang xóa...', 'Deleting...') : t('Xóa', 'Delete')}
-                            </button>
+                            {confirmDeleteUserUid === u.uid ? (
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={deletingUserUid === u.uid}
+                                  onClick={() => handleDeleteUserAccount(u.uid, u.email)}
+                                  className="px-2 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                                >
+                                  {deletingUserUid === u.uid ? t('Đang xóa...', 'Deleting...') : t('Xác nhận xóa', 'Confirm')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteUserUid(null)}
+                                  className="px-2 py-1 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-lg text-[11px] font-semibold cursor-pointer"
+                                >
+                                  {t('Hủy', 'Cancel')}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={deletingUserUid === u.uid}
+                                onClick={() => setConfirmDeleteUserUid(u.uid)}
+                                className="px-2.5 py-1 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                                title={t('Xóa vĩnh viễn tài khoản', 'Delete account permanently')}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                {deletingUserUid === u.uid ? t('Đang xóa...', 'Deleting...') : t('Xóa', 'Delete')}
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1759,9 +2235,11 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                 <Database className="w-4 h-4 text-blue-600" />
               </div>
               <div className="text-xl font-black text-stone-900">
-                {status?.totalRecords ? status.totalRecords.toLocaleString(locale) : (lang === 'en' ? '1,550,640' : '1.550.640')}
+                {(status?.totalRecords ?? ALL_NASA_CELLS.length * 365 * 8).toLocaleString(locale)}
               </div>
-              <div className="text-[11px] text-stone-500">{t('531 ô lưới × 8 chỉ số NASA', '531 grid cells × 8 NASA parameters')}</div>
+              <div className="text-[11px] text-stone-500">
+                {t(`${ALL_NASA_CELLS.length} ô lưới × 8 chỉ số NASA`, `${ALL_NASA_CELLS.length} grid cells × 8 NASA parameters`)}
+              </div>
             </div>
 
             <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-1">
@@ -1809,13 +2287,15 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
             <form onSubmit={handleManualNasaSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs items-end">
               <div>
-                <label className="font-bold text-stone-700 block mb-1">{t('Ô lưới NASA (531 ô)', 'NASA Grid Cell (531)')}</label>
+                <label className="font-bold text-stone-700 block mb-1">
+                  {t(`Ô lưới NASA (${ALL_NASA_CELLS.length} ô)`, `NASA Grid Cell (${ALL_NASA_CELLS.length})`)}
+                </label>
                 <select
                   value={manualCellId}
                   onChange={(e) => setManualCellId(e.target.value)}
                   className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white text-stone-900 font-mono text-xs"
                 >
-                  {ALL_NASA_CELLS.slice(0, 120).map((c) => (
+                  {ALL_NASA_CELLS.map((c) => (
                     <option key={c.cellId} value={c.cellId}>
                       {c.cellId} · {getLocalizedRegionName(c.region, lang)}
                     </option>
@@ -2207,6 +2687,24 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
                   </div>
                 )}
 
+                {/* Skipped empty / ocean-mask / -999 fill rows info */}
+                {(batchPreview.preview.skippedEmptyRows || 0) > 0 && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs flex items-start gap-2">
+                    <Info className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                    <span>
+                      {batchPreview.preview.validRows === 0
+                        ? t(
+                            `Đã đọc ${batchPreview.preview.skippedEmptyRows?.toLocaleString(locale)} dòng trong tệp nhưng toàn bộ giá trị đều trống hoặc mang giá trị thiếu (-999) — thường gặp ở tệp vùng biển (như GWETROOT ngoài khơi). Không có dòng dữ liệu đất liền hợp lệ để nhập.`,
+                            `Scanned ${batchPreview.preview.skippedEmptyRows?.toLocaleString(locale)} rows, but all values are blank or missing-data fill (-999) — typical of offshore ocean masks (e.g., sea-only GWETROOT files). No land observations are present to import.`
+                          )
+                        : t(
+                            `Đã tự động bỏ qua ${batchPreview.preview.skippedEmptyRows?.toLocaleString(locale)} dòng trống / vùng biển hoặc giá trị thiếu (-999) và giữ lại ${batchPreview.preview.validRows.toLocaleString(locale)} bản ghi hợp lệ.`,
+                            `Automatically skipped ${batchPreview.preview.skippedEmptyRows?.toLocaleString(locale)} blank/ocean or missing-value (-999) rows and kept ${batchPreview.preview.validRows.toLocaleString(locale)} valid observations.`
+                          )}
+                    </span>
+                  </div>
+                )}
+
                 {/* Error notifications */}
                 {batchPreview.preview.errors.length > 0 && (
                   <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs space-y-1">
@@ -2560,8 +3058,8 @@ YEAR,MO,DY,T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,GWETROOT,GWETTOP,RH2M,ALLSKY_SFC_SW_D
 
             <p className="text-xs text-stone-400 leading-relaxed">
               {t(
-                'Dữ liệu người dùng (thửa ruộng, kế hoạch luân canh, công việc, phản hồi và chỉ số NASA Earth) được cô lập hoàn toàn theo users/{uid}/* và bảo vệ bởi Firestore Security Rules. Dữ liệu NASA POWER nhiều thư mục CSV được chuẩn hóa trực tiếp trên trình duyệt theo 531 ô lưới Việt Nam và lưu vào Cloud Firestore.',
-                'User farm data (plots, rotation plans, tasks, feedback, and Earth metrics) is strictly isolated under users/{uid}/* and enforced by Firestore Security Rules. Multi-folder NASA POWER CSV batches are normalized client-side onto the 531 Vietnam grid cells and persisted to Cloud Firestore.'
+                `Dữ liệu người dùng (thửa ruộng, kế hoạch luân canh, công việc, phản hồi và chỉ số NASA Earth) được cô lập hoàn toàn theo users/{uid}/* và bảo vệ bởi Firestore Security Rules. Dữ liệu NASA POWER nhiều thư mục CSV được chuẩn hóa trực tiếp trên trình duyệt theo ${ALL_NASA_CELLS.length} ô lưới Việt Nam và lưu vào Cloud Firestore.`,
+                `User farm data (plots, rotation plans, tasks, feedback, and Earth metrics) is strictly isolated under users/{uid}/* and enforced by Firestore Security Rules. Multi-folder NASA POWER CSV batches are normalized client-side onto the ${ALL_NASA_CELLS.length} Vietnam grid cells and persisted to Cloud Firestore.`
               )}
             </p>
           </div>

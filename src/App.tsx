@@ -3,7 +3,13 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import { FirestoreService } from './services/firestoreService';
 import { StorageService } from './services/storage';
-import { analyzeFieldAgronomy, generateTasksFromBrief } from './services/agronomyEngine';
+import {
+  analyzeFieldAgronomy,
+  evaluateFieldCheckIn,
+  FieldCheckInDiagnostic,
+  FieldCheckInInput,
+  generateTasksFromBrief,
+} from './services/agronomyEngine';
 import { Navbar } from './components/Navbar';
 import { HomeView } from './components/HomeView';
 import { DashboardView } from './components/DashboardView';
@@ -179,19 +185,29 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
-  // Load Public Uploaded NASA Climate Overrides (Admin uploads, oldest -> newest)
+  const activeField = fields.find((f) => f.id === activeFieldId) || fields[0];
+  const activeFieldCellId = activeField?.nasaGrid?.cellId;
+
+  // Load Public Uploaded NASA Climate Overrides (Admin uploads, oldest -> newest, scoped to active field's NASA cell)
   useEffect(() => {
     let mounted = true;
-    FirestoreService.getPublicNasaDatasets().then((datasets) => {
-      if (!mounted || datasets.length === 0) return;
-      const completed = datasets
-        .filter((d) => d.status === 'COMPLETED' && d.sampleOverrides?.length)
-        .reverse();
-      if (completed.length === 0) return;
-      setWeather((prev) => {
-        const next = { ...prev };
+    const baseWeather = StorageService.getWeather();
+    FirestoreService.getPublicNasaDatasets()
+      .then((datasets) => {
+        if (!mounted) return;
+        const completed = datasets
+          .filter((d) => d.status === 'COMPLETED' && d.sampleOverrides?.length)
+          .reverse();
+        if (completed.length === 0) {
+          setWeather(baseWeather);
+          return;
+        }
+        const next = { ...baseWeather };
         for (const ds of completed) {
-          for (const row of ds.sampleOverrides || []) {
+          const matchingRows = (ds.sampleOverrides || [])
+            .filter((row) => !activeFieldCellId || row.cell_id === activeFieldCellId)
+            .sort((a, b) => a.date.localeCompare(b.date));
+          for (const row of matchingRows) {
             if (row.indicator_code === 'T2M') next.temp = row.value;
             if (row.indicator_code === 'T2M_MIN') next.minTemp = row.value;
             if (row.indicator_code === 'T2M_MAX') next.maxTemp = row.value;
@@ -201,15 +217,19 @@ export default function App() {
             if (row.indicator_code === 'RH2M') next.humidity = row.value;
             if (row.indicator_code === 'ALLSKY_SFC_SW_DWN') next.solarRadiation = row.value;
           }
-          if (ds.endDate) next.observationDate = ds.endDate;
+          if (matchingRows.length > 0 && ds.endDate) {
+            next.observationDate = ds.endDate;
+          }
         }
-        return next;
+        setWeather(next);
+      })
+      .catch(() => {
+        if (mounted) setWeather(baseWeather);
       });
-    });
     return () => {
       mounted = false;
     };
-  }, [activeTab, datasetRefreshTick]);
+  }, [activeTab, datasetRefreshTick, activeFieldCellId]);
 
   // Redeem pending share link (?share=...) once user is signed in, or prompt login
   useEffect(() => {
@@ -322,7 +342,6 @@ export default function App() {
     };
   }, [authReady, authUser]);
 
-  const activeField = fields.find((f) => f.id === activeFieldId) || fields[0];
 
   const ruleBrief: DailyAgronomicBrief | null = activeField
     ? analyzeFieldAgronomy(activeField, weather, feedbackHistory, lang)
@@ -378,7 +397,11 @@ export default function App() {
     const created = await FirestoreService.createField(authUser.uid, newFieldData);
     const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
     const newTasks = generateTasksFromBrief(brief, created);
-    await FirestoreService.createTasks(authUser.uid, newTasks);
+    try {
+      await FirestoreService.createTasks(authUser.uid, newTasks);
+    } catch {
+      // Field was created successfully; avoid aborting navigation if task generation fails
+    }
     setActiveFieldId(created.id);
     navigateToTab('fields');
   };
@@ -474,6 +497,64 @@ export default function App() {
             ),
       appliedToProfile: true,
     });
+  };
+
+  const handleFieldCheckInUpdate = async (
+    input: FieldCheckInInput,
+    addFixesToTasks: boolean
+  ): Promise<FieldCheckInDiagnostic | null> => {
+    if (!activeField || !authUser || activeField.isSharedWithMe) return null;
+
+    const currentBrief =
+      ruleBrief || analyzeFieldAgronomy(activeField, weather, feedbackHistory, lang);
+    const diagnostic = evaluateFieldCheckIn(activeField, weather, currentBrief, input, lang);
+
+    const feedbackType: FeedbackType =
+      input.observedMoisture === 'dry'
+        ? 'soil_still_dry'
+        : input.observedMoisture === 'wet'
+        ? 'soil_too_wet'
+        : input.observedCropHealth !== 'healthy'
+        ? 'crop_abnormal'
+        : input.predictionOutcome === 'on_track'
+        ? 'helpful'
+        : 'not_suitable';
+
+    await FirestoreService.createFeedback(authUser.uid, {
+      fieldId: activeField.id,
+      feedbackType,
+      userComment: input.note,
+      systemActionTaken: `${diagnostic.verdictTitle} — ${diagnostic.rootCauseExplanation}`,
+      predictionOutcome: input.predictionOutcome,
+      observedMoisture: input.observedMoisture,
+      observedCropHealth: input.observedCropHealth,
+      recommendedFixes: diagnostic.fixes,
+      appliedToProfile: true,
+    });
+
+    await FirestoreService.updateField(authUser.uid, {
+      ...activeField,
+      crop: {
+        ...activeField.crop,
+        currentStage: input.updatedStage || activeField.crop.currentStage,
+        healthStatus: diagnostic.recommendedHealthStatus,
+      },
+      adaptiveMemory: {
+        ...activeField.adaptiveMemory,
+        soilAdjustment: diagnostic.soilAdjustmentNote,
+        irrigationSensitivity: diagnostic.irrigationSensitivity,
+        lastFeedbackDate: new Date().toISOString().slice(0, 10),
+        lastPredictionOutcome: input.predictionOutcome,
+        lastCheckInSummary: diagnostic.rootCauseExplanation,
+        planFixRecommendations: diagnostic.fixes,
+      },
+    });
+
+    if (addFixesToTasks && diagnostic.suggestedTasks.length > 0) {
+      await FirestoreService.createTasks(authUser.uid, diagnostic.suggestedTasks);
+    }
+
+    return diagnostic;
   };
 
   const handleMapCoordinateSelected = async (lat: number, lon: number) => {
@@ -836,7 +917,11 @@ export default function App() {
             <FeedbackHistoryView
               activeField={activeField}
               feedbackHistory={feedbackHistory}
+              weather={weather}
+              brief={ruleBrief}
               onAddFeedback={handleAddFeedback}
+              onSubmitCheckIn={handleFieldCheckInUpdate}
+              onNavigateTab={navigateToTab}
             />
           ) : (
             renderMissingFieldPrompt()

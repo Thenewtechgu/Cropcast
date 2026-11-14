@@ -11,113 +11,140 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'vanha.uow@gmail.com' ||
-        request.auth.token.email == 'fss01211cg@gmail.com' ||
-        request.auth.token.email in ['vanha.uow@gmail.com', 'fss01211cg@gmail.com'] ||
+        (request.auth.token.email_verified == true &&
+          request.auth.token.email in ['vanha.uow@gmail.com', 'fss01211cg@gmail.com']) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
-    // 3. Users Collection & Subcollections
-    match /users {
-      allow list: if isAdmin();
-      allow read, write: if false;
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
+    // 3. Users Collection & Subcollections
     match /users/{userId} {
-      allow read, list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isSignedIn() && request.auth.uid == userId;
-      allow delete: if isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) && isOwner(userId);
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
 
-      match /plots {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /plots/{plotId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
-        allow read: if isSignedIn() && (
-          ('sharedWithUids' in resource.data && request.auth.uid in resource.data.sharedWithUids) ||
-          ('sharedWithEmails' in resource.data && request.auth.token.email != null && request.auth.token.email in resource.data.sharedWithEmails) ||
-          isAdmin()
+        allow get: if isValidId(userId) && isValidId(plotId) && (
+          isOwner(userId) ||
+          isAdmin() ||
+          (isSignedIn() && (
+            ('sharedWithUids' in resource.data && request.auth.uid in resource.data.sharedWithUids) ||
+            ('sharedWithEmails' in resource.data &&
+              request.auth.token.email_verified == true &&
+              request.auth.token.email != null &&
+              request.auth.token.email in resource.data.sharedWithEmails)
+          ))
         );
+        allow list: if isOwner(userId) || isAdmin();
+        allow create: if isValidId(userId) && isValidId(plotId) && isOwner(userId) &&
+          request.resource.data.ownerId == request.auth.uid;
+        allow update: if isValidId(userId) && isValidId(plotId) && (
+          (isOwner(userId) && request.resource.data.ownerId == resource.data.ownerId) ||
+          (isSignedIn() &&
+            !isOwner(userId) &&
+            'activeShareToken' in resource.data &&
+            resource.data.activeShareToken is string &&
+            resource.data.activeShareToken.size() >= 12 &&
+            request.resource.data.presentedShareToken == resource.data.activeShareToken &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'presentedShareToken', 'updatedAt']) &&
+            request.resource.data.sharedWithUids.hasAll(resource.data.sharedWithUids) &&
+            request.auth.uid in request.resource.data.sharedWithUids &&
+            request.resource.data.sharedWithUids.size() <= resource.data.sharedWithUids.size() + 1)
+        );
+        allow delete: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
       }
 
-      match /plans {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /plans/{planId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
+        allow get: if isValidId(userId) && isValidId(planId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(planId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(planId) && (isOwner(userId) || isAdmin());
       }
 
-      match /tasks {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /tasks/{taskId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
+        allow get: if isValidId(userId) && isValidId(taskId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(taskId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(taskId) && (isOwner(userId) || isAdmin());
       }
 
-      match /feedbacks {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /feedbacks/{feedbackId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
+        allow get: if isValidId(userId) && isValidId(feedbackId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(feedbackId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(feedbackId) && (isOwner(userId) || isAdmin());
       }
 
-      match /earth_metrics {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /earth_metrics/{metricId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
+        allow get: if isValidId(userId) && isValidId(metricId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(metricId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(metricId) && (isOwner(userId) || isAdmin());
       }
 
-      match /shared_refs {
-        allow list: if isSignedIn() && request.auth.uid == userId;
-      }
       match /shared_refs/{plotId} {
-        allow read, write, list: if isSignedIn() && request.auth.uid == userId;
+        allow get: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(plotId) && isOwner(userId);
+        allow delete: if isValidId(userId) && isValidId(plotId) && (isOwner(userId) || isAdmin());
       }
     }
 
     // Admins Collection
-    match /admins {
-      allow list: if isAdmin();
-      allow read, write: if isAdmin();
-    }
     match /admins/{userId} {
-      allow read, list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isValidId(userId) && isAdmin();
     }
 
     // Field Shares
-    match /field_shares {
-      allow list: if isSignedIn();
-    }
     match /field_shares/{shareId} {
-      allow read, list: if isSignedIn() && (
+      allow get: if isValidId(shareId) && isSignedIn() && (
         resource.data.ownerId == request.auth.uid ||
         resource.data.isActive == true ||
-        (resource.data.targetEmail != null && request.auth.token.email != null && resource.data.targetEmail == request.auth.token.email) ||
+        (resource.data.targetEmail != null &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email != null &&
+          resource.data.targetEmail == request.auth.token.email) ||
         isAdmin()
       );
-      allow write: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (resource.data.targetEmail != null &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email != null &&
+          resource.data.targetEmail == request.auth.token.email) ||
+        isAdmin()
+      );
+      allow create: if isValidId(shareId) && isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isValidId(shareId) && isSignedIn() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
     }
 
     // NASA Datasets
-    match /nasa_datasets {
-      allow list: if isSignedIn();
-    }
     match /nasa_datasets/{datasetId} {
-      allow read, list: if resource.data.isPublic == true || isSignedIn();
-      allow write: if isAdmin();
+      allow get: if isValidId(datasetId) && (resource.data.isPublic == true || isAdmin());
+      allow list: if resource.data.isPublic == true || isAdmin();
+      allow write: if isValidId(datasetId) && isAdmin();
     }
 
     // NASA Sync Logs
-    match /nasa_sync_logs {
-      allow list: if isAdmin();
-    }
     match /nasa_sync_logs/{logId} {
-      allow read, write, list: if isAdmin();
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow write: if isValidId(logId) && isAdmin();
     }
   }
 }

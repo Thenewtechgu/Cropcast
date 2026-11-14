@@ -705,3 +705,219 @@ export function getGoalLabel(goal: string, lang: AppLanguage = 'vi'): string {
   };
   return map[goal] || goal;
 }
+
+export interface FieldCheckInInput {
+  predictionOutcome: 'on_track' | 'needs_adjustment' | 'off_track';
+  observedMoisture: 'dry' | 'balanced' | 'wet';
+  observedCropHealth: 'healthy' | 'stressed' | 'pest_risk';
+  updatedStage?: string;
+  note?: string;
+}
+
+export interface FieldCheckInDiagnostic {
+  isPredictionAccurate: boolean;
+  verdictTitle: string;
+  rootCauseExplanation: string;
+  fixes: string[];
+  recommendedHealthStatus: 'healthy' | 'stressed' | 'pest_risk';
+  soilAdjustmentNote: string;
+  irrigationSensitivity: 'higher' | 'normal' | 'lower';
+  suggestedTasks: FarmTask[];
+}
+
+export function evaluateFieldCheckIn(
+  field: FieldProfile,
+  weather: WeatherObservation,
+  brief: DailyAgronomicBrief,
+  input: FieldCheckInInput,
+  lang: AppLanguage = 'vi'
+): FieldCheckInDiagnostic {
+  const isEn = lang === 'en';
+  const fixes: string[] = [];
+  const cropName = getPlantDisplayName(field.crop.name, lang);
+  const soilName = getSoilLabel(field.soilType, lang);
+  const rootPct = Math.round(weather.gwetroot * 100);
+
+  let isPredictionAccurate = input.predictionOutcome === 'on_track';
+  let verdictTitle = '';
+  let rootCauseExplanation = '';
+  let recommendedHealthStatus: 'healthy' | 'stressed' | 'pest_risk' = input.observedCropHealth;
+  let soilAdjustmentNote = field.adaptiveMemory?.soilAdjustment || '';
+  let irrigationSensitivity: 'higher' | 'normal' | 'lower' =
+    field.adaptiveMemory?.irrigationSensitivity || 'normal';
+
+  const modelExpectedWet = weather.rain >= 5 || weather.gwetroot >= 0.7;
+  const modelExpectedDry = weather.gwetroot < 0.45 && weather.rain < 2;
+
+  if (input.observedMoisture === 'dry') {
+    irrigationSensitivity = 'higher';
+    soilAdjustmentNote = isEn
+      ? 'Farmer check-in confirmed soil dries faster than satellite grid baseline: higher irrigation sensitivity applied.'
+      : 'Cập nhật thực địa cho thấy đất khô nhanh hơn dự báo vệ tinh: đã tăng độ nhạy nhắc tưới.';
+
+    if (modelExpectedWet || input.predictionOutcome !== 'on_track') {
+      isPredictionAccurate = false;
+      rootCauseExplanation = isEn
+        ? `NASA POWER (${rootPct}% root moisture, ${weather.rain}mm rain) reflects a wide ~50 km grid average, while your actual topsoil on ${soilName} is losing water faster due to wind exposure, uneven canal seepage, or lighter local texture.`
+        : `Ô lưới NASA POWER (ẩm rễ ${rootPct}%, mưa ${weather.rain} mm) phản ánh trung bình vùng rộng ~50 km, trong khi lớp đất thực tế tại ruộng (${soilName}) thoát nước nhanh hơn hoặc chưa thấm đều nước tưới/mưa.`;
+    }
+
+    fixes.push(
+      isEn
+        ? `Irrigate ${Math.round(Math.max(10, field.areaHa * 25))} m³ gently early tomorrow (05:30–07:00) to moisten the 10–15 cm root zone without runoff.`
+        : `Tưới bổ sung nhẹ vào sáng sớm mai (05:30–07:00) để thấm sâu 10–15 cm vùng rễ cho diện tích ${field.areaHa} ha.`
+    );
+    fixes.push(
+      isEn
+        ? 'Spread straw, dry grass, or rice husk mulch around plant bases to cut surface evaporation by 30–40%.'
+        : 'Tủ gốc bằng rơm rạ hoặc cỏ khô quanh luống để giảm 30–40% tốc độ bốc hơi nước tầng mặt.'
+    );
+    fixes.push(
+      isEn
+        ? 'Check field bunds/pipes for hidden leaks or soil crusting; break compacted topsoil lightly before watering.'
+        : 'Kiểm tra bờ ruộng/ống dẫn tránh rò rỉ thất thoát nước và xới phá váng nhẹ nếu đất đóng váng.'
+    );
+  } else if (input.observedMoisture === 'wet') {
+    irrigationSensitivity = 'lower';
+    soilAdjustmentNote = isEn
+      ? 'Farmer check-in confirmed slow drainage / pooling: irrigation postponed & drainage prioritized.'
+      : 'Cập nhật thực địa cho thấy đất giữ ẩm lâu / thoát nước chậm: hoãn tưới và ưu tiên tiêu thoát nước.';
+
+    if (modelExpectedDry || input.predictionOutcome !== 'on_track') {
+      isPredictionAccurate = false;
+      rootCauseExplanation = isEn
+        ? `Even though regional evaporation looked moderate (${rootPct}% model root moisture), low-lying micro-topography or compacted ${soilName} subsoil is trapping excess water.`
+        : `Dù mô hình khí hậu vùng cho thấy ẩm độ trung bình (${rootPct}%), địa hình trũng cục bộ hoặc tầng đế cày của ${soilName} đang giữ nước lâu gây nguy cơ nghẹt rễ.`;
+    }
+
+    fixes.push(
+      isEn
+        ? 'Pause all scheduled irrigation for at least 48–72 hours until hand-squeeze topsoil no longer drips water.'
+        : 'Ngừng tưới hoàn toàn ít nhất 48–72 giờ cho đến khi nắm đất kiểm tra không còn rỉ nước.'
+    );
+    fixes.push(
+      isEn
+        ? 'Clear outlet ditches and cut shallow cross-furrows at low corners to drain standing water within 12 hours.'
+        : 'Khơi thông rãnh đầu bờ và xẻ rãnh xương cá ở góc trũng để rút hết nước đọng trong 12 giờ.'
+    );
+    fixes.push(
+      isEn
+        ? 'Hold back Urea / Nitrogen top-dressing until soil drains so roots recover oxygen and avoid N₂O leaching.'
+        : 'Tạm hoãn bón thúc đạm (Urê) để tránh thối rễ, rửa trôi phân và phát sinh nấm bệnh.'
+    );
+  } else {
+    soilAdjustmentNote =
+      input.predictionOutcome === 'on_track'
+        ? isEn
+          ? `Validated soil moisture calibration on ${new Date().toISOString().slice(0, 10)}: predictions match field reality.`
+          : `Đã đối chiếu thực địa ngày ${new Date().toISOString().slice(0, 10)}: dự báo độ ẩm đang khớp tốt với ruộng.`
+        : soilAdjustmentNote;
+  }
+
+  if (input.observedCropHealth === 'stressed') {
+    isPredictionAccurate = false;
+    fixes.push(
+      isEn
+        ? `Dig 1–2 weak ${cropName} plants gently to inspect white feeder roots vs brown/rotted roots, and check leaf yellowing pattern (lower leaves = Nitrogen/wetness; young tips = Calcium/Boron or heat).`
+        : `Kiểm tra nhẹ vùng rễ tơ của cây ${cropName} bị yếu (rễ trắng khỏe hay đen thối) và vị trí vàng lá (lá già = thiếu đạm/úng; đọt non = sốc nhiệt hoặc thiếu vi lượng).`
+    );
+    fixes.push(
+      isEn
+        ? 'Avoid heavy chemical spraying during midday stress; apply mild organic foliar amino/seaweed or balanced NPK once moisture stabilizes.'
+        : 'Không phun phân/thuốc nồng độ cao lúc cây đang sốc; chỉ bổ sung dinh dưỡng nhẹ vào chiều mát sau khi đã chỉnh ẩm độ đất.'
+    );
+  } else if (input.observedCropHealth === 'pest_risk') {
+    isPredictionAccurate = false;
+    fixes.push(
+      isEn
+        ? `Scout 5 sample points across ${field.name} (focusing on undersides of leaves and stem bases) to confirm pest/fungal density before targeted biological or IPM treatment.`
+        : `Kiểm tra 5 điểm chéo góc trên ruộng ${field.name} (mặt dưới lá và gốc thân) để xác định đúng đối tượng sâu/nấm trước khi xử lý theo ngưỡng phòng trừ tổng hợp (IPM).`
+    );
+    fixes.push(
+      isEn
+        ? 'Remove severely infected leaves/shoots away from field bunds and widen row ventilation by trimming weeds on borders.'
+        : 'Ngắt bỏ lá/cành bệnh nặng ra khỏi bờ ruộng và phát quang cỏ bờ để giảm ẩm độ lưu không khí.'
+    );
+  }
+
+  if (input.predictionOutcome !== 'on_track' && fixes.length === 0) {
+    rootCauseExplanation = isEn
+      ? `You reported the plan is off track (${brief.headline}). Re-syncing field soil/crop stage assumptions ensures upcoming advisories adapt.`
+      : `Bạn báo cáo thực tế chưa khớp hoàn toàn kế hoạch (${brief.headline}). Hệ thống đã ghi nhận sai lệch để điều chỉnh các khuyến nghị tiếp theo.`;
+    fixes.push(
+      isEn
+        ? 'Verify your field crop growth stage and soil drainage setting in My Fields → Edit if the crop grew faster/slower than planted.'
+        : 'Kiểm tra lại giai đoạn sinh trưởng và tốc độ thoát nước trong mục Ruộng của tôi → Chỉnh sửa để lịch chăm sóc bám sát thực tế.'
+    );
+    fixes.push(
+      isEn
+        ? 'Review Today’s Recommended Actions on the Dashboard and postpone high-risk tasks until weather and moisture match.'
+        : 'Rà soát lại danh sách Việc nên làm hôm nay và tạm hoãn các bước nhạy cảm cho đến khi ẩm độ đất ổn định.'
+    );
+  }
+
+  if (!rootCauseExplanation) {
+    rootCauseExplanation = isPredictionAccurate
+      ? isEn
+        ? `Your field conditions align closely with CropCast's NASA climate baseline (${weather.temp}°C, ${rootPct}% root moisture) and ${soilName} model.`
+        : `Tình trạng thực tế tại ruộng đang bám sát dự báo khí hậu NASA (${weather.temp}°C, ẩm rễ ${rootPct}%) và mô hình đất (${soilName}).`
+      : isEn
+      ? 'Micro-climate variations or localized crop stress shifted your field off the baseline projection. Follow the corrective steps below to restore the plan.'
+      : 'Biến động vi khí hậu cục bộ hoặc áp lực sinh trưởng thực tế khiến ruộng lệch khỏi dự báo nền. Làm theo các bước khắc phục bên dưới để đưa ruộng về đúng kế hoạch.';
+  }
+
+  if (fixes.length === 0) {
+    fixes.push(
+      isEn
+        ? `Keep current ${field.crop.irrigationMethod} schedule and inspect again at ${brief.nextCheckTime}.`
+        : `Tiếp tục duy trì chế độ ${field.crop.irrigationMethod} hiện tại và kiểm tra lại vào ${brief.nextCheckTime}.`
+    );
+    fixes.push(
+      isEn
+        ? 'Log another quick update in 3–5 days or right after the next heavy rain to keep predictions calibrated.'
+        : 'Ghi nhận cập nhật tiếp theo sau 3–5 ngày hoặc ngay sau đợt mưa lớn để giữ độ chính xác dự báo.'
+    );
+  }
+
+  if (isPredictionAccurate) {
+    verdictTitle = isEn
+      ? 'Prediction is working as planned — Field is on track'
+      : 'Dự báo đang khớp thực tế — Ruộng đi đúng kế hoạch';
+  } else if (input.predictionOutcome === 'off_track' || input.observedCropHealth !== 'healthy') {
+    verdictTitle = isEn
+      ? 'Action needed: Field diverged from forecast — Fixes ready'
+      : 'Cần điều chỉnh ngay: Thực tế lệch dự báo — Có phương án khắc phục';
+  } else {
+    verdictTitle = isEn
+      ? 'Minor calibration applied — Follow adjustments to stay on plan'
+      : 'Đã hiệu chỉnh dự báo theo thực địa — Làm theo các bước để giữ đúng tiến độ';
+  }
+
+  const nowIso = new Date().toISOString();
+  const suggestedTasks: FarmTask[] = isPredictionAccurate
+    ? []
+    : fixes.slice(0, 3).map((fixText, idx) => ({
+        id: `FIX_${field.id}_${Date.now()}_${idx}`,
+        fieldId: field.id,
+        title: fixText.slice(0, 180),
+        scheduledTime: isEn ? 'Within 24 hours' : 'Trong 24 giờ tới',
+        priority: idx === 0 ? 'HIGH' : 'MEDIUM',
+        reason: isEn
+          ? `Corrective step from field update (${input.observedMoisture} soil · ${input.observedCropHealth} crop)`
+          : `Khắc phục sai lệch thực địa (đất: ${input.observedMoisture} · cây: ${input.observedCropHealth})`,
+        triggerData: `${weather.temp}°C · Root ${rootPct}%`,
+        status: 'pending',
+        createdAt: nowIso,
+      }));
+
+  return {
+    isPredictionAccurate,
+    verdictTitle,
+    rootCauseExplanation,
+    fixes,
+    recommendedHealthStatus,
+    soilAdjustmentNote,
+    irrigationSensitivity,
+    suggestedTasks,
+  };
+}
