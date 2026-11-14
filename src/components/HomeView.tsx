@@ -313,21 +313,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 ? t('Đang lấy GPS...', 'Getting GPS...')
                 : t('Lấy GPS thiết bị', 'Use Device GPS')}
             </button>
-            {isAuthenticated ? (
-              <button
-                type="button"
-                onClick={onOpenNewFieldWizard}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <MapPin className="w-3.5 h-3.5" /> {t('Thêm ruộng mới', 'Add New Field')}
-              </button>
-            ) : (
+            <button
+              type="button"
+              onClick={onOpenNewFieldWizard}
+              className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <MapPin className="w-3.5 h-3.5" /> {t('Thêm ruộng mới', 'Add New Field')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('community')}
+              className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold rounded-xl text-xs transition cursor-pointer"
+            >
+              {t('Cộng đồng', 'Community')}
+            </button>
+            {!isAuthenticated && (
               <button
                 type="button"
                 onClick={onOpenAuthModal}
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 bg-white hover:bg-stone-50 border border-stone-300 text-stone-800 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
               >
-                <LogIn className="w-3.5 h-3.5" /> {t('Đăng nhập / Đăng ký', 'Sign In / Sign Up')}
+                <LogIn className="w-3.5 h-3.5" /> {t('Đăng nhập lưu Cloud', 'Sign In to Sync')}
               </button>
             )}
           </div>

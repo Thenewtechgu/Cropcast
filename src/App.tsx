@@ -24,6 +24,7 @@ import { NasaAnalyticsView } from './components/NasaAnalyticsView';
 import { PlantingCalendarView } from './components/PlantingCalendarView';
 import { AiAssistantView } from './components/AiAssistantView';
 import { FeedbackHistoryView } from './components/FeedbackHistoryView';
+import { CommunityForumView } from './components/CommunityForumView';
 import { ExplanationDrawer } from './components/ExplanationDrawer';
 import { InteractiveMapModal } from './components/InteractiveMapModal';
 import { AdminDataManagementView } from './components/AdminDataManagementView';
@@ -31,7 +32,10 @@ import { AuthModal } from './components/AuthModal';
 import { RecoveryEmailModal } from './components/RecoveryEmailModal';
 import {
   AppUser,
+  CommunityCategory,
+  CommunityPost,
   FieldProfile,
+  ImportedFarmReport,
   WeatherObservation,
   DailyAgronomicBrief,
   FarmTask,
@@ -40,10 +44,36 @@ import {
   EarthEnvironmentSnapshot,
   PlotPlanRecord,
 } from './types';
-import { Sprout, ShieldCheck, Plus, MapPin, LogIn, CheckCircle2, Layers, CalendarCheck, History, RefreshCw, CalendarDays, BarChart3, Home, Globe, Bot } from 'lucide-react';
+import {
+  Sprout,
+  ShieldCheck,
+  Plus,
+  MapPin,
+  LogIn,
+  CheckCircle2,
+  Layers,
+  CalendarCheck,
+  History,
+  RefreshCw,
+  CalendarDays,
+  BarChart3,
+  Home,
+  Globe,
+  Bot,
+  Users,
+  RotateCcw,
+} from 'lucide-react';
 import { useLanguage } from './contexts/LanguageContext';
 import { OfflineCacheService } from './services/offlineCacheService';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import {
+  loadDemoWorkspace,
+  saveDemoWorkspace,
+  resetDemoWorkspace,
+  loadDemoForumPosts,
+  saveDemoForumPosts,
+} from './data/demoData';
+import { findNearestNasaGrid } from './data/nasaVietnamGrid';
 
 const TAB_TO_PATH: Record<string, string> = {
   home: '/',
@@ -54,6 +84,7 @@ const TAB_TO_PATH: Record<string, string> = {
   calendar: '/lich-gieo-trong',
   analytics: '/phan-tich-ban-do',
   fields: '/ruong-cua-toi',
+  community: '/cong-dong',
   assistant: '/tro-ly-ai',
   admin: '/quan-tri',
 };
@@ -68,6 +99,7 @@ const PATH_TO_TAB: Record<string, string> = {
   '/lich-gieo-trong': 'calendar',
   '/phan-tich-ban-do': 'analytics',
   '/ruong-cua-toi': 'fields',
+  '/cong-dong': 'community',
   '/tro-ly-ai': 'assistant',
   '/quan-tri': 'admin',
 };
@@ -103,8 +135,12 @@ export default function App() {
   const [tasks, setTasks] = useState<FarmTask[]>([]);
   const [feedbackHistory, setFeedbackHistory] = useState<FeedbackRecord[]>([]);
   const [plansByPlotId, setPlansByPlotId] = useState<Record<string, PlotPlanRecord>>({});
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => loadDemoForumPosts());
+  const [demoHydrated, setDemoHydrated] = useState(false);
+  const [weatherRefreshing, setWeatherRefreshing] = useState(false);
   const [datasetRefreshTick, setDatasetRefreshTick] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const isDemoMode = authReady && !authUser;
 
   const setActiveFieldId = (nextIdOrUpdater: string | ((prev: string) => string)) => {
     setActiveFieldIdState((prev) => {
@@ -335,21 +371,29 @@ export default function App() {
       });
   }, [authReady, authUser, pendingShareToken]);
 
-  // Subscribe strictly to authenticated farmer's own & shared fields; hydrate & persist offline cache
+  // Subscribe to farmer's cloud records OR hydrate default Demo Workspace when unauthenticated
   useEffect(() => {
     if (!authReady) return;
 
     if (!authUser) {
-      setFields([]);
-      setTasks([]);
-      setFeedbackHistory([]);
-      setPlansByPlotId({});
-      setLastSyncedAt(null);
+      const demo = loadDemoWorkspace();
+      setFields(demo.fields);
+      setTasks(demo.tasks);
+      setFeedbackHistory(demo.feedbacks);
+      setPlansByPlotId(demo.plans);
+      setCommunityPosts(loadDemoForumPosts());
+      setActiveFieldId((prev) =>
+        prev && demo.fields.some((f) => f.id === prev) ? prev : demo.fields[0]?.id || ''
+      );
+      setLastSyncedAt(demo.updatedAt || new Date().toISOString());
+      setDemoHydrated(true);
       if (activeTab === 'admin') {
         navigateToTab('home', true);
       }
       return;
     }
+
+    setDemoHydrated(false);
 
     if (authUser.isAdmin) {
       setFields([]);
@@ -407,6 +451,13 @@ export default function App() {
       setPlansByPlotId(cloudPlans);
     });
 
+    const unsubCommunity = FirestoreService.subscribeCommunityPosts((cloudPosts) => {
+      const localDemoPosts = loadDemoForumPosts().filter(
+        (dp) => !cloudPosts.some((cp) => cp.id === dp.id)
+      );
+      setCommunityPosts([...cloudPosts, ...localDemoPosts]);
+    });
+
     if (activeTab === 'admin') {
       navigateToTab('dashboard', true);
     }
@@ -417,8 +468,21 @@ export default function App() {
       unsubTasks();
       unsubFeedbacks();
       unsubPlans();
+      unsubCommunity();
     };
   }, [authReady, authUser]);
+
+  // Persist Demo Mode workspace edits in localStorage so reloads keep farmer changes
+  useEffect(() => {
+    if (!isDemoMode || !demoHydrated) return;
+    saveDemoWorkspace({
+      fields,
+      tasks,
+      feedbacks: feedbackHistory,
+      plans: plansByPlotId,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [isDemoMode, demoHydrated, fields, tasks, feedbackHistory, plansByPlotId]);
 
   // Persist synchronized farmer records into IndexedDB + localStorage snapshot while online
   useEffect(() => {
@@ -535,9 +599,64 @@ export default function App() {
     setActiveFieldId(fieldId);
   };
 
+  const handleRefreshWeather = async () => {
+    if (activeFieldLat === undefined || activeFieldLon === undefined) return;
+    setWeatherRefreshing(true);
+    try {
+      const fresh = await fetchFieldLiveWeather(activeFieldLat, activeFieldLon, activeField, {
+        forceRefresh: true,
+      });
+      setWeather(fresh);
+      const nowIso = new Date().toISOString();
+      setLastSyncedAt(nowIso);
+      if (authUser && !authUser.isAdmin && activeField?.id) {
+        OfflineCacheService.saveWeatherForField(authUser.uid, activeField.id, fresh).catch(() => {});
+      }
+    } finally {
+      setWeatherRefreshing(false);
+    }
+  };
+
+  const handleResetDemo = () => {
+    const fresh = resetDemoWorkspace();
+    setFields(fresh.fields);
+    setTasks(fresh.tasks);
+    setFeedbackHistory(fresh.feedbacks);
+    setPlansByPlotId(fresh.plans);
+    setActiveFieldId(fresh.fields[0]?.id || '');
+    setLastSyncedAt(fresh.updatedAt);
+    setShareBanner({
+      type: 'ok',
+      text: t(
+        'Đã khôi phục dữ liệu mẫu Demo ban đầu.',
+        'Demo sample workspace restored to defaults.'
+      ),
+    });
+  };
+
   const handleAddNewField = async (newFieldData: Omit<FieldProfile, 'id' | 'nasaGrid'>) => {
     if (!authUser) {
-      setAuthModalOpen(true);
+      const { cell, distanceKm } = findNearestNasaGrid(newFieldData.lat, newFieldData.lon);
+      const created: FieldProfile = {
+        ...newFieldData,
+        id: `DEMO_FIELD_${Date.now()}`,
+        ownerId: 'DEMO_FARMER',
+        ownerName: t('Nông hộ Demo', 'Demo Farmer'),
+        nasaGrid: {
+          cellId: cell.cellId,
+          lat: cell.lat,
+          lon: cell.lon,
+          distanceKm,
+        },
+      };
+      const brief = analyzeFieldAgronomy(created, weather, feedbackHistory, lang);
+      const newTasks = generateTasksFromBrief(brief, created, weather, feedbackHistory);
+      setFields((prev) => [created, ...prev]);
+      if (newTasks.length > 0) {
+        setTasks((prev) => [...newTasks, ...prev]);
+      }
+      setActiveFieldId(created.id);
+      navigateToTab('fields');
       return;
     }
     const created = await FirestoreService.createField(authUser.uid, newFieldData);
@@ -553,13 +672,44 @@ export default function App() {
   };
 
   const handleUpdateField = async (updatedField: FieldProfile) => {
-    if (!authUser || updatedField.isSharedWithMe) return;
+    if (updatedField.isSharedWithMe) return;
+    if (!authUser) {
+      const { cell, distanceKm } = findNearestNasaGrid(updatedField.lat, updatedField.lon);
+      const nextField: FieldProfile = {
+        ...updatedField,
+        nasaGrid: {
+          cellId: cell.cellId,
+          lat: cell.lat,
+          lon: cell.lon,
+          distanceKm,
+        },
+      };
+      setFields((prev) => prev.map((f) => (f.id === nextField.id ? nextField : f)));
+      setActiveFieldId(nextField.id);
+      return;
+    }
     await FirestoreService.updateField(authUser.uid, updatedField);
     setActiveFieldId(updatedField.id);
   };
 
   const handleDeleteField = async (fieldId: string) => {
-    if (!authUser) return;
+    if (!authUser) {
+      setFields((prev) => {
+        const remaining = prev.filter((f) => f.id !== fieldId);
+        if (activeFieldId === fieldId) {
+          setActiveFieldId(remaining[0]?.id || '');
+        }
+        return remaining;
+      });
+      setTasks((prev) => prev.filter((tk) => tk.fieldId !== fieldId));
+      setFeedbackHistory((prev) => prev.filter((fb) => fb.fieldId !== fieldId));
+      setPlansByPlotId((prev) => {
+        const copy = { ...prev };
+        delete copy[fieldId];
+        return copy;
+      });
+      return;
+    }
     await FirestoreService.deleteField(authUser.uid, fieldId);
   };
 
@@ -588,12 +738,57 @@ export default function App() {
     status: FarmTask['status'],
     note?: string
   ) => {
-    if (!authUser) return;
+    if (!authUser) {
+      setTasks((prev) =>
+        prev.map((tk) =>
+          tk.id === taskId ? { ...tk, status, ...(note ? { farmerNote: note } : {}) } : tk
+        )
+      );
+      return;
+    }
     await FirestoreService.updateTaskStatus(authUser.uid, taskId, status, note);
   };
 
   const handleAddFeedback = async (feedback: Omit<FeedbackRecord, 'id' | 'timestamp'>) => {
-    if (!authUser || !activeField || activeField.isSharedWithMe) return;
+    if (!activeField || activeField.isSharedWithMe) return;
+    if (!authUser) {
+      const localFb: FeedbackRecord = {
+        ...feedback,
+        id: `DEMO_FB_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      };
+      setFeedbackHistory((prev) => [localFb, ...prev]);
+      if (
+        feedback.feedbackType === 'soil_still_dry' ||
+        feedback.feedbackType === 'soil_too_wet'
+      ) {
+        const adjustment =
+          feedback.feedbackType === 'soil_still_dry'
+            ? t(
+                'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
+                'Field dried faster than forecast: Increased irrigation reminder sensitivity'
+              )
+            : t(
+                'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
+                'Field retained moisture / drained slowly: Prioritized drainage checks'
+              );
+        setFields((prev) =>
+          prev.map((f) =>
+            f.id === activeField.id
+              ? {
+                  ...f,
+                  adaptiveMemory: {
+                    ...f.adaptiveMemory,
+                    soilAdjustment: adjustment,
+                    lastFeedbackDate: new Date().toISOString().slice(0, 10),
+                  },
+                }
+              : f
+          )
+        );
+      }
+      return;
+    }
     await FirestoreService.createFeedback(authUser.uid, feedback);
     if (
       feedback.feedbackType === 'soil_still_dry' ||
@@ -621,7 +816,7 @@ export default function App() {
   };
 
   const handleInstantFeedback = (type: FeedbackType, note?: string) => {
-    if (!activeField || !authUser || activeField.isSharedWithMe) return;
+    if (!activeField || activeField.isSharedWithMe) return;
     handleAddFeedback({
       fieldId: activeField.id,
       feedbackType: type,
@@ -649,7 +844,7 @@ export default function App() {
     input: FieldCheckInInput,
     addFixesToTasks: boolean
   ): Promise<FieldCheckInDiagnostic | null> => {
-    if (!activeField || !authUser || activeField.isSharedWithMe) return null;
+    if (!activeField || activeField.isSharedWithMe) return null;
 
     const currentBrief =
       ruleBrief || analyzeFieldAgronomy(activeField, weather, feedbackHistory, lang);
@@ -665,6 +860,50 @@ export default function App() {
         : input.predictionOutcome === 'on_track'
         ? 'helpful'
         : 'not_suitable';
+
+    if (!authUser) {
+      const localFb: FeedbackRecord = {
+        id: `DEMO_FB_${Date.now()}`,
+        fieldId: activeField.id,
+        timestamp: new Date().toISOString(),
+        feedbackType,
+        userComment: input.note,
+        systemActionTaken: `${diagnostic.verdictTitle} — ${diagnostic.rootCauseExplanation}`,
+        predictionOutcome: input.predictionOutcome,
+        observedMoisture: input.observedMoisture,
+        observedCropHealth: input.observedCropHealth,
+        recommendedFixes: diagnostic.fixes,
+        appliedToProfile: true,
+      };
+      setFeedbackHistory((prev) => [localFb, ...prev]);
+      setFields((prev) =>
+        prev.map((f) =>
+          f.id === activeField.id
+            ? {
+                ...f,
+                crop: {
+                  ...f.crop,
+                  currentStage: input.updatedStage || f.crop.currentStage,
+                  healthStatus: diagnostic.recommendedHealthStatus,
+                },
+                adaptiveMemory: {
+                  ...f.adaptiveMemory,
+                  soilAdjustment: diagnostic.soilAdjustmentNote,
+                  irrigationSensitivity: diagnostic.irrigationSensitivity,
+                  lastFeedbackDate: new Date().toISOString().slice(0, 10),
+                  lastPredictionOutcome: input.predictionOutcome,
+                  lastCheckInSummary: diagnostic.rootCauseExplanation,
+                  planFixRecommendations: diagnostic.fixes,
+                },
+              }
+            : f
+        )
+      );
+      if (addFixesToTasks && diagnostic.suggestedTasks.length > 0) {
+        setTasks((prev) => [...diagnostic.suggestedTasks, ...prev]);
+      }
+      return diagnostic;
+    }
 
     await FirestoreService.createFeedback(authUser.uid, {
       fieldId: activeField.id,
@@ -704,7 +943,28 @@ export default function App() {
   };
 
   const handleMapCoordinateSelected = async (lat: number, lon: number) => {
-    if (!activeField || !authUser || activeField.isSharedWithMe) return;
+    if (!activeField || activeField.isSharedWithMe) return;
+    if (!authUser) {
+      const { cell, distanceKm } = findNearestNasaGrid(lat, lon);
+      setFields((prev) =>
+        prev.map((f) =>
+          f.id === activeField.id
+            ? {
+                ...f,
+                lat,
+                lon,
+                nasaGrid: {
+                  cellId: cell.cellId,
+                  lat: cell.lat,
+                  lon: cell.lon,
+                  distanceKm,
+                },
+              }
+            : f
+        )
+      );
+      return;
+    }
     const updated = {
       ...activeField,
       lat,
@@ -714,7 +974,7 @@ export default function App() {
   };
 
   const handleSaveEarthMetrics = async (snapshot: EarthEnvironmentSnapshot) => {
-    if (!activeField || !authUser || activeField.isSharedWithMe) return;
+    if (!activeField || activeField.isSharedWithMe) return;
     const updated: FieldProfile = {
       ...activeField,
       adaptiveMemory: {
@@ -722,6 +982,10 @@ export default function App() {
         earthMetrics: snapshot,
       },
     };
+    if (!authUser) {
+      setFields((prev) => prev.map((f) => (f.id === activeField.id ? updated : f)));
+      return;
+    }
     await Promise.all([
       FirestoreService.updateField(authUser.uid, updated),
       FirestoreService.saveEarthMetricsSnapshot(authUser.uid, activeField.id, snapshot),
@@ -732,14 +996,25 @@ export default function App() {
     plotId: string,
     plan: Omit<PlotPlanRecord, 'id' | 'ownerId' | 'plotId' | 'updatedAt'>
   ) => {
-    if (!authUser) return;
+    if (!authUser) {
+      setPlansByPlotId((prev) => ({
+        ...prev,
+        [plotId]: {
+          id: plotId,
+          ownerId: 'DEMO_FARMER',
+          plotId,
+          ...plan,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      return;
+    }
     await FirestoreService.savePlotPlan(authUser.uid, plotId, plan);
   };
 
   const handleSelectCalendarCropKey = async (plotId: string, cropKey: string) => {
-    if (!authUser) return;
     const existing = plansByPlotId[plotId];
-    await FirestoreService.savePlotPlan(authUser.uid, plotId, {
+    const nextPlanPayload: Omit<PlotPlanRecord, 'id' | 'ownerId' | 'plotId' | 'updatedAt'> = {
       priorities: existing?.priorities?.length
         ? existing.priorities
         : ['water_saving', 'nitrogen_fixing', 'pest_break', 'erosion_control'],
@@ -753,7 +1028,202 @@ export default function App() {
       rejectedTitles: existing?.rejectedTitles || [],
       lastRejectionNote: existing?.lastRejectionNote,
       calendarCropKey: cropKey,
+    };
+    if (!authUser) {
+      setPlansByPlotId((prev) => ({
+        ...prev,
+        [plotId]: {
+          id: plotId,
+          ownerId: 'DEMO_FARMER',
+          plotId,
+          ...nextPlanPayload,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      return;
+    }
+    await FirestoreService.savePlotPlan(authUser.uid, plotId, nextPlanPayload);
+  };
+
+  const handleImportReport = async (report: ImportedFarmReport) => {
+    const { cell, distanceKm } = findNearestNasaGrid(report.field.lat, report.field.lon);
+    const normalizedField: FieldProfile = {
+      ...report.field,
+      ownerId: authUser?.uid || report.field.ownerId || 'DEMO_FARMER',
+      isSharedWithMe: false,
+      nasaGrid: report.field.nasaGrid || {
+        cellId: cell.cellId,
+        lat: cell.lat,
+        lon: cell.lon,
+        distanceKm,
+      },
+    };
+
+    if (!authUser) {
+      setFields((prev) => {
+        const exists = prev.some((f) => f.id === normalizedField.id);
+        return exists
+          ? prev.map((f) => (f.id === normalizedField.id ? normalizedField : f))
+          : [normalizedField, ...prev];
+      });
+      if (report.feedbacks?.length) {
+        setFeedbackHistory((prev) => {
+          const existingIds = new Set(prev.map((x) => x.id));
+          const incoming = report.feedbacks
+            .filter((x) => !existingIds.has(x.id))
+            .map((x) => ({ ...x, fieldId: normalizedField.id }));
+          return [...incoming, ...prev];
+        });
+      }
+      if (report.tasks?.length) {
+        setTasks((prev) => {
+          const existingIds = new Set(prev.map((x) => x.id));
+          const incoming = report.tasks
+            .filter((x) => !existingIds.has(x.id))
+            .map((x) => ({ ...x, fieldId: normalizedField.id }));
+          return [...incoming, ...prev];
+        });
+      }
+      if (report.weather) {
+        setWeather(report.weather);
+      }
+      setActiveFieldId(normalizedField.id);
+      setShareBanner({
+        type: 'ok',
+        text: t(
+          `Đã nhập hồ sơ ruộng "${normalizedField.name}" để xem ngoại tuyến.`,
+          `Imported field report "${normalizedField.name}" for offline review.`
+        ),
+      });
+      return;
+    }
+
+    const { id: _ignoredId, nasaGrid: _ignoredGrid, isSharedWithMe: _s, ...creatable } =
+      normalizedField;
+    const created = await FirestoreService.createField(authUser.uid, creatable);
+    if (report.feedbacks?.length) {
+      for (const fb of report.feedbacks.slice(0, 20)) {
+        const { id: _id, timestamp: _ts, fieldId: _fid, ...fbData } = fb;
+        await FirestoreService.createFeedback(authUser.uid, {
+          ...fbData,
+          fieldId: created.id,
+        }).catch(() => {});
+      }
+    }
+    if (report.tasks?.length) {
+      const remappedTasks = report.tasks.slice(0, 20).map((tk) => ({
+        ...tk,
+        fieldId: created.id,
+      }));
+      await FirestoreService.createTasks(authUser.uid, remappedTasks).catch(() => {});
+    }
+    setActiveFieldId(created.id);
+    setShareBanner({
+      type: 'ok',
+      text: t(
+        `Đã khôi phục hồ sơ ruộng "${created.name}" vào tài khoản Cloud của bạn.`,
+        `Restored "${created.name}" into your Cloud account.`
+      ),
     });
+  };
+
+  const handleCreateCommunityPost = async (input: {
+    province: string;
+    district?: string;
+    cropName?: string;
+    category: CommunityCategory;
+    title: string;
+    content: string;
+  }) => {
+    if (!authUser) {
+      const localPost: CommunityPost = {
+        id: `DEMO_POST_${Date.now()}`,
+        authorUid: 'DEMO_FARMER',
+        authorName: t('Nông hộ Demo', 'Demo Farmer'),
+        province: input.province,
+        district: input.district,
+        cropName: input.cropName,
+        category: input.category,
+        title: input.title,
+        content: input.content,
+        likesCount: 0,
+        upvotedUids: [],
+        replies: [],
+        createdAt: new Date().toISOString(),
+        isDemoSeed: true,
+      };
+      setCommunityPosts((prev) => {
+        const next = [localPost, ...prev];
+        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
+        return next;
+      });
+      return;
+    }
+    await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, input);
+  };
+
+  const handleAddCommunityReply = async (postId: string, content: string) => {
+    const target = communityPosts.find((p) => p.id === postId);
+    if (!authUser || target?.isDemoSeed) {
+      const replyAuthorUid = authUser?.uid || 'DEMO_FARMER';
+      const replyAuthorName = authUser?.displayName || t('Nông hộ Demo', 'Demo Farmer');
+      setCommunityPosts((prev) => {
+        const next = prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                replies: [
+                  ...(p.replies || []),
+                  {
+                    id: `REP_${Date.now()}`,
+                    authorUid: replyAuthorUid,
+                    authorName: replyAuthorName,
+                    authorProvince: activeField?.province,
+                    content,
+                    createdAt: new Date().toISOString(),
+                  },
+                ],
+              }
+            : p
+        );
+        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
+        return next;
+      });
+      return;
+    }
+    await FirestoreService.addCommunityReply(
+      postId,
+      authUser.uid,
+      authUser.displayName,
+      activeField?.province,
+      content
+    );
+  };
+
+  const handleToggleCommunityUpvote = async (postId: string) => {
+    const target = communityPosts.find((p) => p.id === postId);
+    if (!authUser || target?.isDemoSeed) {
+      const actorUid = authUser?.uid || 'DEMO_FARMER';
+      setCommunityPosts((prev) => {
+        const next = prev.map((p) => {
+          if (p.id !== postId) return p;
+          const upvoted = (p.upvotedUids || []).includes(actorUid);
+          const nextUids = upvoted
+            ? (p.upvotedUids || []).filter((id) => id !== actorUid)
+            : [...(p.upvotedUids || []), actorUid];
+          const delta = upvoted ? -1 : 1;
+          return {
+            ...p,
+            upvotedUids: nextUids,
+            likesCount: Math.max(0, (p.likesCount || 0) + delta),
+          };
+        });
+        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
+        return next;
+      });
+      return;
+    }
+    await FirestoreService.toggleCommunityUpvote(postId, authUser.uid);
   };
 
   const renderMissingFieldPrompt = () => (
@@ -826,10 +1296,6 @@ export default function App() {
         activeField={activeField}
         onSelectField={handleSelectField}
         onOpenNewFieldModal={() => {
-          if (!authUser) {
-            setAuthModalOpen(true);
-            return;
-          }
           setWizardOpen(true);
           navigateToTab('fields');
         }}
@@ -837,6 +1303,42 @@ export default function App() {
         onSignIn={async () => setAuthModalOpen(true)}
         onSignOut={handleSignOut}
       />
+
+      {isDemoMode && (
+        <div className="max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-3">
+          <div className="p-2.5 sm:p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-start sm:items-center gap-2 text-emerald-950">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-700 text-white font-bold text-[10px] shrink-0 mt-0.5 sm:mt-0">
+                {t('Chế độ Demo', 'Demo Mode')}
+              </span>
+              <span className="leading-relaxed">
+                {t(
+                  'Trải nghiệm đầy đủ bản đồ, dữ liệu NASA 25 năm, Trợ lý AI & Cộng đồng không cần đăng nhập (lưu tạm trên máy).',
+                  'Full access to map, 25-yr NASA data, AI Advisor & Community without sign-in (saved locally).'
+                )}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleResetDemo}
+                className="px-2.5 py-1.5 bg-white hover:bg-stone-50 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+              >
+                <RotateCcw className="w-3 h-3" />
+                {t('Đặt lại mẫu', 'Reset Demo')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthModalOpen(true)}
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+              >
+                <LogIn className="w-3 h-3" />
+                {t('Đăng nhập lưu Cloud', 'Sign In to Cloud')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {authMessage && (
         <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
@@ -961,10 +1463,6 @@ export default function App() {
             userName={authUser?.displayName}
             onOpenAuthModal={() => setAuthModalOpen(true)}
             onOpenNewFieldWizard={() => {
-              if (!authUser) {
-                setAuthModalOpen(true);
-                return;
-              }
               setWizardOpen(true);
               navigateToTab('fields');
             }}
@@ -989,6 +1487,8 @@ export default function App() {
               onSendFeedback={handleInstantFeedback}
               onTaskCompleted={() => {}}
               onSaveEarthMetrics={handleSaveEarthMetrics}
+              onRefreshWeather={handleRefreshWeather}
+              weatherRefreshing={weatherRefreshing}
             />
           ) : (
             renderMissingFieldPrompt()
@@ -1084,15 +1584,29 @@ export default function App() {
             <FeedbackHistoryView
               activeField={activeField}
               feedbackHistory={feedbackHistory}
+              tasks={tasks}
               weather={weather}
               brief={ruleBrief}
               onAddFeedback={handleAddFeedback}
               onSubmitCheckIn={handleFieldCheckInUpdate}
               onNavigateTab={navigateToTab}
+              onImportReport={handleImportReport}
             />
           ) : (
             renderMissingFieldPrompt()
           ))}
+
+        {!authUser?.isAdmin && activeTab === 'community' && (
+          <CommunityForumView
+            activeField={activeField}
+            authUser={authUser}
+            isDemoMode={isDemoMode}
+            posts={communityPosts}
+            onCreatePost={handleCreateCommunityPost}
+            onAddReply={handleAddCommunityReply}
+            onToggleUpvote={handleToggleCommunityUpvote}
+          />
+        )}
 
         {authUser?.isAdmin && (
           <AdminDataManagementView
@@ -1201,16 +1715,32 @@ export default function App() {
         </nav>
       )}
 
-      {/* Minimal Footer */}
+      {/* Attribution Footer (NASA Space Apps Challenge + AI Transparency) */}
       <footer className="bg-white border-t border-stone-200 py-5 pb-24 lg:pb-5 px-4 text-xs text-stone-500 mt-10">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span className="font-semibold text-stone-700">CropCast</span>
-          <span>
-            {t(
-              'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 26 năm (2001–2026) & thời tiết thực địa',
-              'Sustainable farming & crop rotation powered by 26-year (2001–2026) climate & field weather data'
-            )}
-          </span>
+        <div className="max-w-7xl mx-auto flex flex-col gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="font-semibold text-stone-700">CropCast</span>
+            <span>
+              {t(
+                'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 25+ năm (2001–2026) & thời tiết thực địa',
+                'Sustainable farming & crop rotation powered by 25+ year (2001–2026) climate & field weather data'
+              )}
+            </span>
+          </div>
+          <div className="pt-2 border-t border-stone-100 text-[11px] text-stone-400 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+            <span>
+              {t(
+                'Nguồn dữ liệu vệ tinh & khí tượng: NASA POWER, SMAP, GPM, PRISM, OCO-2/3, GRACE-FO, GHG Center STAC & Open-Meteo.',
+                'Earth Observation & Weather Sources: NASA POWER, SMAP, GPM, PRISM, OCO-2/3, GRACE-FO, GHG Center STAC & Open-Meteo.'
+              )}
+            </span>
+            <span>
+              {t(
+                'Minh bạch AI: Phân tích khuyến nghị có hỗ trợ AI/quy tắc nông học — kiểm chứng thực địa trước khi quyết định.',
+                'AI Transparency: Recommendations use AI & agronomic models — verify on-field before operational action.'
+              )}
+            </span>
+          </div>
         </div>
       </footer>
     </div>

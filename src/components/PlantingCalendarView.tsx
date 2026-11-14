@@ -18,51 +18,41 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
   onSelectCropKey,
 }) => {
   const { lang, t } = useLanguage();
-  const [selectedCropKey, setSelectedCropKey] = useState<string>(savedCropKey || 'active');
-  const [selectedDetail, setSelectedDetail] = useState<PlantingRiskEvaluation | null>(null);
-
-  useEffect(() => {
-    setSelectedCropKey(savedCropKey || 'active');
-    setSelectedDetail(null);
-  }, [activeField.id, savedCropKey]);
-
-  const cropOptions = [
+  const quickCrops = [
     {
       id: 'active',
       label: getPlantDisplayName(activeField.crop.name, lang),
       queryValue: activeField.crop.name,
     },
-    {
-      id: 'rice',
-      label: t('Lúa (ST25 / Đài Thơm)', 'Rice (ST25 / Dai Thom)'),
-      queryValue: t('Lúa (ST25 / Đài Thơm)', 'Rice (ST25 / Dai Thom)'),
-    },
-    {
-      id: 'veg',
-      label: t('Rau cải xanh vụ đông', 'Winter Leafy Greens'),
-      queryValue: t('Rau cải xanh vụ đông', 'Winter Leafy Greens'),
-    },
-    {
-      id: 'maize',
-      label: t('Ngô lai F1 (Bắp)', 'Maize / Corn'),
-      queryValue: t('Ngô lai F1 (Bắp)', 'Maize / Corn'),
-    },
-    {
-      id: 'legume',
-      label: t('Đậu tương / Lạc (Họ Đậu)', 'Soybean / Peanut (Legume)'),
-      queryValue: t('Đậu tương / Lạc (Họ Đậu)', 'Soybean / Peanut (Legume)'),
-    },
-  ].filter(
-    (opt, idx, arr) =>
-      idx === 0 ||
-      opt.label.toLowerCase() !== arr[0].label.toLowerCase()
-  );
+    { id: 'rice_st25', label: t('Lúa ST25', 'ST25 Rice'), queryValue: 'Lúa ST25' },
+    { id: 'peanut_l14', label: t('Lạc L14', 'Peanut L14'), queryValue: 'Lạc L14' },
+    { id: 'veg', label: t('Rau cải xanh', 'Leafy Greens'), queryValue: 'Rau cải xanh' },
+    { id: 'maize', label: t('Ngô lai F1', 'Hybrid Maize'), queryValue: 'Ngô lai F1' },
+    { id: 'watermelon', label: t('Dưa hấu', 'Watermelon'), queryValue: 'Dưa hấu' },
+    { id: 'tomato', label: t('Cà chua', 'Tomato'), queryValue: 'Cà chua' },
+  ];
 
-  const selectedOption =
-    cropOptions.find((o) => o.id === selectedCropKey) || cropOptions[0];
+  const [customCropInput, setCustomCropInput] = useState<string>(() => {
+    if (!savedCropKey || savedCropKey === 'active') return activeField.crop.name;
+    const match = quickCrops.find((c) => c.id === savedCropKey);
+    return match ? match.queryValue : savedCropKey;
+  });
+  const [selectedDetail, setSelectedDetail] = useState<PlantingRiskEvaluation | null>(null);
+
+  useEffect(() => {
+    if (!savedCropKey || savedCropKey === 'active') {
+      setCustomCropInput(activeField.crop.name);
+    } else {
+      const found = quickCrops.find((c) => c.id === savedCropKey);
+      setCustomCropInput(found ? found.queryValue : savedCropKey);
+    }
+    setSelectedDetail(null);
+  }, [activeField.id, activeField.crop.name, savedCropKey]);
+
+  const effectiveCropQuery = customCropInput.trim() || activeField.crop.name;
 
   const evaluations = evaluatePlantingCalendar(
-    selectedOption.queryValue,
+    effectiveCropQuery,
     activeField.soilType,
     activeField.lat,
     lang
@@ -102,52 +92,83 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner */}
-      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-emerald-600" />
-            {t(
-              'Đánh giá rủi ro thời vụ theo dữ liệu lịch sử (2001–2026)',
-              'Historical Seasonal Risk Assessment (2001–2026)'
-            )}
+      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              {t(
+                'Đánh giá rủi ro thời vụ theo dữ liệu lịch sử (2001–2026)',
+                'Historical Seasonal Risk Assessment (2001–2026)'
+              )}
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
+              {t(
+                'Lịch Thời Vụ Gieo Trồng Theo Dữ Liệu Khí Hậu',
+                'Climate-Informed Planting Calendar'
+              )}
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
+              {t(
+                `Tổng hợp dữ liệu quan trắc từ 2001–2026 tại khu vực ${getLocalizedRegionName(activeField.province, 'vi')} để ước tính tỷ lệ thuận lợi hay gặp bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
+                `Based on 2001–2026 climate records in ${getLocalizedRegionName(activeField.province, 'en')}, evaluating favorable odds across sensitive crop growth windows.`
+              )}
+            </p>
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
-            {t(
-              'Lịch Thời Vụ Gieo Trồng Theo Dữ Liệu Khí Hậu',
-              'Climate-Informed Planting Calendar'
-            )}
-          </h1>
-          <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-            {t(
-              `Tổng hợp dữ liệu quan trắc từ 2001–2026 tại khu vực ${getLocalizedRegionName(activeField.province, 'vi')} để ước tính tỷ lệ thuận lợi hay gặp bất lợi trong các giai đoạn sinh trưởng nhạy cảm.`,
-              `Based on 2001–2026 climate records in ${getLocalizedRegionName(activeField.province, 'en')}, evaluating favorable odds across sensitive crop growth windows.`
-            )}
-          </p>
+
+          {/* Free-text Crop & Variety Input */}
+          <div className="w-full md:w-72 shrink-0 space-y-1">
+            <label className="text-xs text-stone-700 font-bold block">
+              {t('Nhập cây hoặc giống cần tra lịch:', 'Type any crop or variety:')}
+            </label>
+            <input
+              type="text"
+              value={customCropInput}
+              onChange={(e) => {
+                const nextVal = e.target.value;
+                setCustomCropInput(nextVal);
+                setSelectedDetail(null);
+              }}
+              onBlur={() => {
+                const cleaned = customCropInput.trim();
+                if (cleaned && onSelectCropKey && !activeField.isSharedWithMe) {
+                  onSelectCropKey(activeField.id, cleaned.slice(0, 40));
+                }
+              }}
+              placeholder={t('VD: Lúa ST25, Lạc L14, Dưa hấu...', 'e.g. ST25 Rice, Peanut L14, Tomato...')}
+              className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white font-bold text-base sm:text-xs text-stone-900 shadow-2xs focus:outline-emerald-600"
+            />
+          </div>
         </div>
 
-        {/* Crop Selector */}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-stone-500 font-medium">
-            {t('Chọn cây trồng:', 'Select crop:')}
+        {/* Quick Preset Chips */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-stone-100">
+          <span className="text-[11px] font-semibold text-stone-500 mr-1">
+            {t('Chọn nhanh:', 'Quick pick:')}
           </span>
-          <select
-            value={selectedOption.id}
-            onChange={(e) => {
-              const nextKey = e.target.value;
-              setSelectedCropKey(nextKey);
-              setSelectedDetail(null);
-              if (onSelectCropKey && !activeField.isSharedWithMe) {
-                onSelectCropKey(activeField.id, nextKey);
-              }
-            }}
-            className="px-3 py-2 border border-stone-300 rounded-xl bg-white font-bold text-xs text-stone-900 shadow-2xs"
-          >
-            {cropOptions.map((c) => (
-              <option key={c.id} value={c.id}>
+          {quickCrops.map((c) => {
+            const isSelected = effectiveCropQuery.toLowerCase() === c.queryValue.toLowerCase();
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  setCustomCropInput(c.queryValue);
+                  setSelectedDetail(null);
+                  if (onSelectCropKey && !activeField.isSharedWithMe) {
+                    onSelectCropKey(activeField.id, c.queryValue.slice(0, 40));
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                  isSelected
+                    ? 'bg-emerald-800 text-white border-emerald-800'
+                    : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                }`}
+              >
                 {c.label}
-              </option>
-            ))}
-          </select>
+              </button>
+            );
+          })}
         </div>
       </div>
 

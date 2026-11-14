@@ -648,74 +648,59 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   'Each field belongs privately to the account that created it. You can share view access via link or username/email.'
                 )
               : t(
-                  'Vui lòng đăng nhập tài khoản riêng của bạn để tạo, lưu trữ riêng tư và chia sẻ các thửa ruộng của mình.',
-                  'Sign in to create, store privately, and share your field profiles.'
+                  'Chế độ Demo đang bật: bạn có thể tạo, sửa, xóa thửa ruộng và thử nghiệm mọi tính năng ngay. Đăng nhập bất kỳ lúc nào để đồng bộ lên Cloud.',
+                  'Demo Mode active: create, edit, and test fields right away. Sign in anytime to sync your plots to Cloud Firestore.'
                 )}
           </p>
         </div>
-        {isAuthenticated ? (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => {
               resetWizardToBlank();
               setWizardOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
           >
             <Plus className="w-4 h-4" /> {t('Tạo hồ sơ thửa ruộng mới', 'Add New Field')}
           </button>
-        ) : (
-          <button
-            onClick={() => onOpenAuthModal?.()}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-xs self-start sm:self-auto"
-          >
-            <LogIn className="w-4 h-4" /> {t('Đăng nhập / Đăng ký', 'Sign In / Sign Up')}
-          </button>
-        )}
+          {!isAuthenticated && (
+            <button
+              onClick={() => onOpenAuthModal?.()}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+            >
+              <LogIn className="w-4 h-4" /> {t('Đăng nhập lưu Cloud', 'Sign In to Sync')}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Empty State when unauthenticated or user has no saved fields yet */}
+      {/* Empty State when user has no fields */}
       {fields.length === 0 ? (
         <div className="bg-white rounded-2xl border border-stone-200 p-8 text-center space-y-4 shadow-xs">
           <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
-            {isAuthenticated ? <MapPin className="w-7 h-7" /> : <ShieldCheck className="w-7 h-7" />}
+            <MapPin className="w-7 h-7" />
           </div>
           <div className="max-w-md mx-auto space-y-1.5">
             <h2 className="text-lg font-bold text-stone-900">
-              {isAuthenticated
-                ? t('Chưa có thửa ruộng nào trong tài khoản', 'No fields saved yet')
-                : t('Hồ sơ ruộng được bảo mật theo từng nông dân', 'Field profiles are private to each farmer')}
+              {t('Chưa có thửa ruộng nào', 'No fields saved yet')}
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed">
-              {isAuthenticated
-                ? t(
-                    'Hãy thêm vị trí thửa ruộng thực tế của bạn bằng GPS hoặc chạm trên ảnh vệ tinh để xem điểm khí hậu gần nhất và gợi ý luân canh.',
-                    'Add your field using GPS or by tapping the satellite map to link climate grids and rotation advice.'
-                  )
-                : t(
-                    'CropCast không hiển thị công khai dữ liệu ruộng của người khác. Hãy đăng nhập hoặc tạo tài khoản để bắt đầu tạo thửa ruộng riêng của bạn.',
-                    'CropCast does not show other farmers’ fields publicly. Sign in or sign up to create your own field.'
-                  )}
+              {t(
+                'Hãy thêm vị trí thửa ruộng thực tế của bạn bằng GPS hoặc chạm trên ảnh vệ tinh để xem điểm khí hậu gần nhất và gợi ý luân canh.',
+                'Add your field using GPS or by tapping the satellite map to link climate grids and rotation advice.'
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            {isAuthenticated ? (
-              <button
-                onClick={() => {
-                  resetWizardToBlank();
-                  setWizardOpen(true);
-                }}
-                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" /> {t('Thêm thửa ruộng đầu tiên', 'Add Your First Field')}
-              </button>
-            ) : (
-              <button
-                onClick={() => onOpenAuthModal?.()}
-                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
-              >
-                <LogIn className="w-4 h-4" /> {t('Đăng nhập / Tạo tài khoản ngay', 'Sign In / Sign Up')}
-              </button>
-            )}
+            <button
+              onClick={() => {
+                resetWizardToBlank();
+                setWizardOpen(true);
+              }}
+              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> {t('Thêm thửa ruộng đầu tiên', 'Add Your First Field')}
+            </button>
           </div>
         </div>
       ) : (
@@ -887,6 +872,10 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              if (!isAuthenticated) {
+                                onOpenAuthModal?.();
+                                return;
+                              }
                               setShareModalFieldId(f.id);
                               setShareFeedback(null);
                               setShareEmailInput('');

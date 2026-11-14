@@ -42,6 +42,8 @@ interface DashboardViewProps {
   onSendFeedback: (type: FeedbackType, note?: string) => void;
   onTaskCompleted: (taskTitle: string) => void;
   onSaveEarthMetrics?: (snapshot: EarthEnvironmentSnapshot) => Promise<void> | void;
+  onRefreshWeather?: () => Promise<void> | void;
+  weatherRefreshing?: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -55,6 +57,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSendFeedback,
   onTaskCompleted,
   onSaveEarthMetrics,
+  onRefreshWeather,
+  weatherRefreshing = false,
 }) => {
   const { lang, t } = useLanguage();
   const { isSimpleMode, setViewMode } = useViewMode();
@@ -445,7 +449,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="font-semibold text-stone-800">
               {t('Thời tiết hôm nay', "Today's Weather")}
             </span>
-            <Sun className="w-4 h-4 text-amber-500" />
+            <div className="flex items-center gap-1.5">
+              {onRefreshWeather && (
+                <button
+                  type="button"
+                  disabled={weatherRefreshing}
+                  onClick={() => onRefreshWeather()}
+                  title={t('Làm mới thời tiết thực địa', 'Refresh live weather')}
+                  className="p-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 disabled:opacity-50 cursor-pointer transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${weatherRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+              )}
+              <Sun className="w-4 h-4 text-amber-500" />
+            </div>
           </div>
 
           <div>
@@ -459,6 +476,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="text-[11px] text-stone-400 mt-1">
               {t('Cập nhật:', 'Updated:')} {powerUpdatedLabel}
+              {weather.fromCache && ` · ${t('Bộ nhớ đệm', 'Cached')}`}
             </div>
           </div>
 

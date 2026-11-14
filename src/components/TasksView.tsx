@@ -30,31 +30,50 @@ function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
   let title = task.titleEn || task.title;
   if (!task.titleEn) {
     title = title
-      .replace('Thăm đồng định kỳ vào buổi sáng', 'Routine morning field inspection')
-      .replace('Thăm đồng định kỳ vào buổi chiều', 'Routine afternoon field inspection')
-      .replace('Duy trì chế độ tưới tiết kiệm theo nhu cầu thực', 'Maintain precision water-saving schedule')
-      .replace('Khơi thông rãnh thoát nước ngay đầu bờ', 'Clear edge drainage furrows immediately')
-      .replace('Quan sát mặt dưới lá và gốc để phát hiện đốm nấm ẩm', 'Scout undersides of leaves for fungal spots')
-      .replace('Tưới nước bổ sung vào sáng sớm (05:30 - 07:00)', 'Water lightly early morning (05:30–07:00)')
-      .replace('Tủ ẩm gốc hoặc phủ rơm rạ giữ nước quanh luống', 'Apply organic straw mulch to cut evaporation');
+      .replace(/Thăm đồng định kỳ vào buổi sáng/gi, 'Routine morning field inspection')
+      .replace(/Thăm đồng định kỳ vào buổi chiều/gi, 'Routine afternoon field inspection')
+      .replace(/Thăm đồng định kỳ vào\s*([a-zA-ZÀ-ỹ\s]+)/gi, 'Routine field inspection ($1)')
+      .replace(/Duy trì chế độ tưới tiết kiệm theo nhu cầu thực/gi, 'Maintain precision water-saving schedule')
+      .replace(/Khơi thông rãnh thoát nước ngay đầu bờ/gi, 'Clear edge drainage furrows immediately')
+      .replace(/Quan sát mặt dưới lá và gốc để phát hiện đốm nấm ẩm/gi, 'Scout undersides of leaves for fungal spots')
+      .replace(/Tưới nước bổ sung vào sáng sớm \(05:30\s*-\s*07:00\)/gi, 'Water lightly early morning (05:30–07:00)')
+      .replace(/Tủ ẩm gốc hoặc phủ rơm rạ giữ nước quanh luống/gi, 'Apply organic straw mulch to cut evaporation')
+      .replace(/Duy trì độ ẩm đất ổn định 60\s*-\s*70%/gi, 'Maintain steady 60–70% root-zone moisture')
+      .replace(/Kiểm tra mật độ sâu\/bọ trĩ\/rầy phấn trắng/gi, 'Scout for hoppers, thrips, and panicle pests')
+      .replace(/Cảnh báo nước ngầm: Chuyển tưới tiết kiệm \/ ngập–khô xen kẽ/gi, 'Groundwater Alert: Switch to precision/AWD watering')
+      .replace(/Kiểm tra diệp lục lá & sức khỏe tán \(Quang hợp thấp\)/gi, 'Check leaf chlorophyll & canopy vitality (Low photosynthesis index)')
+      .replace(/Giảm phát thải CH₄\/N₂O: Áp dụng rút nước giữa vụ & chia nhỏ đạm/gi, 'Cut CH₄/N₂O emissions: Apply AWD drainage & split fertilizer')
+      .replace(/^Tưới bổ sung nhẹ vào sáng sớm mai \(([^)]+)\) để thấm sâu 10–15 cm vùng rễ cho diện tích ([^ ]+) ha\.?$/i, 'Irrigate gently early tomorrow ($1) to moisten 10–15 cm root zone across $2 ha.')
+      .replace(/^Ngừng tưới hoàn toàn ít nhất 48–72 giờ cho đến khi nắm đất kiểm tra không còn rỉ nước\.?$/i, 'Pause irrigation for 48–72h until squeezed soil no longer drips water.')
+      .replace(/^Khơi thông rãnh đầu bờ và xẻ rãnh xương cá ở góc trũng để rút hết nước đọng trong 12 giờ\.?$/i, 'Clear outlet ditches and cut shallow cross-furrows to drain standing water within 12h.');
   }
 
   let scheduledTime = task.scheduledTimeEn || task.scheduledTime;
   if (!task.scheduledTimeEn) {
     scheduledTime = scheduledTime
-      .replace('Sáng mai lúc 06:30', 'Tomorrow 06:30 AM')
-      .replace('Sáng sớm mai lúc 06:00', 'Tomorrow 06:00 AM')
-      .replace('Chiều nay lúc 16:30', 'Today 04:30 PM')
-      .replace('Chiều mai lúc 16:30', 'Tomorrow 04:30 PM')
-      .replace('Trong 24 giờ tới', 'Within 24 hours');
+      .replace(/Sáng sớm mai lúc\s*(\d{2}:\d{2})/gi, 'Tomorrow $1 AM')
+      .replace(/Sáng mai lúc\s*(\d{2}:\d{2})/gi, 'Tomorrow $1 AM')
+      .replace(/Sáng nay lúc\s*(\d{2}:\d{2})/gi, 'Today $1 AM')
+      .replace(/Chiều nay lúc\s*(\d{2}:\d{2})/gi, 'Today $1 PM')
+      .replace(/Chiều mai lúc\s*(\d{2}:\d{2})/gi, 'Tomorrow $1 PM')
+      .replace(/Trong 24 giờ tới/gi, 'Within 24 hours')
+      .replace(/Hôm nay/gi, 'Today')
+      .replace(/Ngày mai/gi, 'Tomorrow');
   }
 
   let reason = task.reasonEn || task.reason;
   if (!task.reasonEn) {
     reason = reason
-      .replace('Theo dõi sinh trưởng cây và nhổ cỏ dại cạnh tranh dinh dưỡng', 'Monitor canopy growth, weeds, and basal moisture')
-      .replace(/^Độ ẩm rễ đạt (\d+%), chưa cần tưới ồ ạt$/, 'Root moisture at $1%; avoid over-irrigation')
-      .replace(/^Khắc phục sai lệch thực địa \(đất: ([^·]+) · cây: ([^)]+)\)$/, 'Corrective step from field update ($1 soil · $2 crop)');
+      .replace(/Theo dõi sinh trưởng cây và nhổ cỏ dại cạnh tranh dinh dưỡng/gi, 'Monitor canopy growth, weeds, and basal moisture')
+      .replace(/^Độ ẩm rễ đạt (\d+%),?\s*chưa cần tưới ồ ạt$/i, 'Root moisture at $1%; avoid over-irrigation')
+      .replace(/Giảm thất thoát bốc hơi, giúp cây tích nước trước khi nắng gắt/gi, 'Minimizes evaporation loss and supports canopy cooling before midday heat')
+      .replace(/Hạn chế bốc hơi nước mặt đất, tiết kiệm nước tưới/gi, 'Reduces soil moisture evaporation up to 35–40%')
+      .replace(/Giai đoạn trổ\/hoa cực kỳ nhạy cảm với sốc nước \(cả úng lẫn hạn\)/gi, 'Flowering is highly sensitive to both drought and waterlogging')
+      .replace(/^Khắc phục sai lệch thực địa \(đất:\s*([^·]+) · cây:\s*([^)]+)\)$/i, (_, soilRaw, healthRaw) => {
+        const soilEn = soilRaw.trim().includes('khô') ? 'dry' : soilRaw.trim().includes('ẩm') ? 'wet' : 'balanced';
+        const healthEn = healthRaw.trim().includes('sâu') ? 'pest_risk' : healthRaw.trim().includes('căng') ? 'stressed' : 'healthy';
+        return `Corrective step from field update (${soilEn} soil · ${healthEn} crop)`;
+      });
   }
 
   let triggerData = task.triggerDataEn || task.triggerData;
@@ -62,10 +81,13 @@ function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
     triggerData = triggerData
       .replace(/Lịch người dùng:\s*Buổi sáng/gi, 'Schedule: Morning')
       .replace(/Lịch người dùng:\s*Buổi chiều/gi, 'Schedule: Afternoon')
+      .replace(/Lịch người dùng:\s*Sáng/gi, 'Schedule: Morning')
+      .replace(/Lịch người dùng:\s*Chiều/gi, 'Schedule: Afternoon')
       .replace(/GWETROOT\s*(\d+%)/gi, 'Root-zone moisture $1')
       .replace(/GWETTOP\s*(\d+%)/gi, 'Topsoil moisture $1')
       .replace(/Ẩm vùng rễ\s*(\d+%)/gi, 'Root-zone moisture $1')
-      .replace(/Ẩm tầng rễ\s*(\d+%)/gi, 'Root-zone moisture $1');
+      .replace(/Ẩm tầng rễ\s*(\d+%)/gi, 'Root-zone moisture $1')
+      .replace(/Ẩm tầng mặt\s*(\d+%)/gi, 'Topsoil moisture $1');
   }
 
   return { title, scheduledTime, reason, triggerData };
@@ -174,7 +196,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <select
             value={filterFieldId}
             onChange={(e) => setFilterFieldId(e.target.value)}
-            className="px-2.5 py-1.5 border border-stone-300 rounded-lg bg-stone-50 text-stone-800 font-medium"
+            className="px-2.5 py-1.5 border border-stone-300 rounded-lg bg-stone-50 text-stone-800 font-medium text-base sm:text-xs"
           >
             <option value="ALL">
               {t(`Tất cả thửa ruộng (${fields.length})`, `All fields (${fields.length})`)}

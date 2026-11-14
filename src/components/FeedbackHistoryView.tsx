@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   History,
   Sparkles,
@@ -14,23 +14,36 @@ import {
   CalendarCheck,
   ShieldAlert,
   Download,
+  FileText,
+  Upload,
 } from 'lucide-react';
 import {
   DailyAgronomicBrief,
+  FarmTask,
   FeedbackRecord,
   FieldProfile,
+  ImportedFarmReport,
   ObservedCropHealthState,
   ObservedMoistureState,
   PredictionOutcome,
   WeatherObservation,
 } from '../types';
-import { FieldCheckInDiagnostic, FieldCheckInInput } from '../services/agronomyEngine';
+import {
+  FieldCheckInDiagnostic,
+  FieldCheckInInput,
+} from '../services/agronomyEngine';
+import {
+  exportFarmReportJson,
+  exportFarmReportPdf,
+  importFarmReportFile,
+} from '../services/reportExportImportService';
 import { getCommonStageLabel, getPlantDisplayName } from '../data/cropTaxonomy';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface FeedbackHistoryViewProps {
   activeField: FieldProfile;
   feedbackHistory: FeedbackRecord[];
+  tasks?: FarmTask[];
   weather?: WeatherObservation;
   brief?: DailyAgronomicBrief | null;
   onAddFeedback: (feedback: Omit<FeedbackRecord, 'id' | 'timestamp'>) => void;
@@ -39,16 +52,19 @@ interface FeedbackHistoryViewProps {
     addFixesToTasks: boolean
   ) => Promise<FieldCheckInDiagnostic | null>;
   onNavigateTab?: (tab: string) => void;
+  onImportReport?: (report: ImportedFarmReport) => Promise<void> | void;
 }
 
 export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
   activeField,
   feedbackHistory,
+  tasks = [],
   weather,
   brief,
   onAddFeedback,
   onSubmitCheckIn,
   onNavigateTab,
+  onImportReport,
 }) => {
   const { lang, t } = useLanguage();
 
@@ -62,6 +78,9 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [latestDiagnostic, setLatestDiagnostic] = useState<FieldCheckInDiagnostic | null>(null);
+  const [importedReport, setImportedReport] = useState<ImportedFarmReport | null>(null);
+  const [importStatus, setImportStatus] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const stageSuggestions = [
     { vi: 'Cây con / Mạ non', en: 'Seedling / Nursery' },
@@ -344,6 +363,54 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = async () => {
+    const fieldTasks = tasks.filter((tk) => tk.fieldId === activeField.id);
+    await exportFarmReportPdf({
+      field: activeField,
+      weather,
+      brief,
+      tasks: fieldTasks,
+      feedbacks: fieldFeedbacks,
+      lang,
+    });
+  };
+
+  const handleExportJson = () => {
+    const fieldTasks = tasks.filter((tk) => tk.fieldId === activeField.id);
+    exportFarmReportJson({
+      field: activeField,
+      weather,
+      brief,
+      tasks: fieldTasks,
+      feedbacks: fieldFeedbacks,
+    });
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportStatus(null);
+    try {
+      const parsed = await importFarmReportFile(file);
+      setImportedReport(parsed);
+      setImportStatus({
+        type: 'ok',
+        text: t(
+          `Đã đọc thành công báo cáo cho ruộng "${parsed.field.name}" (${parsed.feedbacks.length} phản hồi, ${parsed.tasks.length} công việc).`,
+          `Loaded report for field "${parsed.field.name}" (${parsed.feedbacks.length} logs, ${parsed.tasks.length} tasks).`
+        ),
+      });
+    } catch (err: any) {
+      setImportStatus({
+        type: 'err',
+        text:
+          err?.message ||
+          t('Không đọc được tệp báo cáo (.pdf hoặc .json).', 'Unable to parse report file (.pdf or .json).'),
+      });
+    }
   };
 
   return (
@@ -721,20 +788,93 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
               </h2>
               <p className="text-xs text-stone-500">
                 {t(
-                  'Theo dõi lịch sử đối chiếu dự báo thực tế và xuất tệp CSV lưu trữ',
-                  'Timeline of field checks and exportable CSV records'
+                  'Lưu trữ & khôi phục hồ sơ nông trại ngoại tuyến bằng PDF, JSON hoặc CSV',
+                  'Export & re-import farm records offline via PDF, JSON, or CSV'
                 )}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-            >
-              <Download className="w-3.5 h-3.5" />
-              {t('Xuất CSV', 'Export CSV')}
-            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                {t('Xuất PDF', 'Export PDF')}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportJson}
+                className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 rounded-xl text-xs font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                JSON
+              </button>
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                CSV
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".pdf,.json,application/pdf,application/json"
+                onChange={handleFileImport}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-950 rounded-xl text-xs font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                {t('Nhập PDF/JSON', 'Import Report')}
+              </button>
+            </div>
           </div>
+
+          {importStatus && (
+            <div
+              className={`p-3 rounded-xl border text-xs font-medium ${
+                importStatus.type === 'ok'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                  : 'bg-rose-50 border-rose-200 text-rose-900'
+              }`}
+            >
+              <div>{importStatus.text}</div>
+              {importedReport && importStatus.type === 'ok' && (
+                <div className="mt-2 pt-2 border-t border-emerald-200/80 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px] text-emerald-900">
+                    <strong>{importedReport.field.name}</strong> · {importedReport.field.province} ·{' '}
+                    {importedReport.field.crop.name} ({importedReport.feedbacks.length}{' '}
+                    {t('nhật ký', 'logs')}, {importedReport.tasks.length} {t('việc', 'tasks')})
+                  </div>
+                  {onImportReport && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await onImportReport(importedReport);
+                        setImportedReport(null);
+                        setImportStatus({
+                          type: 'ok',
+                          text: t(
+                            'Đã nạp toàn bộ dữ liệu báo cáo vào không gian làm việc hiện tại!',
+                            'Imported report data into your active workspace!'
+                          ),
+                        });
+                      }}
+                      className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-lg text-[11px] cursor-pointer"
+                    >
+                      {t('Áp dụng vào Ruộng đang xem', 'Load into Workspace')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {fieldFeedbacks.length === 0 ? (
             <div className="p-10 text-center text-stone-400 space-y-2">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   BarChart3,
   Thermometer,
@@ -12,6 +12,10 @@ import {
   Clock,
   TrendingUp,
   CheckCircle2,
+  RefreshCw,
+  Download,
+  Loader2,
+  Database,
 } from 'lucide-react';
 import { FieldProfile, WeatherObservation } from '../types';
 import {
@@ -23,6 +27,12 @@ import {
 import { getPlantDisplayName } from '../data/cropTaxonomy';
 import { SatelliteMap } from './SatelliteMap';
 import { computeHarmonizedIndicators } from '../services/rotationEngine';
+import { assessSoilDrainageFromEarthData, getDrainageLabel } from '../services/agronomyEngine';
+import {
+  fetchNasaDailyRange2001ToPresent,
+  NasaDailyExtractProgress,
+  NasaDailyHistoricalRow,
+} from '../services/nasaWarehouseService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useViewMode } from '../contexts/ViewModeContext';
 
@@ -47,6 +57,106 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
   const [overlayTheme, setOverlayTheme] = useState<OverlayTheme>('moisture');
   const [selectedChartMonth, setSelectedChartMonth] = useState<string | null>(null);
 
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyProgress, setDailyProgress] = useState<NasaDailyExtractProgress | null>(null);
+  const [dailyResult, setDailyResult] = useState<{
+    cellId: string;
+    actualStartDate: string;
+    actualEndDate: string;
+    rows: NasaDailyHistoricalRow[];
+    liveApiChunks: number;
+    fallbackChunks: number;
+    fromCache?: boolean;
+    cachedAt?: string;
+    elapsedMs: number;
+  } | null>(null);
+
+  const runDailyFetch = async (forceRefresh = false) => {
+    setDailyLoading(true);
+    try {
+      const res = await fetchNasaDailyRange2001ToPresent(field.lat, field.lon, {
+        forceRefresh,
+        onProgress: (p) => setDailyProgress(p),
+      });
+      setDailyResult({
+        cellId: res.cellId,
+        actualStartDate: res.actualStartDate,
+        actualEndDate: res.actualEndDate,
+        rows: res.rows,
+        liveApiChunks: res.liveApiChunks,
+        fallbackChunks: res.fallbackChunks,
+        fromCache: res.fromCache,
+        cachedAt: res.cachedAt,
+        elapsedMs: res.elapsedMs,
+      });
+    } finally {
+      setDailyLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    setDailyLoading(true);
+    fetchNasaDailyRange2001ToPresent(field.lat, field.lon, {
+      onProgress: (p) => {
+        if (active) setDailyProgress(p);
+      },
+    })
+      .then((res) => {
+        if (!active) return;
+        setDailyResult({
+          cellId: res.cellId,
+          actualStartDate: res.actualStartDate,
+          actualEndDate: res.actualEndDate,
+          rows: res.rows,
+          liveApiChunks: res.liveApiChunks,
+          fallbackChunks: res.fallbackChunks,
+          fromCache: res.fromCache,
+          cachedAt: res.cachedAt,
+          elapsedMs: res.elapsedMs,
+        });
+      })
+      .finally(() => {
+        if (active) setDailyLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [field.id, field.lat, field.lon]);
+
+  const handleExportDailyCsv = () => {
+    if (!dailyResult || dailyResult.rows.length === 0) return;
+    const header =
+      'date,cell_id,t2m_c,t2m_min_c,t2m_max_c,gpm_precip_mm,smap_topsoil_pct,root_moisture_pct,rh2m_pct,solar_mj_m2,prism_dew_c,prism_vpd_max_hpa,source';
+    const lines = dailyResult.rows.map((r) =>
+      [
+        r.date,
+        r.cellId,
+        r.t2m,
+        r.t2mMin,
+        r.t2mMax,
+        r.gpmPrecipMm,
+        r.gwettopPct,
+        r.gwetrootPct,
+        r.rh2m,
+        r.solarMjM2,
+        r.prismDewPointC,
+        r.prismVpdMaxHpa,
+        r.source,
+      ].join(',')
+    );
+    const csv = `\uFEFF${header}\n${lines.join('\n')}`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cropcast-nasa-daily-${dailyResult.cellId}-2001-to-present.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const { cell } = findNearestNasaGrid(field.lat, field.lon);
   const monthlyData = getCellMonthlyProfile(cell, lang);
   const annualSeries = getCellAnnualSeries2001to2025(cell);
@@ -69,6 +179,26 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
     { rainDeltaPct: 0, tempDeltaC: 0 },
     lang
   );
+  const drainageEstimate = assessSoilDrainageFromEarthData(
+    weather,
+    field.soilType,
+    field.adaptiveMemory?.earthMetrics,
+    lang
+  );
+  const dailySummaryStats = dailyResult && dailyResult.rows.length > 0
+    ? {
+        count: dailyResult.rows.length,
+        avgTemp: (
+          dailyResult.rows.reduce((s, r) => s + r.t2m, 0) / dailyResult.rows.length
+        ).toFixed(1),
+        avgRainYr: Math.round(
+          (dailyResult.rows.reduce((s, r) => s + r.gpmPrecipMm, 0) / dailyResult.rows.length) * 365.25
+        ),
+        avgSmapTop: Math.round(
+          dailyResult.rows.reduce((s, r) => s + r.gwettopPct, 0) / dailyResult.rows.length
+        ),
+      }
+    : null;
 
   const indicatorsMeta = [
     {
@@ -365,8 +495,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
                 role: t('Điểm sương & sức hút bốc hơi (VPD)', 'Dew point & vapor pressure deficit (VPD)'),
               },
               {
-                name: 'OCO-2 & GRACE-FO',
-                role: t('Quang hợp tán lá & trữ lượng nước ngầm', 'Canopy photosynthesis & groundwater trend'),
+                name: 'OCO-2, GRACE-FO & GHG STAC',
+                role: t('Quang hợp, nước ngầm & phát thải khí nhà kính', 'Canopy photosynthesis, groundwater & GHG flux'),
               },
             ].map((src) => (
               <div key={src.name} className="p-2.5 bg-stone-50 rounded-xl border border-stone-200 flex items-start gap-2">
@@ -378,6 +508,160 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Automated Soil Drainage Assessment + Daily 2001–2026 NASA Pipeline */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Drainage Card */}
+        <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
+              <Droplets className="w-4 h-4 text-sky-600" />
+              {t('Đánh giá Thoát nước Đất Tự động (SMAP/GPM)', 'Automated Soil Drainage Check (SMAP/GPM)')}
+            </h2>
+            <span
+              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                drainageEstimate.drainage === 'fast'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  : drainageEstimate.drainage === 'slow'
+                  ? 'bg-rose-50 text-rose-900 border-rose-200'
+                  : 'bg-amber-50 text-amber-900 border-amber-200'
+              }`}
+            >
+              {getDrainageLabel(drainageEstimate.drainage, lang)}
+            </span>
+          </div>
+
+          <p className="text-xs text-stone-700 leading-relaxed">
+            {lang === 'en' ? drainageEstimate.explanationEn : drainageEstimate.explanationVi}
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[10px] text-stone-500 block">{t('SMAP tầng mặt', 'SMAP Topsoil')}</span>
+              <strong className="font-mono text-stone-900">{drainageEstimate.smapSurfacePct}%</strong>
+            </div>
+            <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[10px] text-stone-500 block">{t('Ẩm tầng rễ', 'Root Zone')}</span>
+              <strong className="font-mono text-stone-900">{drainageEstimate.rootZonePct}%</strong>
+            </div>
+            <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[10px] text-stone-500 block">{t('Mưa GPM 7 ngày', '7d GPM Rain')}</span>
+              <strong className="font-mono text-sky-800">{drainageEstimate.gpmRain7dMm} mm</strong>
+            </div>
+            <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+              <span className="text-[10px] text-stone-500 block">{t('Hệ số rút ẩm', 'Drop-off Index')}</span>
+              <strong className="font-mono text-emerald-800">{drainageEstimate.dropOffRatio}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Continuous Daily NASA Pipeline Card (2001–2026) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-stone-200 shadow-xs space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-stone-900 flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-700" />
+                {t('Chuỗi Dữ liệu Ngày NASA Liên tục (2001–2026)', 'Continuous NASA Daily Pipeline (2001–2026)')}
+              </h2>
+              <p className="text-[11px] text-stone-500 mt-0.5">
+                {dailyResult?.fromCache
+                  ? t(
+                      `Đang dùng bộ nhớ đệm cục bộ (IndexedDB) — 0 lượt gọi API mới.`,
+                      `Loaded from persistent IndexedDB cache — zero redundant API calls.`
+                    )
+                  : t(
+                      `Trích xuất trực tiếp theo từng ngày từ 01/01/2001 tới hiện tại và lưu vĩnh viễn ngoại tuyến.`,
+                      `Daily measurements from 2001-01-01 to present, cached permanently offline.`
+                    )}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={dailyLoading}
+                onClick={() => runDailyFetch(true)}
+                className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 disabled:opacity-50 text-stone-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                {dailyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                {t('Làm mới NASA', 'Refresh NASA Daily')}
+              </button>
+              <button
+                type="button"
+                disabled={!dailyResult || dailyResult.rows.length === 0}
+                onClick={handleExportDailyCsv}
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                {t('Tải CSV 2001–2026', 'Export Daily CSV')}
+              </button>
+            </div>
+          </div>
+
+          {dailyLoading && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1.5">
+              <div className="flex items-center justify-between font-semibold">
+                <span>{dailyProgress?.statusLabel || t('Đang tải dữ liệu ngày NASA 2001–2026...', 'Fetching NASA daily 2001–2026...')}</span>
+                <span className="font-mono">{dailyProgress?.percent ?? 0}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-emerald-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-700 transition-all"
+                  style={{ width: `${dailyProgress?.percent ?? 15}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {dailySummaryStats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 block">{t('Tổng số ngày đã nạp', 'Daily Records')}</span>
+                <strong className="font-mono text-stone-900">{dailySummaryStats.count.toLocaleString()}</strong>
+              </div>
+              <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 block">{t('Nhiệt độ TB ngày', 'Mean Daily Temp')}</span>
+                <strong className="font-mono text-stone-900">{dailySummaryStats.avgTemp}°C</strong>
+              </div>
+              <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 block">{t('Mưa GPM TB năm', 'GPM Annual Mean')}</span>
+                <strong className="font-mono text-sky-800">{dailySummaryStats.avgRainYr} mm/yr</strong>
+              </div>
+              <div className="p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 block">{t('SMAP tầng mặt TB', 'Mean SMAP Topsoil')}</span>
+                <strong className="font-mono text-emerald-800">{dailySummaryStats.avgSmapTop}%</strong>
+              </div>
+            </div>
+          )}
+
+          {!isSimpleMode && dailyResult && dailyResult.rows.length > 0 && (
+            <div className="overflow-x-auto border border-stone-200 rounded-xl">
+              <table className="w-full text-[11px] text-left">
+                <thead className="bg-stone-50 text-stone-600 border-b border-stone-200">
+                  <tr>
+                    <th className="px-2.5 py-1.5">{t('Ngày', 'Date')}</th>
+                    <th className="px-2.5 py-1.5">T2M (°C)</th>
+                    <th className="px-2.5 py-1.5">GPM (mm)</th>
+                    <th className="px-2.5 py-1.5">SMAP (%)</th>
+                    <th className="px-2.5 py-1.5">VPD Max (hPa)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100 font-mono">
+                  {dailyResult.rows.slice(-6).reverse().map((row) => (
+                    <tr key={row.date} className="hover:bg-stone-50">
+                      <td className="px-2.5 py-1.5 text-stone-800 font-semibold">{row.date}</td>
+                      <td className="px-2.5 py-1.5">{row.t2m.toFixed(1)}</td>
+                      <td className="px-2.5 py-1.5 text-sky-800">{row.gpmPrecipMm.toFixed(1)}</td>
+                      <td className="px-2.5 py-1.5 text-emerald-800">{row.gwettopPct.toFixed(1)}%</td>
+                      <td className="px-2.5 py-1.5 text-amber-800">{row.prismVpdMaxHpa.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
@@ -792,6 +1076,19 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
       </div>
       </>
       )}
+
+      {/* NASA Space Apps Challenge & AI Transparency Attribution */}
+      <div className="bg-stone-50 rounded-2xl border border-stone-200 p-4 text-[11px] text-stone-600 leading-relaxed space-y-1">
+        <div className="font-bold text-stone-800">
+          {t('Ghi nhận Nguồn dữ liệu Vệ tinh & Trợ lý AI (NASA Space Apps Challenge)', 'Satellite Data & AI Transparency Disclosure (NASA Space Apps Challenge)')}
+        </div>
+        <p>
+          {t(
+            'Các chỉ số khí hậu ngày (2001–2026) và đánh giá đất-nước được tổng hợp từ NASA POWER, NASA SMAP, NASA GPM, PRISM Climate, OCO-2/3, GRACE-FO và GHG Center STAC kết hợp dự báo thời tiết Open-Meteo. Các phân tích tổng hợp và gợi ý luân canh có sự hỗ trợ của AI nhằm phục vụ tham khảo nông học tại thực địa.',
+            'Daily 2001–2026 climate records and field water diagnostics integrate NASA POWER, NASA SMAP, NASA GPM, PRISM Climate, OCO-2/3, GRACE-FO, and GHG Center STAC alongside Open-Meteo forecasts. Rotation recommendations and agronomic summaries are AI-assisted for practical farm decision support.'
+          )}
+        </p>
+      </div>
     </div>
   );
 };

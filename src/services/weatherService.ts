@@ -4,9 +4,7 @@ import {
   findNearestNasaGrid,
   getCellMonthlyProfile,
 } from '../data/nasaVietnamGrid';
-
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const weatherCache = new Map<string, { timestamp: number; data: WeatherObservation }>();
+import { weatherCacheService } from './weatherCache';
 
 /**
  * Builds a monthly 2001–2025 baseline WeatherObservation for any coordinate in Vietnam
@@ -71,13 +69,15 @@ export function buildClimaticBaselineWeather(lat: number, lon: number): WeatherO
 export async function fetchFieldLiveWeather(
   lat: number,
   lon: number,
-  _field?: FieldProfile
+  _field?: FieldProfile,
+  options?: { forceRefresh?: boolean }
 ): Promise<WeatherObservation> {
   const baseline = buildClimaticBaselineWeather(lat, lon);
-  const cacheKey = `${lat.toFixed(2)},${lon.toFixed(2)}`;
-  const cached = weatherCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
+  if (!options?.forceRefresh) {
+    const cached = await weatherCacheService.getOpenMeteo(lat, lon);
+    if (cached) {
+      return cached;
+    }
   }
 
   const controller = new AbortController();
@@ -185,6 +185,7 @@ export async function fetchFieldLiveWeather(
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
 
+    const nowIso = new Date().toISOString();
     const result: WeatherObservation = {
       temp,
       minTemp,
@@ -204,10 +205,12 @@ export async function fetchFieldLiveWeather(
       observationDate: `Hôm nay (Cập nhật ${hh}:${mm})`,
       isRealtimeAvailable: true,
       source: 'LIVE_WEATHER',
+      cachedAt: nowIso,
+      fromCache: false,
       historicalBaseline: baseline.historicalBaseline,
     };
 
-    weatherCache.set(cacheKey, { timestamp: Date.now(), data: result });
+    await weatherCacheService.setOpenMeteo(lat, lon, result);
     return result;
   } catch {
     return baseline;

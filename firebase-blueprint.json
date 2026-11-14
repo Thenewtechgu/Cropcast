@@ -603,6 +603,76 @@
         "isActive",
         "createdAt"
       ]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Community farming discussion post scoped by Vietnamese city/province and category.",
+      "type": "object",
+      "properties": {
+        "authorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "province": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "district": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "cropName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "enum": ["weather_alert", "rotation_tips", "pest_disease", "soil_water", "market_harvest"]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 3000
+        },
+        "likesCount": {
+          "type": "number"
+        },
+        "upvotedUids": {
+          "type": "array"
+        },
+        "replies": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "authorUid",
+        "authorName",
+        "province",
+        "category",
+        "title",
+        "content",
+        "likesCount",
+        "upvotedUids",
+        "replies",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -649,6 +719,10 @@
     "/nasa_sync_logs/{logId}": {
       "schema": { "$ref": "#/entities/NasaSyncLog" },
       "description": "Admin-only NASA synchronization audit logs."
+    },
+    "/community_posts/{postId}": {
+      "schema": { "$ref": "#/entities/CommunityPost" },
+      "description": "Farmer community forum posts filtered by local province/city or nationwide."
     }
   }
 }

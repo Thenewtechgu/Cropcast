@@ -5,6 +5,7 @@ import type {
   DataImportRecord,
   SyncLogRecord,
 } from '../types';
+import { weatherCacheService } from './weatherCache';
 
 export interface ParsedNasaRow {
   cell_id: string;
@@ -1787,6 +1788,7 @@ export async function fetchNasaDailyRange2001ToPresent(
   options?: {
     startDate?: string; // default '2001-01-01'
     endDate?: string; // default today
+    forceRefresh?: boolean;
     onProgress?: (p: NasaDailyExtractProgress) => void;
   }
 ): Promise<{
@@ -1802,6 +1804,8 @@ export async function fetchNasaDailyRange2001ToPresent(
   totalChunks: number;
   skippedLagDays: number;
   elapsedMs: number;
+  fromCache?: boolean;
+  cachedAt?: string;
 }> {
   const startedAtMs = Date.now();
   const { cell } = findNearestNasaGrid(lat, lon);
@@ -1809,6 +1813,38 @@ export async function fetchNasaDailyRange2001ToPresent(
   const today = new Date();
   const maxDefaultEnd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const endIso = options?.endDate || maxDefaultEnd;
+
+  if (!options?.forceRefresh) {
+    const cached = await weatherCacheService.getNasaDaily<{
+      cellId: string;
+      region: string;
+      startDate: string;
+      endDate: string;
+      actualStartDate: string;
+      actualEndDate: string;
+      rows: NasaDailyHistoricalRow[];
+      liveApiChunks: number;
+      fallbackChunks: number;
+      totalChunks: number;
+      skippedLagDays: number;
+    }>(cell.cellId, cell.lat, cell.lon, startIso, endIso);
+
+    if (cached && Array.isArray(cached.payload?.rows) && cached.payload.rows.length > 0) {
+      options?.onProgress?.({
+        percent: 100,
+        completedChunks: cached.payload.totalChunks,
+        totalChunks: cached.payload.totalChunks,
+        rowsCollected: cached.payload.rows.length,
+        statusLabel: `${cell.cellId}: Loaded ${cached.payload.rows.length.toLocaleString()} cached daily rows`,
+      });
+      return {
+        ...cached.payload,
+        elapsedMs: Date.now() - startedAtMs,
+        fromCache: true,
+        cachedAt: new Date(cached.cachedAt).toISOString(),
+      };
+    }
+  }
 
   const startYear = Math.max(2001, Number(startIso.slice(0, 4)) || 2001);
   const endYear = Math.min(2030, Math.max(startYear, Number(endIso.slice(0, 4)) || today.getFullYear()));
@@ -1908,7 +1944,7 @@ export async function fetchNasaDailyRange2001ToPresent(
     });
   }
 
-  return {
+  const payload = {
     cellId: cell.cellId,
     region: cell.region,
     startDate: startIso,
@@ -1920,7 +1956,17 @@ export async function fetchNasaDailyRange2001ToPresent(
     fallbackChunks,
     totalChunks: chunks.length,
     skippedLagDays,
+  };
+
+  if (allRows.length > 0) {
+    await weatherCacheService.setNasaDaily(cell.cellId, cell.lat, cell.lon, startIso, endIso, payload);
+  }
+
+  return {
+    ...payload,
     elapsedMs: Date.now() - startedAtMs,
+    fromCache: false,
+    cachedAt: new Date().toISOString(),
   };
 }
 

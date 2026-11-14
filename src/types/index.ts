@@ -273,6 +273,8 @@ export interface WeatherObservation {
   forecastDays?: DailyForecastPoint[];
   observationDate: string;
   isRealtimeAvailable: boolean;
+  cachedAt?: string;
+  fromCache?: boolean;
   source: 'NASA_POWER_UPDATED' | 'LIVE_WEATHER' | 'USER_OBSERVATION' | 'WEATHER_STATION' | 'ESTIMATED_CLIMATE';
   historicalBaseline: {
     avgTemp: number;
@@ -574,4 +576,57 @@ export interface EarthEnvironmentSnapshot {
   carbonFluxOco2: CarbonFluxOco2Record;
   groundwaterAnomalyGrace: GroundwaterAnomalyGraceRecord;
   greenhouseGasEdgar: GreenhouseGasEdgarRecord;
+}
+
+export type CommunityCategory =
+  | 'weather_alert'
+  | 'rotation_tips'
+  | 'pest_disease'
+  | 'soil_water'
+  | 'market_harvest';
+
+export interface CommunityReply {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  authorProvince?: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  province: string;
+  district?: string;
+  cropName?: string;
+  category: CommunityCategory;
+  title: string;
+  content: string;
+  likesCount: number;
+  upvotedUids: string[];
+  replies: CommunityReply[];
+  createdAt: string;
+  isDemoSeed?: boolean;
+}
+
+export interface ImportedFarmReport {
+  schemaVersion: '1.0';
+  exportedAt: string;
+  sourceLabel: string;
+  field: FieldProfile;
+  weather?: WeatherObservation;
+  briefHeadline?: string;
+  drainageSummary?: SoilDrainageEstimate;
+  tasks: FarmTask[];
+  feedbacks: FeedbackRecord[];
+  dailySampleSummary?: {
+    cellId: string;
+    startDate: string;
+    endDate: string;
+    rowCount: number;
+    avgTempC: number;
+    totalRainMm: number;
+  };
 }

@@ -39,6 +39,9 @@ import {
   AdminPlatformStats,
   AdminUserSummary,
   AppUser,
+  CommunityCategory,
+  CommunityPost,
+  CommunityReply,
   EarthEnvironmentSnapshot,
   FarmTask,
   FeedbackRecord,
@@ -1632,6 +1635,143 @@ export const FirestoreService = {
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, userPath);
+    }
+  },
+
+  // =========================================================================
+  // Community Forum (City/Region & Nationwide)
+  // =========================================================================
+
+  subscribeCommunityPosts(onData: (posts: CommunityPost[]) => void) {
+    return onSnapshot(
+      collection(db, 'community_posts'),
+      (snap) => {
+        const list: CommunityPost[] = snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              authorUid: String(data.authorUid || ''),
+              authorName: String(data.authorName || 'Nông dân CropCast'),
+              province: String(data.province || 'Hà Nội'),
+              district: data.district ? String(data.district) : undefined,
+              cropName: data.cropName ? String(data.cropName) : undefined,
+              category: (data.category || 'rotation_tips') as CommunityCategory,
+              title: String(data.title || ''),
+              content: String(data.content || ''),
+              likesCount: Number(data.likesCount) || 0,
+              upvotedUids: Array.isArray(data.upvotedUids) ? data.upvotedUids : [],
+              replies: Array.isArray(data.replies) ? data.replies : [],
+              createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+            };
+          })
+          .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+        onData(list);
+      },
+      () => {
+        onData([]);
+      }
+    );
+  },
+
+  async createCommunityPost(
+    uid: string,
+    authorName: string,
+    input: {
+      province: string;
+      district?: string;
+      cropName?: string;
+      category: CommunityCategory;
+      title: string;
+      content: string;
+    }
+  ): Promise<CommunityPost> {
+    const postId = `POST_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const path = `community_posts/${postId}`;
+    const payload = {
+      authorUid: uid,
+      authorName: (authorName || 'Nông dân CropCast').slice(0, 120),
+      province: input.province.slice(0, 100),
+      district: input.district ? input.district.slice(0, 120) : undefined,
+      cropName: input.cropName ? input.cropName.slice(0, 120) : undefined,
+      category: input.category,
+      title: input.title.trim().slice(0, 180),
+      content: input.content.trim().slice(0, 3000),
+      likesCount: 0,
+      upvotedUids: [],
+      replies: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      await setDoc(doc(db, 'community_posts', postId), payload);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    }
+    return {
+      id: postId,
+      authorUid: uid,
+      authorName: payload.authorName,
+      province: payload.province,
+      district: payload.district,
+      cropName: payload.cropName,
+      category: input.category,
+      title: payload.title,
+      content: payload.content,
+      likesCount: 0,
+      upvotedUids: [],
+      replies: [],
+      createdAt: new Date().toISOString(),
+    };
+  },
+
+  async addCommunityReply(
+    postId: string,
+    uid: string,
+    authorName: string,
+    authorProvince: string | undefined,
+    content: string
+  ): Promise<void> {
+    const path = `community_posts/${postId}`;
+    const ref = doc(db, 'community_posts', postId);
+    const reply: CommunityReply = {
+      id: `REP_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      authorUid: uid,
+      authorName: (authorName || 'Nông dân CropCast').slice(0, 120),
+      authorProvince: authorProvince ? authorProvince.slice(0, 100) : undefined,
+      content: content.trim().slice(0, 1200),
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const snap = await getDoc(ref);
+      const existingReplies = snap.exists() && Array.isArray(snap.data().replies) ? snap.data().replies : [];
+      await updateDoc(ref, {
+        replies: [...existingReplies, cleanUndefined(reply)].slice(-200),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  },
+
+  async toggleCommunityUpvote(postId: string, uid: string): Promise<void> {
+    const path = `community_posts/${postId}`;
+    const ref = doc(db, 'community_posts', postId);
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return;
+      const existing: string[] = Array.isArray(snap.data().upvotedUids) ? snap.data().upvotedUids : [];
+      const hasUpvoted = existing.includes(uid);
+      const nextUids = hasUpvoted
+        ? existing.filter((id) => id !== uid)
+        : [...existing, uid].slice(0, 500);
+      await updateDoc(ref, {
+        upvotedUids: nextUids,
+        likesCount: nextUids.length,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
     }
   },
 };

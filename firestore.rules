@@ -146,5 +146,80 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow write: if isValidId(logId) && isAdmin();
     }
+
+    function isValidCommunityPost(data) {
+      return data.keys().hasAll([
+        'authorUid',
+        'authorName',
+        'province',
+        'category',
+        'title',
+        'content',
+        'likesCount',
+        'upvotedUids',
+        'replies',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'authorUid',
+        'authorName',
+        'province',
+        'district',
+        'cropName',
+        'category',
+        'title',
+        'content',
+        'likesCount',
+        'upvotedUids',
+        'replies',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.authorUid == request.auth.uid &&
+      data.authorName is string && data.authorName.size() > 0 && data.authorName.size() <= 120 &&
+      data.province is string && data.province.size() > 0 && data.province.size() <= 100 &&
+      (!('district' in data) || (data.district is string && data.district.size() <= 120)) &&
+      (!('cropName' in data) || (data.cropName is string && data.cropName.size() <= 120)) &&
+      data.category in ['weather_alert', 'rotation_tips', 'pest_disease', 'soil_water', 'market_harvest'] &&
+      data.title is string && data.title.size() > 0 && data.title.size() <= 180 &&
+      data.content is string && data.content.size() > 0 && data.content.size() <= 3000 &&
+      data.likesCount is number && data.likesCount >= 0 && data.likesCount <= 100000 &&
+      data.upvotedUids is list && data.upvotedUids.size() <= 500 &&
+      data.replies is list && data.replies.size() <= 200 &&
+      data.updatedAt == request.time;
+    }
+
+    // Community Forum Posts (local city & nationwide farmer Q&A, non-PII)
+    match /community_posts/{postId} {
+      allow get: if isValidId(postId);
+      allow list: if resource.data.category is string;
+      allow create: if isValidId(postId) && isSignedIn() &&
+        isValidCommunityPost(request.resource.data) &&
+        request.resource.data.createdAt == request.time;
+      allow update: if isValidId(postId) && isSignedIn() && (
+        isAdmin() ||
+        (resource.data.authorUid == request.auth.uid &&
+          request.resource.data.authorUid == resource.data.authorUid &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          isValidCommunityPost(request.resource.data)) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'replies',
+            'upvotedUids',
+            'likesCount',
+            'updatedAt'
+          ]) &&
+          request.resource.data.replies is list &&
+          request.resource.data.replies.size() <= 200 &&
+          request.resource.data.upvotedUids is list &&
+          request.resource.data.upvotedUids.size() <= 500 &&
+          request.resource.data.likesCount is number &&
+          request.resource.data.likesCount >= 0 &&
+          request.resource.data.likesCount <= 100000 &&
+          request.resource.data.updatedAt == request.time)
+      );
+      allow delete: if isValidId(postId) && isSignedIn() &&
+        (resource.data.authorUid == request.auth.uid || isAdmin());
+    }
   }
 }

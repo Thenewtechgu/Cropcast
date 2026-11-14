@@ -53,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         { id: 'dashboard', label: t('Tổng quan', 'Overview'), matchTabs: ['dashboard', 'tasks', 'feedback'] },
         { id: 'rotation', label: t('Luân canh', 'Rotation'), matchTabs: ['rotation', 'calendar', 'analytics'] },
         { id: 'fields', label: t('Ruộng của tôi', 'My Fields'), matchTabs: ['fields'] },
+        { id: 'community', label: t('Cộng đồng', 'Community'), matchTabs: ['community'] },
         { id: 'assistant', label: t('Trợ lý AI', 'AI Assistant'), matchTabs: ['assistant'] },
       ];
 
@@ -125,29 +126,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ))
                     )}
                     <div className="border-t border-stone-100 mt-1 pt-1 px-2">
-                      {authUser ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onOpenNewFieldModal();
-                            setFieldDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> {t('Thêm thửa ruộng', 'Add field')}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFieldDropdownOpen(false);
-                            onSignIn();
-                          }}
-                          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold rounded-lg transition cursor-pointer"
-                        >
-                          <LogIn className="w-3.5 h-3.5" /> {t('Đăng nhập để thêm ruộng', 'Sign in to add field')}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onOpenNewFieldModal();
+                          setFieldDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> {t('Thêm thửa ruộng', 'Add field')}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -277,6 +265,52 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Mobile Quick Sub-Bar: Visible 1-tap Simple/Detailed toggle + Community shortcut */}
+        {!authUser?.isAdmin && (
+          <div className="md:hidden pb-2 pt-1 border-t border-stone-100 flex items-center justify-between gap-2 text-[11px]">
+            <div
+              role="group"
+              aria-label={t('Chế độ hiển thị', 'Display mode')}
+              className="inline-flex items-center bg-stone-100 border border-stone-200 rounded-lg p-0.5 font-bold"
+            >
+              <button
+                type="button"
+                onClick={() => setViewMode('simple')}
+                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                  viewMode === 'simple'
+                    ? 'bg-emerald-800 text-white shadow-2xs'
+                    : 'text-stone-600'
+                }`}
+              >
+                {t('Đơn giản', 'Simple')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('detailed')}
+                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                  viewMode === 'detailed'
+                    ? 'bg-emerald-800 text-white shadow-2xs'
+                    : 'text-stone-600'
+                }`}
+              >
+                {t('Chi tiết', 'Detailed')}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('community')}
+              className={`px-2.5 py-1 rounded-lg border font-bold transition cursor-pointer ${
+                activeTab === 'community'
+                  ? 'bg-emerald-800 text-white border-emerald-800'
+                  : 'bg-stone-50 text-stone-700 border-stone-200'
+              }`}
+            >
+              {t('Cộng đồng nông dân', 'Community Forum')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Mobile Drawer */}
@@ -374,18 +408,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ))}
                 </div>
               )}
-              {authUser && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onOpenNewFieldModal();
-                  }}
-                  className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> {t('Thêm thửa ruộng mới', 'Add New Field')}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenNewFieldModal();
+                }}
+                className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" /> {t('Thêm thửa ruộng mới', 'Add New Field')}
+              </button>
             </div>
           )}
 
