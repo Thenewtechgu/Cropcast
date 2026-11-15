@@ -82,10 +82,9 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
 
   const buildStreetLayer = (activeLang: 'vi' | 'en') =>
     activeLang === 'en'
-      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-          attribution: 'CARTO Voyager',
-          subdomains: 'abcd',
-          maxZoom: 18,
+      ? L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
+          maxZoom: 19,
         })
       : L.tileLayer(
           'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
@@ -94,11 +93,10 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
 
   const buildLabelsLayer = (activeLang: 'vi' | 'en') =>
     activeLang === 'en'
-      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
-          subdomains: 'abcd',
-          maxZoom: 18,
-          opacity: 0.9,
-        })
+      ? L.tileLayer(
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          { maxZoom: 18, opacity: 0.9 }
+        )
       : L.tileLayer(
           'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
           { maxZoom: 18, opacity: 0.9 }
