@@ -544,7 +544,20 @@ const REGION_EN_MAP: Record<string, string> = {
 export function getLocalizedRegionName(region: string, lang: AppLanguage = 'vi'): string {
   if (lang !== 'en') return region;
   const clean = (region || '').trim();
-  return REGION_EN_MAP[clean] || clean;
+  if (REGION_EN_MAP[clean]) return REGION_EN_MAP[clean];
+  // Replace region prefix if present in subRegion strings like "Đồng bằng Sông Hồng - Ô ..."
+  for (const [vi, en] of Object.entries(REGION_EN_MAP)) {
+    if (clean.startsWith(vi)) {
+      return clean
+        .replace(vi, en)
+        .replace(' - Ô ', ' - Cell ')
+        .replace('Quần đảo Hoàng Sa (Việt Nam)', 'Hoang Sa Archipelago (Vietnam)')
+        .replace('Quần đảo Trường Sa (Việt Nam)', 'Truong Sa Archipelago (Vietnam)');
+    }
+  }
+  return clean
+    .replace('Quần đảo Hoàng Sa (Việt Nam)', 'Hoang Sa Archipelago (Vietnam)')
+    .replace('Quần đảo Trường Sa (Việt Nam)', 'Truong Sa Archipelago (Vietnam)');
 }
 
 /**
@@ -553,8 +566,8 @@ export function getLocalizedRegionName(region: string, lang: AppLanguage = 'vi')
 export function getCellMonthlyProfile(cell: NasaGridCell, lang: AppLanguage = 'vi') {
   const months =
     lang === 'en'
-      ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      : ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
+      ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+      : ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
   const baseT = cell.climatology21Yr.avgTemp;
   const isNorth = cell.lat > 16.5;
 

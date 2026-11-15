@@ -10,10 +10,13 @@ import {
   Loader2,
   AlertCircle,
   ShieldCheck,
-  Sprout,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
+
+const PREVIEW_AUTH_DOMAIN = 'ais-dev-wvxosoxc77e7vrt5ewe5gs-795275540927.asia-northeast1.run.app';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -47,9 +50,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState<string | null>(null);
   const [forgotModalOpen, setForgotModalOpen] = useState(false);
 
   if (!isOpen) return null;
+
+  const unauthorizedDomainHost = error?.startsWith('AUTH_UNAUTHORIZED_DOMAIN:')
+    ? error.split(':').slice(1).join(':').trim() ||
+      (typeof window !== 'undefined' ? window.location.hostname : PREVIEW_AUTH_DOMAIN)
+    : null;
+
+  const handleCopyDomain = (host: string) => {
+    try {
+      navigator.clipboard?.writeText(host);
+      setCopiedDomain(host);
+      setTimeout(() => setCopiedDomain(null), 2500);
+    } catch {
+      // ignore clipboard restriction
+    }
+  };
 
   const resetFields = () => {
     setIdentifier('');
@@ -149,9 +168,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* Header */}
           <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-emerald-900 text-white flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-emerald-700 flex items-center justify-center shrink-0">
-                <Sprout className="w-5 h-5 text-emerald-200" />
-              </div>
+              <img
+                src="/assets/aistudio/cropcast-icon_aa50b3f6.png"
+                alt="CropCast"
+                className="w-8 h-8 rounded-lg object-cover shrink-0 shadow-xs"
+              />
               <div>
                 <h2 className="text-base font-bold">
                   {mode === 'signin'
@@ -212,9 +233,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-medium space-y-2">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span>{error}</span>
+                  {unauthorizedDomainHost ? (
+                    <div className="space-y-2 flex-1 min-w-0">
+                      <div className="font-bold text-rose-950">
+                        {t(
+                          'Tên miền hiện tại chưa được cấp phép trong Firebase Authentication (auth/unauthorized-domain).',
+                          'Current domain is not whitelisted in Firebase Authentication (auth/unauthorized-domain).'
+                        )}
+                      </div>
+                      <p className="text-[11px] text-rose-900 leading-relaxed">
+                        {t(
+                          'Vui lòng mở Firebase Console → Authentication → Settings → Authorized domains và thêm các tên miền sau:',
+                          'Open Firebase Console → Authentication → Settings → Authorized domains and add these domains:'
+                        )}
+                      </p>
+                      <div className="space-y-1.5">
+                        {Array.from(new Set([unauthorizedDomainHost, PREVIEW_AUTH_DOMAIN])).map((host) => (
+                          <div
+                            key={host}
+                            className="flex items-center justify-between gap-2 bg-white border border-rose-200 rounded-lg px-2.5 py-1.5"
+                          >
+                            <code className="text-[11px] font-mono text-stone-900 truncate">{host}</code>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyDomain(host)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-rose-100 hover:bg-rose-200 text-rose-900 text-[10px] font-bold shrink-0 cursor-pointer"
+                            >
+                              {copiedDomain === host ? (
+                                <>
+                                  <Check className="w-3 h-3" /> {t('Đã chép', 'Copied')}
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" /> {t('Chép', 'Copy')}
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <span>{error}</span>
+                  )}
                 </div>
-                {mode === 'signin' && (
+                {mode === 'signin' && !unauthorizedDomainHost && (
                   <button
                     type="button"
                     onClick={() => setForgotModalOpen(true)}

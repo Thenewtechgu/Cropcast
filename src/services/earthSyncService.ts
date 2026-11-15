@@ -8,6 +8,7 @@ import type {
   SmapModisGpmSummary,
 } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
+import { getCalendarMonthName } from './translationService';
 
 const EARTH_CACHE_STORAGE_KEY = 'cropcast_earth_metrics_cache_v1';
 
@@ -60,12 +61,12 @@ async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<any 
   }
 }
 
-function buildRecentMonthLabels(count = 6): string[] {
+function buildRecentMonthLabels(count = 6, lang: AppLanguage = 'vi'): string[] {
   const now = new Date();
   const labels: string[] = [];
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    labels.push(`T${d.getMonth() + 1}`);
+    labels.push(getCalendarMonthName(d.getMonth() + 1, lang, true));
   }
   return labels;
 }
@@ -132,7 +133,7 @@ async function fetchAndNormalizeOco2(
   const status: CarbonFluxOco2Record['photosynthesisStatus'] =
     sifVal >= 1.25 ? 'high' : sifVal >= 0.85 ? 'moderate' : 'low';
 
-  const months = buildRecentMonthLabels(6);
+  const months = buildRecentMonthLabels(6, 'en');
   const trendSeries = months.map((m, idx) => {
     const wave = Math.sin((idx + 1) * 0.85 + lat * 0.1) * 0.14;
     return {
@@ -153,8 +154,8 @@ async function fetchAndNormalizeOco2(
     carbonUptakeTonHaYr: uptakeTonHa,
     photosynthesisStatus: status,
     dataSource: granuleTitle
-      ? 'Đo quang hợp & hấp thụ Carbon theo vùng'
-      : 'Cân bằng quang hợp tán lá theo vùng',
+      ? 'NASA OCO-2 Canopy Photosynthesis & Carbon Flux'
+      : 'Regional Canopy Carbon Balance',
     trendSeries,
   };
 }
@@ -223,7 +224,7 @@ async function fetchAndNormalizeGrace(
   const groundwaterStatus: GroundwaterAnomalyGraceRecord['groundwaterStatus'] =
     lweCm >= 1.5 ? 'recharging' : lweCm <= -2.0 ? 'depleting' : 'stable';
 
-  const months = buildRecentMonthLabels(6);
+  const months = buildRecentMonthLabels(6, 'en');
   const trendSeries = months.map((m, idx) => {
     const step =
       (idx - 2.5) *
@@ -249,8 +250,8 @@ async function fetchAndNormalizeGrace(
     groundwaterStatus,
     soilWaterBalancePct: Math.round(rootMoisture * 100),
     dataSource: granuleEntry?.title
-      ? 'Theo dõi trữ lượng nước ngầm & ẩm rễ'
-      : 'Cân bằng nước ngầm vùng rễ',
+      ? 'NASA GRACE-FO Subsurface Water Storage'
+      : 'Root-Zone & Aquifer Water Balance',
     trendSeries,
   };
 }
@@ -286,7 +287,7 @@ async function fetchAndNormalizeGhgeEdgar(
   const emissionLevel: GreenhouseGasEdgarRecord['emissionLevel'] =
     co2eqTonHa >= 4.2 ? 'high' : co2eqTonHa >= 2.0 ? 'moderate' : 'low';
 
-  const months = buildRecentMonthLabels(6);
+  const months = buildRecentMonthLabels(6, 'en');
   const trendSeries = months.map((m, idx) => ({
     label: m,
     value: Number((co2eqTonHa * (0.94 + Math.sin(idx + lon * 0.1) * 0.08)).toFixed(2)),
@@ -303,8 +304,8 @@ async function fetchAndNormalizeGhgeEdgar(
     n2oKgHa,
     co2eqTonHa,
     emissionLevel,
-    cropContext: cropName || 'Cây trồng hiện tại',
-    dataSource: hasGhgc ? 'Ước tính phát thải khí nhà kính đồng ruộng' : 'Mô hình phát thải nông nghiệp theo vùng',
+    cropContext: cropName || 'Current Crop',
+    dataSource: hasGhgc ? 'US GHG Center (GHGx) / EDGAR Field Footprint' : 'Regional Agricultural GHG Model',
     trendSeries,
   };
 }
@@ -375,8 +376,8 @@ async function fetchAndNormalizeSmapModisGpm(
     gpmPrecipitation7dMm: Number(rain7d.toFixed(1)),
     dataSource:
       smapEntry || modisEntry
-        ? 'Theo dõi độ ẩm tầng mặt & độ xanh tán lá'
-        : 'Độ ẩm bề mặt & tán lá ước tính theo vùng',
+        ? 'NASA SMAP Soil Moisture + MODIS NDVI + GPM Rain'
+        : 'Regional Surface Moisture & Canopy Baseline',
   };
 }
 

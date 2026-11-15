@@ -54,6 +54,36 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
   const [basemap, setBasemap] = useState<'satellite' | 'street'>('satellite');
   const [boundaryAlert, setBoundaryAlert] = useState<string | null>(null);
 
+  const buildLabelsLayer = (activeLang: 'vi' | 'en') =>
+    activeLang === 'en'
+      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+          subdomains: 'abcd',
+          maxZoom: 18,
+          opacity: 0.9,
+        })
+      : L.tileLayer(
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          {
+            maxZoom: 18,
+            opacity: 0.85,
+          }
+        );
+
+  const buildStreetLayer = (activeLang: 'vi' | 'en') =>
+    activeLang === 'en'
+      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: 'CARTO Voyager',
+          subdomains: 'abcd',
+          maxZoom: 18,
+        })
+      : L.tileLayer(
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+          {
+            attribution: 'World Street Map',
+            maxZoom: 18,
+          }
+        );
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -77,21 +107,8 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
       }
     );
 
-    const labelsLayer = L.tileLayer(
-      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      {
-        maxZoom: 18,
-        opacity: 0.85,
-      }
-    );
-
-    const osmLayer = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-      {
-        attribution: 'World Street Map',
-        maxZoom: 18,
-      }
-    );
+    const labelsLayer = buildLabelsLayer(langRef.current);
+    const osmLayer = buildStreetLayer(langRef.current);
 
     satelliteLayer.addTo(map);
     labelsLayer.addTo(map);
@@ -140,23 +157,26 @@ export const SatelliteMap: React.FC<SatelliteMapProps> = ({
     };
   }, []);
 
-  // Switch basemap layer cleanly
+  // Switch basemap layer cleanly and re-localize map labels/street tiles when lang toggles
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
     if (!map || !layers) return;
 
+    if (map.hasLayer(layers.osm)) map.removeLayer(layers.osm);
+    if (map.hasLayer(layers.labels)) map.removeLayer(layers.labels);
+    layers.osm = buildStreetLayer(lang);
+    layers.labels = buildLabelsLayer(lang);
+
     if (basemap === 'satellite') {
-      if (map.hasLayer(layers.osm)) map.removeLayer(layers.osm);
       if (!map.hasLayer(layers.satellite)) layers.satellite.addTo(map);
-      if (!map.hasLayer(layers.labels)) layers.labels.addTo(map);
+      layers.labels.addTo(map);
     } else {
       if (map.hasLayer(layers.satellite)) map.removeLayer(layers.satellite);
-      if (map.hasLayer(layers.labels)) map.removeLayer(layers.labels);
-      if (!map.hasLayer(layers.osm)) layers.osm.addTo(map);
+      layers.osm.addTo(map);
     }
     setTimeout(() => map.invalidateSize(), 60);
-  }, [basemap]);
+  }, [basemap, lang]);
 
   // Smoothly fly/pan map & redraw active markers when lat/lon/zoom/flyToTrigger updates
   useEffect(() => {

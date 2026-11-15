@@ -30,6 +30,9 @@ import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { EarthSustainabilityPanel } from './EarthSustainabilityPanel';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useViewMode } from '../contexts/ViewModeContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
+import { getWeatherObservationDate } from '../services/weatherService';
+import { findDistrictInProvince } from '../data/vietnamLocations';
 
 interface DashboardViewProps {
   field: FieldProfile;
@@ -102,18 +105,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const earth = field.adaptiveMemory?.earthMetrics;
   const smap = earth?.smapModis;
-  const baselineMonthMatch = weather.observationDate.match(
-    /Nền khí hậu tháng\s+(\d+)\s*\(([^)]+)\)/i
-  );
-  const localizedObsDate =
-    weather.observationDate === 'Hôm nay (Cập nhật 07:00)'
-      ? t('Hôm nay (Cập nhật 07:00)', 'Today (Updated 07:00)')
-      : baselineMonthMatch
-      ? t(
-          weather.observationDate,
-          `Month ${baselineMonthMatch[1]} Climate Baseline (${baselineMonthMatch[2]})`
-        )
-      : weather.observationDate;
+  const localizedObsDate = getWeatherObservationDate(weather, lang);
   const powerUpdatedLabel = earth?.nasaPowerLastUpdated
     ? new Date(earth.nasaPowerLastUpdated).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')
     : localizedObsDate;
@@ -199,14 +191,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>·</span>
             <span>
               {getLocalizedRegionName(field.province, lang)}
-              {field.district ? `, ${field.district}` : ''}
+              {field.district
+                ? `, ${
+                    lang === 'en'
+                      ? findDistrictInProvince(field.province, field.district)?.nameEn ||
+                        field.districtEn ||
+                        field.district
+                      : field.district
+                  }`
+                : ''}
             </span>
             <span>·</span>
             <span className="font-mono tabular-nums">{field.areaHa} ha</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
-              {field.name}
+              {lang === 'en' ? field.nameEn || field.name : field.name}
             </h1>
             <span
               className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${simpleStatusMeta.cls}`}
@@ -248,6 +248,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Environmental Sustainability Panel — Detailed Mode only so Simple Mode stays clear for farmers */}
       {!isSimpleMode && (
@@ -412,7 +414,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : t('Lần thăm ruộng gần nhất: Đã phát hiện sai lệch & có hướng sửa', 'Latest check-in: Fixes ready to restore plan')}
                 </div>
                 <div className="text-[11px] opacity-90">
-                  {field.adaptiveMemory.planFixRecommendations?.[0] ||
+                  {(lang === 'en'
+                    ? field.adaptiveMemory.planFixRecommendationsEn?.[0] ||
+                      field.adaptiveMemory.lastCheckInSummaryEn
+                    : undefined) ||
+                    field.adaptiveMemory.planFixRecommendations?.[0] ||
                     field.adaptiveMemory.lastCheckInSummary}
                 </div>
               </div>

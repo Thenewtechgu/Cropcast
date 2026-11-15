@@ -182,6 +182,7 @@ export const DEFAULT_WEATHER_SIM: WeatherObservation = {
   vpdMaxHpa: 11.8,
   et0MmDay: 3.6,
   observationDate: 'Hôm nay (Cập nhật tự động)',
+  observationDateEn: 'Today (Auto-updated)',
   isRealtimeAvailable: true,
   source: 'LIVE_WEATHER',
   historicalBaseline: {

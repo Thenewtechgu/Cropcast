@@ -44,6 +44,8 @@ import {
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { fetchFieldEarthMetrics } from '../services/earthSyncService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
+import { getCalendarMonthName } from '../services/translationService';
 
 interface RotationExplorerViewProps {
   field: FieldProfile;
@@ -319,7 +321,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
               {t('Hỗ trợ quyết định Luân canh & Đất khỏe', 'Crop Rotation & Soil Health')}
             </span>
             <span className="text-stone-500">
-              {t('Ruộng:', 'Field:')} <strong className="text-stone-800">{field.name}</strong> (
+              {t('Ruộng:', 'Field:')}{' '}
+              <strong className="text-stone-800">{lang === 'en' ? field.nameEn || field.name : field.name}</strong> (
               {getLocalizedRegionName(field.province, lang)})
             </span>
           </div>
@@ -346,6 +349,8 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
           {t('Xem ảnh vệ tinh thửa ruộng', 'View Field Satellite Map')}
         </button>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Sustainability Context with Last Updated */}
       {earthSnapshot && (
@@ -554,10 +559,9 @@ export const RotationExplorerView: React.FC<RotationExplorerViewProps> = ({
               </span>
               <span className="font-bold text-stone-900 text-sm">
                 {indicators.droughtRiskMonths.length
-                  ? t(
-                      `Tháng ${indicators.droughtRiskMonths.join(', ')}`,
-                      `M${indicators.droughtRiskMonths.join(', M')}`
-                    )
+                  ? indicators.droughtRiskMonths
+                      .map((m) => getCalendarMonthName(m, lang, true))
+                      .join(', ')
                   : t('Ít biến động', 'Low variance')}
               </span>
             </div>

@@ -174,8 +174,11 @@ function mapAuthErrorMessage(err: any): string {
     return 'Trình duyệt đang chặn cửa sổ bật lên Google Sign-In. Vui lòng cho phép popup cho trang này.';
   }
   if (code === 'auth/unauthorized-domain') {
-    const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    return `Tên miền "${host}" chưa được cấp phép trong Firebase Authentication (Authorized domains). Hãy thêm tên miền này trong Firebase Console → Authentication → Settings → Authorized domains.`;
+    const host =
+      typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname
+        : 'ais-dev-wvxosoxc77e7vrt5ewe5gs-795275540927.asia-northeast1.run.app';
+    return `AUTH_UNAUTHORIZED_DOMAIN:${host}`;
   }
   return err?.message || 'Không thể xác thực lúc này. Vui lòng thử lại.';
 }
@@ -211,8 +214,11 @@ function mapPlotDocToField(d: any, currentUid: string): FieldProfile {
     activeShareToken: data.activeShareToken || '',
     isSharedWithMe: data.ownerId !== currentUid,
     name: data.name,
+    nameEn: data.nameEn || undefined,
     province: data.province,
+    provinceEn: data.provinceEn || undefined,
     district: data.district,
+    districtEn: data.districtEn || undefined,
     lat: data.lat,
     lon: data.lon,
     areaHa: data.areaHa,
@@ -669,6 +675,7 @@ export const FirestoreService = {
             triggerDataEn: data.triggerDataEn || undefined,
             status: data.status,
             farmerNote: data.farmerNote,
+            farmerNoteEn: data.farmerNoteEn || undefined,
             createdAt:
               data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
           } as FarmTask;
@@ -692,11 +699,16 @@ export const FirestoreService = {
             fieldId: data.fieldId,
             feedbackType: data.feedbackType,
             userComment: data.userComment,
+            userCommentEn: data.userCommentEn || undefined,
             systemActionTaken: data.systemActionTaken,
+            systemActionTakenEn: data.systemActionTakenEn || undefined,
             predictionOutcome: data.predictionOutcome,
             observedMoisture: data.observedMoisture,
             observedCropHealth: data.observedCropHealth,
             recommendedFixes: Array.isArray(data.recommendedFixes) ? data.recommendedFixes : undefined,
+            recommendedFixesEn: Array.isArray(data.recommendedFixesEn)
+              ? data.recommendedFixesEn
+              : undefined,
             appliedToProfile: data.appliedToProfile,
             timestamp:
               data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
@@ -850,8 +862,11 @@ export const FirestoreService = {
       sharedWithUids: [],
       activeShareToken: '',
       name: fieldData.name.slice(0, 150),
+      nameEn: fieldData.nameEn ? fieldData.nameEn.slice(0, 150) : undefined,
       province: fieldData.province.slice(0, 100),
+      provinceEn: fieldData.provinceEn ? fieldData.provinceEn.slice(0, 100) : undefined,
       district: (fieldData.district || 'Khu vực canh tác').slice(0, 120),
+      districtEn: fieldData.districtEn ? fieldData.districtEn.slice(0, 120) : undefined,
       lat: Number(fieldData.lat),
       lon: Number(fieldData.lon),
       areaHa: Number(Math.max(0.001, Number(fieldData.areaHa) || 0.5).toFixed(4)),
@@ -908,8 +923,11 @@ export const FirestoreService = {
     };
     const updateData: Record<string, any> = {
       name: field.name.slice(0, 150),
+      nameEn: field.nameEn ? field.nameEn.slice(0, 150) : undefined,
       province: field.province.slice(0, 100),
+      provinceEn: field.provinceEn ? field.provinceEn.slice(0, 100) : undefined,
       district: (field.district || 'Khu vực canh tác').slice(0, 120),
+      districtEn: field.districtEn ? field.districtEn.slice(0, 120) : undefined,
       lat: Number(field.lat),
       lon: Number(field.lon),
       areaHa: Number(Math.max(0.001, Number(field.areaHa) || 0.5).toFixed(4)),
@@ -984,7 +1002,8 @@ export const FirestoreService = {
     uid: string,
     taskId: string,
     status: FarmTask['status'],
-    note?: string
+    note?: string,
+    noteEn?: string
   ): Promise<void> {
     const payload: Record<string, any> = {
       status,
@@ -992,6 +1011,9 @@ export const FirestoreService = {
     };
     if (note) {
       payload.farmerNote = note.slice(0, 500);
+    }
+    if (noteEn) {
+      payload.farmerNoteEn = noteEn.slice(0, 500);
     }
     const taskPath = `users/${uid}/tasks/${taskId}`;
     try {
@@ -1014,12 +1036,17 @@ export const FirestoreService = {
       createdAt: serverTimestamp(),
     };
     if (fb.userComment) payload.userComment = fb.userComment.slice(0, 1000);
+    if (fb.userCommentEn) payload.userCommentEn = fb.userCommentEn.slice(0, 1000);
     if (fb.systemActionTaken) payload.systemActionTaken = fb.systemActionTaken.slice(0, 500);
+    if (fb.systemActionTakenEn) payload.systemActionTakenEn = fb.systemActionTakenEn.slice(0, 500);
     if (fb.predictionOutcome) payload.predictionOutcome = fb.predictionOutcome;
     if (fb.observedMoisture) payload.observedMoisture = fb.observedMoisture;
     if (fb.observedCropHealth) payload.observedCropHealth = fb.observedCropHealth;
     if (Array.isArray(fb.recommendedFixes) && fb.recommendedFixes.length > 0) {
       payload.recommendedFixes = fb.recommendedFixes.slice(0, 8).map((s) => String(s).slice(0, 260));
+    }
+    if (Array.isArray(fb.recommendedFixesEn) && fb.recommendedFixesEn.length > 0) {
+      payload.recommendedFixesEn = fb.recommendedFixesEn.slice(0, 8).map((s) => String(s).slice(0, 260));
     }
     const fbPath = `users/${uid}/feedbacks/${fbId}`;
     try {
@@ -1642,13 +1669,30 @@ export const FirestoreService = {
   // Community Forum (City/Region & Nationwide)
   // =========================================================================
 
-  subscribeCommunityPosts(onData: (posts: CommunityPost[]) => void) {
-    return onSnapshot(
+  subscribeCommunityPosts(
+    onData: (posts: CommunityPost[]) => void,
+    onError?: (err: Error) => void
+  ) {
+    const communityQuery = query(
       collection(db, 'community_posts'),
+      where('category', 'in', [
+        'weather_alert',
+        'rotation_tips',
+        'pest_disease',
+        'soil_water',
+        'market_harvest',
+      ])
+    );
+
+    return onSnapshot(
+      communityQuery,
       (snap) => {
         const list: CommunityPost[] = snap.docs
           .map((d) => {
             const data = d.data();
+            const createdIso =
+              data.createdAt?.toDate?.()?.toISOString() ||
+              (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
             return {
               id: d.id,
               authorUid: String(data.authorUid || ''),
@@ -1656,20 +1700,24 @@ export const FirestoreService = {
               province: String(data.province || 'Hà Nội'),
               district: data.district ? String(data.district) : undefined,
               cropName: data.cropName ? String(data.cropName) : undefined,
+              cropNameEn: data.cropNameEn ? String(data.cropNameEn) : undefined,
               category: (data.category || 'rotation_tips') as CommunityCategory,
               title: String(data.title || ''),
+              titleEn: data.titleEn ? String(data.titleEn) : undefined,
               content: String(data.content || ''),
+              contentEn: data.contentEn ? String(data.contentEn) : undefined,
               likesCount: Number(data.likesCount) || 0,
               upvotedUids: Array.isArray(data.upvotedUids) ? data.upvotedUids : [],
               replies: Array.isArray(data.replies) ? data.replies : [],
-              createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+              createdAt: createdIso,
             };
           })
-          .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
         onData(list);
       },
-      () => {
-        onData([]);
+      (err) => {
+        console.warn('Community sync listener error:', err);
+        if (onError) onError(err);
       }
     );
   },
@@ -1681,9 +1729,12 @@ export const FirestoreService = {
       province: string;
       district?: string;
       cropName?: string;
+      cropNameEn?: string;
       category: CommunityCategory;
       title: string;
+      titleEn?: string;
       content: string;
+      contentEn?: string;
     }
   ): Promise<CommunityPost> {
     const postId = `POST_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1694,9 +1745,12 @@ export const FirestoreService = {
       province: input.province.slice(0, 100),
       district: input.district ? input.district.slice(0, 120) : undefined,
       cropName: input.cropName ? input.cropName.slice(0, 120) : undefined,
+      cropNameEn: input.cropNameEn ? input.cropNameEn.slice(0, 150) : undefined,
       category: input.category,
       title: input.title.trim().slice(0, 180),
+      titleEn: input.titleEn ? input.titleEn.trim().slice(0, 220) : undefined,
       content: input.content.trim().slice(0, 3000),
+      contentEn: input.contentEn ? input.contentEn.trim().slice(0, 3500) : undefined,
       likesCount: 0,
       upvotedUids: [],
       replies: [],
@@ -1715,9 +1769,12 @@ export const FirestoreService = {
       province: payload.province,
       district: payload.district,
       cropName: payload.cropName,
+      cropNameEn: payload.cropNameEn,
       category: input.category,
       title: payload.title,
+      titleEn: payload.titleEn,
       content: payload.content,
+      contentEn: payload.contentEn,
       likesCount: 0,
       upvotedUids: [],
       replies: [],
@@ -1730,7 +1787,8 @@ export const FirestoreService = {
     uid: string,
     authorName: string,
     authorProvince: string | undefined,
-    content: string
+    content: string,
+    contentEn?: string
   ): Promise<void> {
     const path = `community_posts/${postId}`;
     const ref = doc(db, 'community_posts', postId);
@@ -1740,6 +1798,7 @@ export const FirestoreService = {
       authorName: (authorName || 'Nông dân CropCast').slice(0, 120),
       authorProvince: authorProvince ? authorProvince.slice(0, 100) : undefined,
       content: content.trim().slice(0, 1200),
+      contentEn: contentEn ? contentEn.trim().slice(0, 1500) : undefined,
       createdAt: new Date().toISOString(),
     };
     try {

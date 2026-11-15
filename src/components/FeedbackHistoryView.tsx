@@ -38,7 +38,10 @@ import {
   importFarmReportFile,
 } from '../services/reportExportImportService';
 import { getCommonStageLabel, getPlantDisplayName } from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { getWeatherObservationDate } from '../services/weatherService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface FeedbackHistoryViewProps {
   activeField: FieldProfile;
@@ -227,9 +230,15 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
     }
   };
 
-  const savedPlanFixes = activeField.adaptiveMemory?.planFixRecommendations || [];
+  const displayFieldName = lang === 'en' ? activeField.nameEn || activeField.name : activeField.name;
+  const savedPlanFixes =
+    (lang === 'en' ? activeField.adaptiveMemory?.planFixRecommendationsEn : undefined) ||
+    activeField.adaptiveMemory?.planFixRecommendations ||
+    [];
   const savedLastOutcome = activeField.adaptiveMemory?.lastPredictionOutcome;
-  const savedCheckInSummary = activeField.adaptiveMemory?.lastCheckInSummary;
+  const savedCheckInSummary =
+    (lang === 'en' ? activeField.adaptiveMemory?.lastCheckInSummaryEn : undefined) ||
+    activeField.adaptiveMemory?.lastCheckInSummary;
 
   const activeFixesToDisplay = latestDiagnostic
     ? latestDiagnostic.fixes
@@ -313,15 +322,15 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
 
     const rows: string[][] = fieldFeedbacks.map((item) => [
       item.timestamp,
-      activeField.name,
-      activeField.province,
+      displayFieldName,
+      getLocalizedRegionName(activeField.province, lang),
       getPlantDisplayName(activeField.crop.name, lang),
       getFeedbackBadgeLabel(item),
       formatObservedMoisture(item.observedMoisture) || '',
       formatObservedHealth(item.observedCropHealth) || '',
-      item.userComment || '',
-      item.systemActionTaken || '',
-      (item.recommendedFixes || []).join(' | '),
+      (lang === 'en' ? item.userCommentEn : undefined) || item.userComment || '',
+      (lang === 'en' ? item.systemActionTakenEn : undefined) || item.systemActionTaken || '',
+      ((lang === 'en' ? item.recommendedFixesEn : undefined) || item.recommendedFixes || []).join(' | '),
       weather ? String(weather.temp) : '',
       weather ? String(weather.rain) : '',
       weather ? String(Math.round(weather.gwetroot * 100)) : '',
@@ -331,13 +340,13 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
     if (weather) {
       rows.push([
         new Date().toISOString(),
-        activeField.name,
-        activeField.province,
+        displayFieldName,
+        getLocalizedRegionName(activeField.province, lang),
         getPlantDisplayName(activeField.crop.name, lang),
         t('Số liệu thời tiết ruộng hiện tại', 'Current Field Weather Snapshot'),
         '',
         '',
-        weather.observationDate,
+        getWeatherObservationDate(weather, lang),
         brief?.headline || '',
         (brief?.topActions || []).map((a) => a.title).join(' | '),
         String(weather.temp),
@@ -424,8 +433,8 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900">
             {t(
-              `Cập nhật Ruộng "${activeField.name}"`,
-              `Field Check-in: "${activeField.name}"`
+              `Cập nhật Ruộng "${displayFieldName}"`,
+              `Field Check-in: "${displayFieldName}"`
             )}
           </h1>
           <p className="text-xs sm:text-sm text-stone-500">
@@ -458,7 +467,8 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
               {t('Hiệu chỉnh hiện tại:', 'Active Calibration:')}
             </div>
             <p className="text-[11px] leading-snug">
-              {activeField.adaptiveMemory?.soilAdjustment ||
+              {(lang === 'en' ? activeField.adaptiveMemory?.soilAdjustmentEn : undefined) ||
+                activeField.adaptiveMemory?.soilAdjustment ||
                 t(
                   'Đang dùng thông số khí hậu nền & loại đất mặc định. Hãy gửi cập nhật sau khi thăm ruộng!',
                   'Using baseline climate & soil parameters. Submit an update after inspecting your field.'
@@ -467,6 +477,8 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
           </div>
         </div>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Active Diagnostic & "What to Fix to Go as Planned" Card */}
       {(activeVerdictTitle || activeFixesToDisplay.length > 0) && (
@@ -944,32 +956,40 @@ export const FeedbackHistoryView: React.FC<FeedbackHistoryViewProps> = ({
                       </div>
                     )}
 
-                    {item.userComment && (
+                    {(lang === 'en' ? item.userCommentEn || item.userComment : item.userComment) && (
                       <p className="text-stone-700 italic bg-white p-2 rounded-lg border border-stone-100 text-[11px]">
-                        "{item.userComment}"
+                        "{lang === 'en' ? item.userCommentEn || item.userComment : item.userComment}"
                       </p>
                     )}
 
-                    {item.systemActionTaken && (
+                    {(lang === 'en'
+                      ? item.systemActionTakenEn || item.systemActionTaken
+                      : item.systemActionTaken) && (
                       <div className="p-2 bg-purple-50/80 rounded-lg border border-purple-200 text-purple-900 text-[11px] flex items-start gap-1.5 font-medium">
                         <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
-                        <span>{item.systemActionTaken}</span>
+                        <span>
+                          {lang === 'en'
+                            ? item.systemActionTakenEn || item.systemActionTaken
+                            : item.systemActionTaken}
+                        </span>
                       </div>
                     )}
 
-                    {item.recommendedFixes && item.recommendedFixes.length > 0 && (
-                      <div className="p-2.5 bg-white rounded-lg border border-stone-200 space-y-1">
-                        <div className="text-[10px] font-bold text-stone-700 flex items-center gap-1">
-                          <Wrench className="w-3 h-3 text-amber-600" />
-                          {t('Hướng dẫn khắc phục đã đề xuất:', 'Suggested Fixes:')}
+                    {((lang === 'en' ? item.recommendedFixesEn : undefined) || item.recommendedFixes) &&
+                      ((lang === 'en' ? item.recommendedFixesEn : undefined) || item.recommendedFixes)!.length > 0 && (
+                        <div className="p-2.5 bg-white rounded-lg border border-stone-200 space-y-1">
+                          <div className="text-[10px] font-bold text-stone-700 flex items-center gap-1">
+                            <Wrench className="w-3 h-3 text-amber-600" />
+                            {t('Hướng dẫn khắc phục đã đề xuất:', 'Suggested Fixes:')}
+                          </div>
+                          <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-stone-600">
+                            {((lang === 'en' ? item.recommendedFixesEn : undefined) ||
+                              item.recommendedFixes)!.map((fx, i) => (
+                              <li key={i}>{fx}</li>
+                            ))}
+                          </ul>
                         </div>
-                        <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-stone-600">
-                          {item.recommendedFixes.map((fx, i) => (
-                            <li key={i}>{fx}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                      )}
                   </div>
                 );
               })}

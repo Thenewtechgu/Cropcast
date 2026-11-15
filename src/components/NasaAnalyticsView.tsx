@@ -35,6 +35,8 @@ import {
 } from '../services/nasaWarehouseService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useViewMode } from '../contexts/ViewModeContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
+import { getCalendarMonthName } from '../services/translationService';
 
 interface NasaAnalyticsViewProps {
   field: FieldProfile;
@@ -51,6 +53,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
 }) => {
   const { lang, t } = useLanguage();
   const { isSimpleMode, setViewMode } = useViewMode();
+  const displayFieldName = lang === 'en' ? field.nameEn || field.name : field.name;
   const [selectedIndicator, setSelectedIndicator] = useState<
     'T2M' | 'PRECTOTCORR' | 'GWETROOT' | 'ALLSKY_SFC_SW_DWN' | 'RH2M'
   >('T2M');
@@ -280,8 +283,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
       riskNote:
         harmonized.droughtRiskMonths.length > 0
           ? t(
-              `Các tháng dễ hụt ẩm: Tháng ${harmonized.droughtRiskMonths.join(', ')}.`,
-              `Dry deficit months: Month ${harmonized.droughtRiskMonths.join(', ')}.`
+              `Các tháng dễ hụt ẩm: ${harmonized.droughtRiskMonths.map((m) => getCalendarMonthName(m, 'vi')).join(', ')}.`,
+              `Dry deficit months: ${harmonized.droughtRiskMonths.map((m) => getCalendarMonthName(m, 'en')).join(', ')}.`
             )
           : t('Độ ẩm duy trì khá đều quanh năm.', 'Moisture remains fairly steady year-round.'),
     },
@@ -295,8 +298,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
       riskNote:
         harmonized.frostRiskMonths.length > 0
           ? t(
-              `Tháng cần đề phòng rét hại ban đêm: Tháng ${harmonized.frostRiskMonths.join(', ')}.`,
-              `Cold night risk months: Month ${harmonized.frostRiskMonths.join(', ')}.`
+              `Tháng cần đề phòng rét hại ban đêm: ${harmonized.frostRiskMonths.map((m) => getCalendarMonthName(m, 'vi')).join(', ')}.`,
+              `Cold night risk months: ${harmonized.frostRiskMonths.map((m) => getCalendarMonthName(m, 'en')).join(', ')}.`
             )
           : t(
               'Ít nguy cơ sương muối nhưng cần tủ gốc vào cao điểm nắng nóng.',
@@ -313,8 +316,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
       riskNote:
         harmonized.floodRiskMonths.length > 0
           ? t(
-              `Tháng mưa tập trung lớn: Tháng ${harmonized.floodRiskMonths.join(', ')}.`,
-              `Peak flood months: Month ${harmonized.floodRiskMonths.join(', ')}.`
+              `Tháng mưa tập trung lớn: ${harmonized.floodRiskMonths.map((m) => getCalendarMonthName(m, 'vi')).join(', ')}.`,
+              `Peak flood months: ${harmonized.floodRiskMonths.map((m) => getCalendarMonthName(m, 'en')).join(', ')}.`
             )
           : t('Chưa ghi nhận mùa mưa cực đoan kéo dài.', 'No prolonged extreme rainfall months flagged.'),
     },
@@ -431,6 +434,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           </button>
         </div>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Climate Change Multi-Year Anomaly & NASA Insights Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -671,7 +676,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
               <Satellite className="w-4 h-4 text-emerald-700" />{' '}
-              {t(`Ảnh vệ tinh khu vực ruộng ${field.name}`, `Satellite view: ${field.name}`)}
+              {t(`Ảnh vệ tinh khu vực ruộng ${displayFieldName}`, `Satellite view: ${displayFieldName}`)}
             </span>
             <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
               {activeOverlay.badge}
@@ -684,7 +689,7 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             heightClass="h-72"
             interactive={true}
             showNasaGrid={true}
-            fieldLabel={field.name}
+            fieldLabel={displayFieldName}
           />
         </div>
 
@@ -746,8 +751,8 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             </h2>
             <p className="text-xs text-stone-500 mt-0.5">
               {t(
-                `Chỉ số khí hậu thực tế và năng suất tham chiếu cho ruộng ${field.name} (${getPlantDisplayName(field.crop.name, 'vi')}).`,
-                `Historical metrics and yield baseline tailored for ${field.name} (${getPlantDisplayName(field.crop.name, 'en')}).`
+                `Chỉ số khí hậu thực tế và năng suất tham chiếu cho ruộng ${displayFieldName} (${getPlantDisplayName(field.crop.name, 'vi')}).`,
+                `Historical metrics and yield baseline tailored for ${displayFieldName} (${getPlantDisplayName(field.crop.name, 'en')}).`
               )}
             </p>
           </div>
@@ -1040,7 +1045,9 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             <p className="text-[11px] text-stone-500">
               {t('Tháng có nguy cơ rét hại:', 'Cold risk months:')}{' '}
               {cell.climatology21Yr.riskMonthsCold.length
-                ? `${t('Tháng', 'M')} ${cell.climatology21Yr.riskMonthsCold.join(', ')}`
+                ? cell.climatology21Yr.riskMonthsCold
+                    .map((m) => getCalendarMonthName(m, lang, true))
+                    .join(', ')
                 : t('Không có', 'None')}
             </p>
           </div>
@@ -1054,7 +1061,9 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
             </div>
             <p className="text-[11px] text-stone-500">
               {t('Tháng mưa bão lớn:', 'Peak rain months:')}{' '}
-              {t('Tháng', 'M')} {cell.climatology21Yr.riskMonthsFlood.join(', ')}
+              {cell.climatology21Yr.riskMonthsFlood
+                .map((m) => getCalendarMonthName(m, lang, true))
+                .join(', ')}
             </p>
           </div>
 
@@ -1063,7 +1072,9 @@ export const NasaAnalyticsView: React.FC<NasaAnalyticsViewProps> = ({
               {t('Tháng khô hạn cao điểm', 'Peak Dry Months')}
             </span>
             <div className="text-stone-900 font-bold text-sm">
-              {t('Tháng', 'Month')} {cell.climatology21Yr.riskMonthsDrought.join(', ')}
+              {cell.climatology21Yr.riskMonthsDrought
+                .map((m) => getCalendarMonthName(m, lang, true))
+                .join(', ')}
             </div>
             <p className="text-[11px] text-stone-500">
               {t(

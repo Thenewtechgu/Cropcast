@@ -10,6 +10,7 @@ import {
 } from '../data/cropTaxonomy';
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface AiAssistantViewProps {
   activeField: FieldProfile;
@@ -173,12 +174,15 @@ const FormattedChatContent: React.FC<{ text: string; isAi: boolean }> = ({ text,
 export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, weather }) => {
   const { lang, t } = useLanguage();
 
+  const getFieldLabel = (field: FieldProfile) =>
+    lang === 'en' ? field.nameEn || field.name : field.name;
+
   const buildGreeting = (field: FieldProfile): ChatMessage => ({
     id: `msg-0-${field.id}-${lang}`,
     sender: 'ai',
     text: t(
       `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu (2001–2026). Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
-      `Hello! I am CropCast Agronomy AI. I am tracking "${field.name}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 2001–2026 climate records. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+      `Hello! I am CropCast Agronomy AI. I am tracking "${getFieldLabel(field)}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 2001–2026 climate records. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
     ),
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
@@ -283,7 +287,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           <h1 className="text-xl font-bold text-stone-900 mt-1">
             {t(
               `Trợ lý Canh tác Riêng cho Thửa ruộng: ${activeField.name}`,
-              `Field Assistant: ${activeField.name}`
+              `Field Assistant: ${getFieldLabel(activeField)}`
             )}
           </h1>
           <p className="text-xs text-stone-500">
@@ -298,6 +302,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
           {t('Cây:', 'Crop:')} {getPlantDisplayName(activeField.crop.name, lang)} • {getCommonStageLabel(activeField.crop.currentStage, lang)}
         </div>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Chat Window */}
       <div className="bg-white rounded-2xl border border-stone-200 shadow-xs flex flex-col h-[65dvh] min-h-[380px] max-h-[560px] overflow-hidden">

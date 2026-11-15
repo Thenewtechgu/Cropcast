@@ -14,17 +14,29 @@ import {
   Droplets,
   Store,
   RefreshCw,
+  Languages,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { AppUser, CommunityCategory, CommunityPost, FieldProfile } from '../types';
-import { VIETNAM_PROVINCES, getDistrictsForProvince } from '../data/vietnamLocations';
+import {
+  VIETNAM_PROVINCES,
+  findDistrictInProvince,
+  findProvinceByName,
+  getDistrictsForProvince,
+} from '../data/vietnamLocations';
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { getPlantDisplayName } from '../data/cropTaxonomy';
+import { translateTexts } from '../services/translationService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface CommunityForumViewProps {
   activeField?: FieldProfile;
   authUser: AppUser | null;
   isDemoMode: boolean;
   posts: CommunityPost[];
+  syncError?: string | null;
   onCreatePost: (input: {
     province: string;
     district?: string;
@@ -37,17 +49,26 @@ interface CommunityForumViewProps {
   onToggleUpvote: (postId: string) => Promise<void> | void;
 }
 
+interface TranslatedPostOverlay {
+  targetLang: 'vi' | 'en';
+  title: string;
+  cropName?: string;
+  content: string;
+  replies: Record<string, string>;
+}
+
 export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
   activeField,
   authUser,
   isDemoMode,
   posts,
+  syncError,
   onCreatePost,
   onAddReply,
   onToggleUpvote,
 }) => {
   const { lang, t } = useLanguage();
-  const [scopeTab, setScopeTab] = useState<'local' | 'nationwide'>('local');
+  const [scopeTab, setScopeTab] = useState<'local' | 'nationwide'>('nationwide');
   const [selectedCity, setSelectedCity] = useState<string>(activeField?.province || 'Cần Thơ');
   const [selectedCategory, setSelectedCategory] = useState<CommunityCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,6 +88,12 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
   const [expandedPostIds, setExpandedPostIds] = useState<Record<string, boolean>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyBusyId, setReplyBusyId] = useState<string | null>(null);
+
+  // Per-post on-the-fly translation state
+  const [translatedOverlays, setTranslatedOverlays] = useState<
+    Record<string, TranslatedPostOverlay | undefined>
+  >({});
+  const [translatingPostId, setTranslatingPostId] = useState<string | null>(null);
 
   const currentActorId = authUser?.uid || 'demo_farmer_local';
 
@@ -110,11 +137,18 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
 
   const filteredPosts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const selProv = findProvinceByName(selectedCity);
     return posts.filter((p) => {
       if (scopeTab === 'local') {
+        const postProv = findProvinceByName(p.province);
         const normPostProv = p.province.toLowerCase();
         const normSelected = selectedCity.toLowerCase();
-        if (normPostProv !== normSelected && !normPostProv.includes(normSelected)) {
+        const matchesProv =
+          (postProv && selProv && postProv.name === selProv.name) ||
+          normPostProv === normSelected ||
+          normPostProv.includes(normSelected) ||
+          normSelected.includes(normPostProv);
+        if (!matchesProv) {
           return false;
         }
       }
@@ -122,7 +156,7 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
         return false;
       }
       if (q) {
-        const hay = `${p.title} ${p.content} ${p.province} ${p.district || ''} ${p.cropName || ''} ${p.authorName}`.toLowerCase();
+        const hay = `${p.title} ${p.titleEn || ''} ${p.content} ${p.contentEn || ''} ${p.province} ${p.district || ''} ${p.cropName || ''} ${p.cropNameEn || ''} ${p.authorName}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -175,6 +209,98 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
     }
   };
 
+  const handleToggleTranslatePost = async (post: CommunityPost) => {
+    const existingOverlay = translatedOverlays[post.id];
+    if (existingOverlay) {
+      setTranslatedOverlays((prev) => ({ ...prev, [post.id]: undefined }));
+      return;
+    }
+
+    const currentlyShowingEn = lang === 'en' && Boolean(post.titleEn && post.contentEn);
+    const targetLang: 'vi' | 'en' = currentlyShowingEn ? 'vi' : lang === 'en' ? 'en' : 'en';
+
+    // If UI is Vietnamese and user wants to translate a post into Vietnamese (e.g. written in English) or English:
+    const hasVietnameseChars = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
+      `${post.title} ${post.content}`
+    );
+    const resolvedTarget: 'vi' | 'en' =
+      lang === 'vi'
+        ? hasVietnameseChars
+          ? 'en'
+          : 'vi'
+        : currentlyShowingEn
+        ? 'vi'
+        : 'en';
+
+    if (resolvedTarget === 'en' && post.titleEn && post.contentEn && (post.replies || []).every((r) => !!r.contentEn)) {
+      const replyMap: Record<string, string> = {};
+      (post.replies || []).forEach((r) => {
+        if (r.contentEn) replyMap[r.id] = r.contentEn;
+      });
+      setTranslatedOverlays((prev) => ({
+        ...prev,
+        [post.id]: {
+          targetLang: 'en',
+          title: post.titleEn!,
+          cropName: post.cropNameEn || (post.cropName ? getPlantDisplayName(post.cropName, 'en') : undefined),
+          content: post.contentEn!,
+          replies: replyMap,
+        },
+      }));
+      return;
+    }
+
+    if (resolvedTarget === 'vi' && post.title && post.content && hasVietnameseChars) {
+      const replyMap: Record<string, string> = {};
+      (post.replies || []).forEach((r) => {
+        replyMap[r.id] = r.content;
+      });
+      setTranslatedOverlays((prev) => ({
+        ...prev,
+        [post.id]: {
+          targetLang: 'vi',
+          title: post.title,
+          cropName: post.cropName,
+          content: post.content,
+          replies: replyMap,
+        },
+      }));
+      return;
+    }
+
+    setTranslatingPostId(post.id);
+    try {
+      const replyList = post.replies || [];
+      const batch = [
+        post.title,
+        post.cropName || '',
+        post.content,
+        ...replyList.map((r) => r.content),
+      ];
+      const { translations } = await translateTexts(
+        batch,
+        resolvedTarget,
+        'Vietnamese farmer community discussion post and comments'
+      );
+      const replyMap: Record<string, string> = {};
+      replyList.forEach((r, idx) => {
+        replyMap[r.id] = translations[3 + idx] || r.content;
+      });
+      setTranslatedOverlays((prev) => ({
+        ...prev,
+        [post.id]: {
+          targetLang: resolvedTarget,
+          title: translations[0] || post.title,
+          cropName: post.cropName ? translations[1] || getPlantDisplayName(post.cropName, resolvedTarget) : undefined,
+          content: translations[2] || post.content,
+          replies: replyMap,
+        },
+      }));
+    } finally {
+      setTranslatingPostId(null);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -203,12 +329,26 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
         <button
           type="button"
           onClick={() => setComposerOpen((v) => !v)}
-          className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 self-start md:self-auto"
+          className="px-4 py-2.5 min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 self-start md:self-auto"
         >
           <Plus className="w-4 h-4" />
           {composerOpen ? t('Đóng khung viết bài', 'Close Composer') : t('Đăng bài chia sẻ / Hỏi đáp', 'New Post / Question')}
         </button>
       </div>
+
+      {syncError && (
+        <div className="p-3.5 rounded-2xl border border-amber-300 bg-amber-50 text-amber-950 text-xs flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-bold">
+              {t('Đồng bộ đám mây đang gặp gián đoạn tạm thời', 'Cloud community sync notice')}
+            </div>
+            <p className="text-[11px] leading-relaxed">{syncError}</p>
+          </div>
+        </div>
+      )}
+
+      <AdvisoryDisclaimer compact />
 
       {/* Scope Tabs: Khu vực cùng thành phố vs Cả nước + City Filter */}
       <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-xs space-y-3">
@@ -487,6 +627,36 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
             const CatIcon = catMeta.icon;
             const hasLiked = post.upvotedUids.includes(currentActorId);
             const isExpanded = !!expandedPostIds[post.id];
+            const overlay = translatedOverlays[post.id];
+            const isTranslating = translatingPostId === post.id;
+
+            const displayDistrict = post.district
+              ? lang === 'en'
+                ? findDistrictInProvince(post.province, post.district)?.nameEn ||
+                  post.districtEn ||
+                  post.district
+                : post.district
+              : undefined;
+
+            const displayCropName = overlay?.cropName
+              ? overlay.cropName
+              : post.cropName
+              ? lang === 'en'
+                ? post.cropNameEn || getPlantDisplayName(post.cropName, 'en')
+                : post.cropName
+              : undefined;
+
+            const displayTitle = overlay
+              ? overlay.title
+              : lang === 'en'
+              ? post.titleEn || post.title
+              : post.title;
+
+            const displayContent = overlay
+              ? overlay.content
+              : lang === 'en'
+              ? post.contentEn || post.content
+              : post.content;
 
             return (
               <article
@@ -504,11 +674,11 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-stone-100 text-stone-800 text-[11px] font-semibold">
                       <MapPin className="w-3 h-3 text-emerald-700" />
                       {getLocalizedRegionName(post.province, lang)}
-                      {post.district ? ` · ${post.district}` : ''}
+                      {displayDistrict ? ` · ${displayDistrict}` : ''}
                     </span>
-                    {post.cropName && (
+                    {displayCropName && (
                       <span className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-bold">
-                        {post.cropName}
+                        {displayCropName}
                       </span>
                     )}
                   </div>
@@ -518,21 +688,30 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <h2 className="text-base font-bold text-stone-900 leading-snug">{post.title}</h2>
-                  <div className="text-[11px] text-stone-500 font-medium">
-                    {t('Đăng bởi:', 'Posted by:')} <strong className="text-stone-700">{post.authorName}</strong>
+                  <h2 className="text-base font-bold text-stone-900 leading-snug">{displayTitle}</h2>
+                  <div className="text-[11px] text-stone-500 font-medium flex flex-wrap items-center gap-2">
+                    <span>
+                      {t('Đăng bởi:', 'Posted by:')} <strong className="text-stone-700">{post.authorName}</strong>
+                    </span>
+                    {overlay && (
+                      <span className="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-900 text-[10px] font-semibold">
+                        {overlay.targetLang === 'en'
+                          ? t('Đã dịch sang Tiếng Anh', 'Translated to English')
+                          : t('Đã dịch sang Tiếng Việt', 'Translated to Vietnamese')}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs sm:text-sm text-stone-700 leading-relaxed pt-1 whitespace-pre-line">
-                    {post.content}
+                    {displayContent}
                   </p>
                 </div>
 
                 <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => onToggleUpvote(post.id)}
-                      className={`px-3 py-1.5 rounded-xl border font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                      className={`px-3 py-1.5 min-h-[40px] sm:min-h-0 rounded-xl border font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
                         hasLiked
                           ? 'bg-emerald-800 text-white border-emerald-800'
                           : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
@@ -548,11 +727,35 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                       onClick={() =>
                         setExpandedPostIds((prev) => ({ ...prev, [post.id]: !prev[post.id] }))
                       }
-                      className="px-3 py-1.5 rounded-xl border bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200 font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
+                      className="px-3 py-1.5 min-h-[40px] sm:min-h-0 rounded-xl border bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200 font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
                       <span>{t('Thảo luận', 'Replies')}</span>
                       <span className="font-mono tabular-nums">({post.replies.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isTranslating}
+                      onClick={() => handleToggleTranslatePost(post)}
+                      className={`px-3 py-1.5 min-h-[40px] sm:min-h-0 rounded-xl border font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                        overlay
+                          ? 'bg-sky-700 text-white border-sky-700'
+                          : 'bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-200'
+                      }`}
+                    >
+                      {isTranslating ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Languages className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {isTranslating
+                          ? t('Đang dịch...', 'Translating...')
+                          : overlay
+                          ? t('Xem bản gốc', 'Show Original')
+                          : t('Dịch VI ↔ EN', 'Translate VI ↔ EN')}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -561,30 +764,35 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                   <div className="pt-2 space-y-2.5">
                     {post.replies.length > 0 && (
                       <div className="space-y-2 pl-3 border-l-2 border-emerald-200">
-                        {(isExpanded ? post.replies : post.replies.slice(0, 1)).map((rep) => (
-                          <div
-                            key={rep.id}
-                            className="p-2.5 bg-stone-50 rounded-xl border border-stone-200/80 text-xs space-y-1"
-                          >
-                            <div className="flex items-center justify-between gap-2 text-[11px]">
-                              <span className="font-bold text-stone-800">
-                                {rep.authorName}
-                                {rep.authorProvince && (
-                                  <span className="text-stone-500 font-normal">
-                                    {' '}
-                                    · {getLocalizedRegionName(rep.authorProvince, lang)}
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-stone-400 font-mono">
-                                {new Date(rep.createdAt).toLocaleDateString(
-                                  lang === 'en' ? 'en-US' : 'vi-VN'
-                                )}
-                              </span>
+                        {(isExpanded ? post.replies : post.replies.slice(0, 1)).map((rep) => {
+                          const displayReplyText =
+                            overlay?.replies[rep.id] ||
+                            (lang === 'en' ? rep.contentEn || rep.content : rep.content);
+                          return (
+                            <div
+                              key={rep.id}
+                              className="p-2.5 bg-stone-50 rounded-xl border border-stone-200/80 text-xs space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-[11px]">
+                                <span className="font-bold text-stone-800">
+                                  {rep.authorName}
+                                  {rep.authorProvince && (
+                                    <span className="text-stone-500 font-normal">
+                                      {' '}
+                                      · {getLocalizedRegionName(rep.authorProvince, lang)}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-stone-400 font-mono">
+                                  {new Date(rep.createdAt).toLocaleDateString(
+                                    lang === 'en' ? 'en-US' : 'vi-VN'
+                                  )}
+                                </span>
+                              </div>
+                              <p className="text-stone-700 leading-relaxed">{displayReplyText}</p>
                             </div>
-                            <p className="text-stone-700 leading-relaxed">{rep.content}</p>
-                          </div>
-                        ))}
+                          );
+                        })}
                         {!isExpanded && post.replies.length > 1 && (
                           <button
                             type="button"

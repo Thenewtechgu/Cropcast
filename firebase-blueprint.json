@@ -90,11 +90,23 @@
           "type": "string",
           "maxLength": 150
         },
+        "nameEn": {
+          "type": "string",
+          "maxLength": 150
+        },
         "province": {
           "type": "string",
           "maxLength": 100
         },
+        "provinceEn": {
+          "type": "string",
+          "maxLength": 100
+        },
         "district": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "districtEn": {
           "type": "string",
           "maxLength": 120
         },
@@ -344,7 +356,15 @@
           "type": "string",
           "maxLength": 200
         },
+        "titleEn": {
+          "type": "string",
+          "maxLength": 200
+        },
         "scheduledTime": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "scheduledTimeEn": {
           "type": "string",
           "maxLength": 100
         },
@@ -356,7 +376,15 @@
           "type": "string",
           "maxLength": 600
         },
+        "reasonEn": {
+          "type": "string",
+          "maxLength": 600
+        },
         "triggerData": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "triggerDataEn": {
           "type": "string",
           "maxLength": 300
         },
@@ -365,6 +393,10 @@
           "enum": ["pending", "completed", "postponed", "skipped"]
         },
         "farmerNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "farmerNoteEn": {
           "type": "string",
           "maxLength": 500
         },
@@ -413,7 +445,15 @@
           "type": "string",
           "maxLength": 1000
         },
+        "userCommentEn": {
+          "type": "string",
+          "maxLength": 1000
+        },
         "systemActionTaken": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "systemActionTakenEn": {
           "type": "string",
           "maxLength": 500
         },
@@ -430,6 +470,9 @@
           "enum": ["healthy", "stressed", "pest_risk"]
         },
         "recommendedFixes": {
+          "type": "array"
+        },
+        "recommendedFixesEn": {
           "type": "array"
         },
         "appliedToProfile": {
@@ -630,6 +673,10 @@
           "type": "string",
           "maxLength": 120
         },
+        "cropNameEn": {
+          "type": "string",
+          "maxLength": 150
+        },
         "category": {
           "type": "string",
           "enum": ["weather_alert", "rotation_tips", "pest_disease", "soil_water", "market_harvest"]
@@ -638,9 +685,17 @@
           "type": "string",
           "maxLength": 180
         },
+        "titleEn": {
+          "type": "string",
+          "maxLength": 220
+        },
         "content": {
           "type": "string",
           "maxLength": 3000
+        },
+        "contentEn": {
+          "type": "string",
+          "maxLength": 3500
         },
         "likesCount": {
           "type": "number"

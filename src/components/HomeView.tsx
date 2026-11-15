@@ -43,6 +43,7 @@ import {
 } from '../services/rotationEngine';
 import { GeminiService } from '../services/geminiService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface HomeViewProps {
   isAuthenticated: boolean;
@@ -672,6 +673,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   </div>
                 )}
               </div>
+
+              <AdvisoryDisclaimer compact />
             </div>
           </div>
         </div>

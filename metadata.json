@@ -1,6 +1,6 @@
 {
   "name": "CropCast",
-  "description": "CropCast – Trợ lý luân canh và canh tác cá nhân hóa theo từng thửa ruộng kết hợp dữ liệu khí hậu 25 năm (2001–2025) và thời tiết thực tế.",
+  "description": "CropCast – Personalized farm crop rotation & climate intelligence assistant powered by NASA POWER (2001–2026), SMAP, GPM, MODIS NDVI, OCO-2, GRACE-FO, US GHG Center STAC, and Google Gemini AI. Recommendations are for reference purposes only and not absolute certainty. All media, logos, and open scientific data are original or openly licensed with zero unauthorized copyrighted materials.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

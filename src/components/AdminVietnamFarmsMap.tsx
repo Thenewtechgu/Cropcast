@@ -80,6 +80,30 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
     [visibleFields]
   );
 
+  const buildStreetLayer = (activeLang: 'vi' | 'en') =>
+    activeLang === 'en'
+      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: 'CARTO Voyager',
+          subdomains: 'abcd',
+          maxZoom: 18,
+        })
+      : L.tileLayer(
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+          { attribution: 'World Street Map', maxZoom: 18 }
+        );
+
+  const buildLabelsLayer = (activeLang: 'vi' | 'en') =>
+    activeLang === 'en'
+      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+          subdomains: 'abcd',
+          maxZoom: 18,
+          opacity: 0.9,
+        })
+      : L.tileLayer(
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          { maxZoom: 18, opacity: 0.9 }
+        );
+
   // Initialize Leaflet map centered on Vietnam
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -92,18 +116,12 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
       scrollWheelZoom: true,
     });
 
-    const streetLayer = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-      { attribution: 'World Street Map', maxZoom: 18 }
-    );
+    const streetLayer = buildStreetLayer(lang);
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       { attribution: 'World Imagery', maxZoom: 18 }
     );
-    const labelsLayer = L.tileLayer(
-      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 18, opacity: 0.9 }
-    );
+    const labelsLayer = buildLabelsLayer(lang);
 
     streetLayer.addTo(map);
     const markerGroup = L.layerGroup().addTo(map);
@@ -123,23 +141,26 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
     };
   }, []);
 
-  // Switch basemap
+  // Switch basemap & re-localize tiles when lang changes
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
     if (!map || !layers) return;
 
+    if (map.hasLayer(layers.street)) map.removeLayer(layers.street);
+    if (map.hasLayer(layers.labels)) map.removeLayer(layers.labels);
+    layers.street = buildStreetLayer(lang);
+    layers.labels = buildLabelsLayer(lang);
+
     if (basemap === 'satellite') {
-      if (map.hasLayer(layers.street)) map.removeLayer(layers.street);
       if (!map.hasLayer(layers.satellite)) layers.satellite.addTo(map);
-      if (!map.hasLayer(layers.labels)) layers.labels.addTo(map);
+      layers.labels.addTo(map);
     } else {
       if (map.hasLayer(layers.satellite)) map.removeLayer(layers.satellite);
-      if (map.hasLayer(layers.labels)) map.removeLayer(layers.labels);
-      if (!map.hasLayer(layers.street)) layers.street.addTo(map);
+      layers.street.addTo(map);
     }
     setTimeout(() => map.invalidateSize(), 50);
-  }, [basemap]);
+  }, [basemap, lang]);
 
   // Render markers whenever visibleFields or lang changes
   useEffect(() => {
@@ -151,8 +172,16 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
 
     // Subtle reference pins for Vietnam archipelagos (Hoàng Sa & Trường Sa)
     const islands: Array<{ name: string; lat: number; lon: number }> = [
-      { name: lang === 'en' ? 'Hoàng Sa Archipelago' : 'Quần đảo Hoàng Sa', lat: 16.53, lon: 111.61 },
-      { name: lang === 'en' ? 'Trường Sa Archipelago' : 'Quần đảo Trường Sa', lat: 10.72, lon: 114.85 },
+      {
+        name: lang === 'en' ? 'Hoàng Sa (Paracel) Archipelago' : 'Quần đảo Hoàng Sa',
+        lat: 16.53,
+        lon: 111.61,
+      },
+      {
+        name: lang === 'en' ? 'Trường Sa (Spratly) Archipelago' : 'Quần đảo Trường Sa',
+        lat: 10.72,
+        lon: 114.85,
+      },
     ];
     islands.forEach((isl) => {
       L.circleMarker([isl.lat, isl.lon], {
@@ -179,9 +208,10 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
       const localizedProv = getLocalizedRegionName(f.province, lang);
       const cropLabel = getPlantDisplayName(f.cropName, lang);
 
+      const localizedPinName = lang === 'en' ? f.nameEn || f.name : f.name;
       marker.bindTooltip(
         `<div style="font-size:11px;line-height:1.35;">
-          <strong>${f.name.replace(/</g, '&lt;')}</strong><br/>
+          <strong>${localizedPinName.replace(/</g, '&lt;')}</strong><br/>
           ${cropLabel.replace(/</g, '&lt;')} · ${f.areaHa} ha<br/>
           ${localizedProv.replace(/</g, '&lt;')} · ${f.ownerName.replace(/</g, '&lt;')}
         </div>`,
@@ -362,12 +392,14 @@ export const AdminVietnamFarmsMap: React.FC<AdminVietnamFarmsMapProps> = ({
           <div className="space-y-0.5">
             <div className="font-bold text-stone-900 flex items-center gap-1.5">
               <Sprout className="w-4 h-4 text-emerald-700" />
-              <span>{selectedPin.name}</span>
+              <span>{lang === 'en' ? selectedPin.nameEn || selectedPin.name : selectedPin.name}</span>
               <span className="text-stone-400">·</span>
               <span className="font-mono text-emerald-800 tabular-nums">{selectedPin.areaHa} ha</span>
             </div>
             <div className="text-stone-600">
-              {selectedPin.district ? `${selectedPin.district}, ` : ''}
+              {selectedPin.district
+                ? `${lang === 'en' ? selectedPin.districtEn || selectedPin.district : selectedPin.district}, `
+                : ''}
               {getLocalizedRegionName(selectedPin.province, lang)} ·{' '}
               {getPlantDisplayName(selectedPin.cropName, lang)} ·{' '}
               {getSoilLabel(selectedPin.soilType, lang)} · {t('Chủ:', 'Owner:')}{' '}

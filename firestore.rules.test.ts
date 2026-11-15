@@ -232,4 +232,29 @@ describe('CropCast Dirty Dozen Firestore Security Tests', () => {
       })
     );
   });
+
+  it('Allows bilingual community post create and cross-user read/reply sync', async () => {
+    const dbA = testEnv.authenticatedContext('userA', { email: 'usera@example.com', email_verified: true }).firestore();
+    const dbB = testEnv.authenticatedContext('userB', { email: 'userb@example.com', email_verified: true }).firestore();
+    await assertSucceeds(
+      setDoc(doc(dbA, 'community_posts', 'POST_SYNC_1'), {
+        authorUid: 'userA',
+        authorName: 'Farmer A',
+        province: 'Cần Thơ',
+        cropName: 'Lúa ST25',
+        cropNameEn: 'ST25 Rice',
+        category: 'rotation_tips',
+        title: 'Thử nghiệm đồng bộ cộng đồng',
+        titleEn: 'Community sync test',
+        content: 'Nội dung chia sẻ kinh nghiệm thực tế',
+        contentEn: 'Practical experience shared across farmers',
+        likesCount: 0,
+        upvotedUids: [],
+        replies: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
+    await assertSucceeds(getDoc(doc(dbB, 'community_posts', 'POST_SYNC_1')));
+  });
 });

@@ -14,7 +14,11 @@ import {
   getSoilLabel,
   getDrainageLabel,
 } from './agronomyEngine';
-import { resolveCropBotanicalProfile } from '../data/cropTaxonomy';
+import {
+  resolveCropBotanicalProfile,
+  getPlantDisplayName,
+  getCommonStageLabel,
+} from '../data/cropTaxonomy';
 import type { AppLanguage } from '../contexts/LanguageContext';
 
 export interface AdvisorApiResponse {
@@ -61,10 +65,20 @@ function buildLocalAgronomyReply(
 ): string {
   const q = userMessage.toLowerCase().trim();
   const isEn = language === 'en';
-  const fieldName = field?.name || (isEn ? 'your field' : 'thửa ruộng của bạn');
-  const cropName = field?.crop?.name || (isEn ? 'current crop' : 'cây trồng hiện tại');
-  const stageName = field?.crop?.currentStage || (isEn ? 'growing stage' : 'đang sinh trưởng');
-  const botanical = resolveCropBotanicalProfile(cropName, field?.crop?.seedFamily, field?.crop?.category);
+  const fieldName = isEn
+    ? field?.nameEn || field?.name || 'your field'
+    : field?.name || 'thửa ruộng của bạn';
+  const cropName = isEn
+    ? field?.crop?.nameEn || getPlantDisplayName(field?.crop?.name || 'Paddy Rice', 'en')
+    : field?.crop?.name || 'cây trồng hiện tại';
+  const stageName = isEn
+    ? field?.crop?.currentStageEn || getCommonStageLabel(field?.crop?.currentStage || 'Đang sinh trưởng', 'en')
+    : field?.crop?.currentStage || 'đang sinh trưởng';
+  const botanical = resolveCropBotanicalProfile(
+    field?.crop?.name || cropName,
+    field?.crop?.seedFamily,
+    field?.crop?.category
+  );
   const familyLabel = isEn ? botanical.familyLabelEn : botanical.familyLabelVi;
   const soilLabel = getSoilLabel(String(field?.soilType || 'loam'), language);
   const drainage = field?.soilCharacteristics?.drainage || 'moderate';
@@ -82,7 +96,6 @@ function buildLocalAgronomyReply(
   const oco2 = earthMetrics?.carbonFluxOco2;
   const ghg = earthMetrics?.greenhouseGasEdgar;
 
-  // 1. Strict Agricultural Domain Guardrail (reject off-topic prompts without hallucination)
   const hasAgriKeyword = AGRI_DOMAIN_HINTS.some((kw) => q.includes(kw));
   const isOffTopic = OFF_TOPIC_PATTERNS.some((rx) => rx.test(q)) && !hasAgriKeyword;
   if (isOffTopic) {
@@ -102,7 +115,6 @@ function buildLocalAgronomyReply(
     ].join('\n');
   }
 
-  // 2. Greeting / initial prompt response
   if (/^(xin\s*chào|chào|hello|hi|hey|alo|good\s*(morning|afternoon|evening))\b/i.test(q) && q.length < 48) {
     if (isEn) {
       return [
@@ -118,7 +130,6 @@ function buildLocalAgronomyReply(
     ].join('\n');
   }
 
-  // 3. Specific leaf symptom / disease diagnostics (red leaf, yellowing, leaf curl, wilt)
   if (
     q.includes('đỏ lá') ||
     q.includes('lá đỏ') ||
@@ -159,7 +170,6 @@ function buildLocalAgronomyReply(
     ].join('\n');
   }
 
-  // 4. Soil drainage estimation query (NASA SMAP + GPM assessment)
   if (
     q.includes('thoát nước') ||
     q.includes('úng') ||
@@ -448,16 +458,44 @@ export const GeminiService = {
       params.rejectionReason,
       lang
     );
+
+    try {
+      const resp = await fetch('/api/gemini/rethink-rotation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field: params.field,
+          baseStrategy: fallbackStrategy,
+          rejectionReason: params.rejectionReason,
+          language: lang,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (typeof data?.whySuggested === 'string' && data.whySuggested.trim()) {
+          return {
+            strategy: {
+              ...fallbackStrategy,
+              whySuggested: data.whySuggested.trim(),
+            },
+            source: 'gemini',
+          };
+        }
+      }
+    } catch {
+      // Offline or unconfigured API key — fall back cleanly to rule engine
+    }
+
     return { strategy: fallbackStrategy, source: 'rule_engine' };
   },
 
   async sendChatMessage(
     message: string,
     field: FieldProfile,
-    _conversationHistory: Array<{ role: 'user' | 'model'; parts: string }>,
+    conversationHistory: Array<{ role: 'user' | 'model'; parts: string }>,
     weather?: WeatherObservation,
     language: AppLanguage = 'vi'
-  ): Promise<{ reply: string; isError?: boolean; fromFallback?: boolean }> {
+  ): Promise<{ reply: string; isError?: boolean; fromFallback?: boolean; provider?: 'gemini' | 'local' }> {
     const earth = field.adaptiveMemory?.earthMetrics;
     const promptText =
       message.trim() ||
@@ -465,10 +503,38 @@ export const GeminiService = {
         ? 'Hello, what should I check on my field today?'
         : 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?');
 
+    try {
+      const resp = await fetch('/api/gemini/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: promptText,
+          field,
+          weather,
+          history: conversationHistory.slice(-8),
+          language,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (typeof data?.reply === 'string' && data.reply.trim()) {
+          return {
+            reply: data.reply.trim(),
+            isError: false,
+            fromFallback: false,
+            provider: 'gemini',
+          };
+        }
+      }
+    } catch {
+      // Fallback seamlessly when offline or server Gemini API key is absent
+    }
+
     return {
       reply: buildLocalAgronomyReply(promptText, field, weather, earth, language),
       isError: false,
-      fromFallback: false,
+      fromFallback: true,
+      provider: 'local',
     };
   },
 };

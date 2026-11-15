@@ -12,6 +12,7 @@ import {
 import { DailyAgronomicBrief, FieldProfile, WeatherObservation } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { getSoilLabel, getDrainageLabel } from '../services/agronomyEngine';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface ExplanationDrawerProps {
   isOpen: boolean;
@@ -278,6 +279,8 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
               </li>
             </ul>
           </section>
+
+          <AdvisoryDisclaimer compact />
         </div>
 
         <div className="p-4 bg-stone-50 border-t border-stone-200 text-right">

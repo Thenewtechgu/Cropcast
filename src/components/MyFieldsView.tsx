@@ -67,6 +67,8 @@ import {
 } from '../data/vietnamLocations';
 import { SatelliteMap } from './SatelliteMap';
 import { AppLanguage, useLanguage } from '../contexts/LanguageContext';
+import { buildBilingualFieldFields } from '../services/translationService';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
 interface MyFieldsViewProps {
   fields: FieldProfile[];
@@ -575,10 +577,27 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
 
     setSavingField(true);
     try {
-      const payload = {
+      const cleanVariety = variety.trim() || (lang === 'en' ? 'Local Variety' : 'Giống địa phương');
+      const cleanDistrict = district.trim() || (lang === 'en' ? 'Cultivation Area' : 'Khu vực canh tác');
+      const bilingual = await buildBilingualFieldFields({
         name: name.trim(),
-        province: province.trim() || 'Hà Nội',
-        district: district.trim() || (lang === 'en' ? 'Cultivation area' : 'Khu vực canh tác'),
+        district: cleanDistrict,
+        cropName: cropName.trim(),
+        variety: cleanVariety,
+        currentStage,
+        farmingMethod,
+        irrigationMethod,
+        sourceLang: lang,
+      });
+
+      const matchedProv = findProvinceByName(province.trim() || 'Hà Nội');
+      const payload = {
+        name: bilingual.name,
+        nameEn: bilingual.nameEn,
+        province: matchedProv?.name || province.trim() || 'Hà Nội',
+        provinceEn: matchedProv?.nameEn || getLocalizedRegionName(province.trim() || 'Hà Nội', 'en'),
+        district: bilingual.district,
+        districtEn: bilingual.districtEn,
         lat,
         lon,
         areaHa: finalAreaHa,
@@ -597,15 +616,20 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
           salinityRisk,
         },
         crop: {
-          seedFamily: resolveCropBotanicalProfile(cropName.trim(), seedFamily, cropCategory).seedFamilyId,
-          name: cropName.trim(),
+          seedFamily: resolveCropBotanicalProfile(bilingual.cropName, seedFamily, cropCategory).seedFamilyId,
+          name: bilingual.cropName,
+          nameEn: bilingual.cropNameEn,
           category: cropCategory,
-          variety: variety.trim() || 'Giống địa phương',
+          variety: bilingual.variety,
+          varietyEn: bilingual.varietyEn,
           plantingDate,
-          currentStage,
+          currentStage: bilingual.currentStage,
+          currentStageEn: bilingual.currentStageEn,
           stageIndex: editingField?.crop.stageIndex || 1,
-          farmingMethod,
-          irrigationMethod,
+          farmingMethod: bilingual.farmingMethod,
+          farmingMethodEn: bilingual.farmingMethodEn,
+          irrigationMethod: bilingual.irrigationMethod,
+          irrigationMethodEn: bilingual.irrigationMethodEn,
           healthStatus: editingField?.crop.healthStatus || 'healthy',
         },
         primaryGoal,
@@ -666,13 +690,15 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
           {!isAuthenticated && (
             <button
               onClick={() => onOpenAuthModal?.()}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
             >
               <LogIn className="w-4 h-4" /> {t('Đăng nhập lưu Cloud', 'Sign In to Sync')}
             </button>
           )}
         </div>
       </div>
+
+      <AdvisoryDisclaimer compact />
 
       {/* Empty State when user has no fields */}
       {fields.length === 0 ? (
@@ -719,6 +745,11 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
               .split('(')[0]
               .trim();
 
+            const localizedFieldName = lang === 'en' ? f.nameEn || f.name : f.name;
+            const matchedDist = f.district ? findDistrictInProvince(f.province, f.district) : undefined;
+            const localizedDistrict =
+              lang === 'en' ? matchedDist?.nameEn || f.districtEn || f.district : f.district;
+
             return (
               <div
                 key={f.id}
@@ -737,7 +768,7 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     heightClass="h-40"
                     interactive={false}
                     showNasaGrid={false}
-                    fieldLabel={f.name}
+                    fieldLabel={localizedFieldName}
                   />
                   <button
                     type="button"
@@ -755,7 +786,10 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 truncate">
-                        {shortBotanicalLabel} · {getPlantDisplayName(f.crop.name, lang)}
+                        {shortBotanicalLabel} ·{' '}
+                        {lang === 'en' && f.crop.nameEn
+                          ? f.crop.nameEn
+                          : getPlantDisplayName(f.crop.name, lang)}
                       </span>
                       {isActive ? (
                         <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1 shrink-0">
@@ -771,10 +805,10 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                       )}
                     </div>
 
-                    <h3 className="font-bold text-base text-stone-900">{f.name}</h3>
+                    <h3 className="font-bold text-base text-stone-900">{localizedFieldName}</h3>
                     <p className="text-xs text-stone-500">
                       {getLocalizedRegionName(f.province, lang)}
-                      {f.district ? `, ${f.district}` : ''} • {t('Diện tích:', 'Area:')} {f.areaHa} ha
+                      {localizedDistrict ? `, ${localizedDistrict}` : ''} • {t('Diện tích:', 'Area:')} {f.areaHa} ha
                     </p>
                     {f.isSharedWithMe ? (
                       <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-900">
@@ -806,10 +840,15 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
                       <span className="text-stone-400 text-[10px] block">{t('Giai đoạn:', 'Stage:')}</span>
                       <span className="font-semibold text-stone-800">
-                        {getCommonStageLabel(f.crop.currentStage, lang)}
+                        {lang === 'en' && f.crop.currentStageEn
+                          ? f.crop.currentStageEn
+                          : getCommonStageLabel(f.crop.currentStage, lang)}
                       </span>
                       <span className="text-[11px] text-stone-500 block">
-                        {t('Giống:', 'Variety:')} {getCommonVarietyLabel(f.crop.variety, lang)}
+                        {t('Giống:', 'Variety:')}{' '}
+                        {lang === 'en' && f.crop.varietyEn
+                          ? f.crop.varietyEn
+                          : getCommonVarietyLabel(f.crop.variety, lang)}
                       </span>
                     </div>
                     <div className="bg-stone-50 p-2 rounded-lg border border-stone-200/80">
@@ -841,7 +880,12 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                   {f.adaptiveMemory?.soilAdjustment && (
                     <div className="p-2 bg-purple-50 border border-purple-200 rounded-lg text-[11px] text-purple-900 flex items-start gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
-                      <span>{t('Đã ghi nhận thực địa:', 'Field note:')} {f.adaptiveMemory.soilAdjustment}</span>
+                      <span>
+                        {t('Đã ghi nhận thực địa:', 'Field note:')}{' '}
+                        {lang === 'en'
+                          ? f.adaptiveMemory.soilAdjustmentEn || f.adaptiveMemory.soilAdjustment
+                          : f.adaptiveMemory.soilAdjustment}
+                      </span>
                     </div>
                   )}
 
@@ -939,7 +983,9 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                 <div>
                   <h2 className="text-base font-bold">
                     {editingField
-                      ? `${t('Chỉnh sửa Hồ sơ:', 'Edit Field:')} ${editingField.name}`
+                      ? `${t('Chỉnh sửa Hồ sơ:', 'Edit Field:')} ${
+                          lang === 'en' ? editingField.nameEn || editingField.name : editingField.name
+                        }`
                       : t('Tạo Hồ sơ Thửa ruộng Mới', 'Create New Field Profile')}
                   </h2>
                   <p className="text-xs text-emerald-200">
@@ -1975,7 +2021,8 @@ export const MyFieldsView: React.FC<MyFieldsViewProps> = ({
                 <div className="min-w-0">
                   <h2 className="text-base font-bold">{t('Chia sẻ Thửa ruộng', 'Share Field')}</h2>
                   <p className="text-[11px] text-emerald-200 truncate max-w-[210px] sm:max-w-[300px]">
-                    {shareModalField.name} · {getLocalizedRegionName(shareModalField.province, lang)}
+                    {lang === 'en' ? shareModalField.nameEn || shareModalField.name : shareModalField.name} ·{' '}
+                    {getLocalizedRegionName(shareModalField.province, lang)}
                   </p>
                 </div>
               </div>

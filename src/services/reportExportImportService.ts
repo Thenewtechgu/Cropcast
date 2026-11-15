@@ -10,7 +10,8 @@ import {
 } from '../types';
 import { AppLanguage } from '../contexts/LanguageContext';
 import { assessSoilDrainageFromEarthData, getDrainageLabel, getSoilLabel } from './agronomyEngine';
-import { getPlantDisplayName } from '../data/cropTaxonomy';
+import { getCommonStageLabel, getCommonVarietyLabel, getPlantDisplayName } from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 
 const EMBED_MARKER = 'CROPCAST_REPORT_V1:';
 
@@ -139,10 +140,18 @@ export async function exportFarmReportPdf(params: {
     marginX,
     66
   );
+  const displayFieldName = isEn ? field.nameEn || field.name : field.name;
+  const displayProvince = getLocalizedRegionName(field.province, lang);
+  const displayDistrict = field.district ? (isEn ? field.districtEn || field.district : field.district) : '';
+  const displayVariety = isEn
+    ? field.crop.varietyEn || getCommonVarietyLabel(field.crop.variety, 'en')
+    : field.crop.variety || '—';
+  const displayStage = getCommonStageLabel(field.crop.currentStage, lang);
+
   ctx.fillStyle = '#d1fae5';
   ctx.font = '20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
   ctx.fillText(
-    `${field.name} · ${field.province}${field.district ? `, ${field.district}` : ''} · ${new Date().toLocaleString(
+    `${displayFieldName} · ${displayProvince}${displayDistrict ? `, ${displayDistrict}` : ''} · ${new Date().toLocaleString(
       isEn ? 'en-US' : 'vi-VN'
     )}`,
     marginX,
@@ -160,8 +169,8 @@ export async function exportFarmReportPdf(params: {
   y += 30;
 
   const profileLines = [
-    `${isEn ? 'Crop / Variety' : 'Cây trồng / Giống'}: ${getPlantDisplayName(field.crop.name, lang)} (${field.crop.variety || '—'})`,
-    `${isEn ? 'Growth Stage' : 'Giai đoạn'}: ${field.crop.currentStage} · ${isEn ? 'Planted' : 'Xuống giống'}: ${field.crop.plantingDate}`,
+    `${isEn ? 'Crop / Variety' : 'Cây trồng / Giống'}: ${getPlantDisplayName(field.crop.name, lang)} (${displayVariety})`,
+    `${isEn ? 'Growth Stage' : 'Giai đoạn'}: ${displayStage} · ${isEn ? 'Planted' : 'Xuống giống'}: ${field.crop.plantingDate}`,
     `${isEn ? 'Area & Coordinates' : 'Diện tích & Tọa độ'}: ${field.areaHa} ha · ${field.lat.toFixed(4)}°N, ${field.lon.toFixed(4)}°E (NASA Grid ${field.nasaGrid.cellId})`,
     `${isEn ? 'Soil & Drainage' : 'Đất & Thoát nước'}: ${getSoilLabel(field.soilType, lang)} · ${getDrainageLabel(field.soilCharacteristics.drainage, lang)}`,
   ];
@@ -291,16 +300,18 @@ export async function exportFarmReportPdf(params: {
       }${fb.observedCropHealth ? ` · ${fb.observedCropHealth}` : ''}`;
       ctx.fillText(lineHead, marginX, y);
       y += 28;
-      if (fb.userComment) {
+      const commentTxt = isEn ? fb.userCommentEn || fb.userComment : fb.userComment;
+      if (commentTxt) {
         ctx.fillStyle = '#44403c';
-        for (const wrapped of wrapLines(ctx, `"${fb.userComment}"`, contentW - 18)) {
+        for (const wrapped of wrapLines(ctx, `"${commentTxt}"`, contentW - 18)) {
           ctx.fillText(wrapped, marginX + 14, y);
           y += 26;
         }
       }
-      if (fb.systemActionTaken) {
+      const actionTxt = isEn ? fb.systemActionTakenEn || fb.systemActionTaken : fb.systemActionTaken;
+      if (actionTxt) {
         ctx.fillStyle = '#065f46';
-        for (const wrapped of wrapLines(ctx, `→ ${fb.systemActionTaken}`, contentW - 18)) {
+        for (const wrapped of wrapLines(ctx, `→ ${actionTxt}`, contentW - 18)) {
           ctx.fillText(wrapped, marginX + 14, y);
           y += 26;
         }
@@ -339,7 +350,7 @@ export async function exportFarmReportPdf(params: {
   ctx.fillStyle = '#78716c';
   ctx.font = '18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
   ctx.fillText(
-    `CropCast · Page ${pages.length + 1} · ${field.name}`,
+    `CropCast · Page ${pages.length + 1} · ${displayFieldName}`,
     marginX,
     1706
   );

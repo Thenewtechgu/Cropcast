@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { FarmTask, FieldProfile } from '../types';
 import { AppLanguage, useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
+import { looksVietnamese, fallbackDictionaryTranslate } from '../services/translationService';
 
 function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
   const cleanTriggerVi = (raw: string) =>
@@ -45,7 +47,16 @@ function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
       .replace(/Giảm phát thải CH₄\/N₂O: Áp dụng rút nước giữa vụ & chia nhỏ đạm/gi, 'Cut CH₄/N₂O emissions: Apply AWD drainage & split fertilizer')
       .replace(/^Tưới bổ sung nhẹ vào sáng sớm mai \(([^)]+)\) để thấm sâu 10–15 cm vùng rễ cho diện tích ([^ ]+) ha\.?$/i, 'Irrigate gently early tomorrow ($1) to moisten 10–15 cm root zone across $2 ha.')
       .replace(/^Ngừng tưới hoàn toàn ít nhất 48–72 giờ cho đến khi nắm đất kiểm tra không còn rỉ nước\.?$/i, 'Pause irrigation for 48–72h until squeezed soil no longer drips water.')
-      .replace(/^Khơi thông rãnh đầu bờ và xẻ rãnh xương cá ở góc trũng để rút hết nước đọng trong 12 giờ\.?$/i, 'Clear outlet ditches and cut shallow cross-furrows to drain standing water within 12h.');
+      .replace(/^Khơi thông rãnh đầu bờ và xẻ rãnh xương cá ở góc trũng để rút hết nước đọng trong 12 giờ\.?$/i, 'Clear outlet ditches and cut shallow cross-furrows to drain standing water within 12h.')
+      .replace(/^Kiểm tra mặt dưới lá, rễ non và chồi ngọn trong bán kính 5 m nếu thấy vết lạ thì khoanh vùng xử lý sớm\.?$/i, 'Inspect leaf undersides, young roots, and shoots within 5 m and isolate affected spots early.')
+      .replace(/^Rải lớp rơm rạ hoặc bã thực vật dày 3–5 cm quanh gốc để giảm bốc hơi trực tiếp trong 3 ngày nắng\.?$/i, 'Spread 3–5 cm straw or crop residue mulch around bases to curb soil evaporation.');
+    if (looksVietnamese(title)) {
+      title = fallbackDictionaryTranslate(title, 'en')
+        .replace(/^Cảnh báo:\s*/i, 'Alert: ')
+        .replace(/^Tạm hoãn:\s*/i, 'Postpone: ')
+        .replace(/^Kiểm tra\s*/i, 'Inspect ')
+        .replace(/^Theo dõi\s*/i, 'Monitor ');
+    }
   }
 
   let scheduledTime = task.scheduledTimeEn || task.scheduledTime;
@@ -74,6 +85,9 @@ function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
         const healthEn = healthRaw.trim().includes('sâu') ? 'pest_risk' : healthRaw.trim().includes('căng') ? 'stressed' : 'healthy';
         return `Corrective step from field update (${soilEn} soil · ${healthEn} crop)`;
       });
+    if (looksVietnamese(reason)) {
+      reason = fallbackDictionaryTranslate(reason, 'en');
+    }
   }
 
   let triggerData = task.triggerDataEn || task.triggerData;
@@ -87,7 +101,8 @@ function localizeTaskFields(task: FarmTask, lang: AppLanguage) {
       .replace(/GWETTOP\s*(\d+%)/gi, 'Topsoil moisture $1')
       .replace(/Ẩm vùng rễ\s*(\d+%)/gi, 'Root-zone moisture $1')
       .replace(/Ẩm tầng rễ\s*(\d+%)/gi, 'Root-zone moisture $1')
-      .replace(/Ẩm tầng mặt\s*(\d+%)/gi, 'Topsoil moisture $1');
+      .replace(/Ẩm tầng mặt\s*(\d+%)/gi, 'Topsoil moisture $1')
+      .replace(/Phản hồi thực địa nông dân/gi, 'Farmer field update');
   }
 
   return { title, scheduledTime, reason, triggerData };
@@ -124,7 +139,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
   });
 
   const getFieldName = (fieldId: string) => {
-    return fields.find((f) => f.id === fieldId)?.name || t('Thửa ruộng', 'Field');
+    const found = fields.find((f) => f.id === fieldId);
+    if (!found) return t('Thửa ruộng', 'Field');
+    return lang === 'en' ? found.nameEn || found.name : found.name;
   };
 
   const handlePostponeSubmit = (taskId: string) => {
@@ -187,6 +204,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
         </div>
       </div>
 
+      <AdvisoryDisclaimer compact />
+
       {/* Filter Bar */}
       <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">
@@ -203,7 +222,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </option>
             {fields.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.name}
+                {lang === 'en' ? f.nameEn || f.name : f.name}
               </option>
             ))}
           </select>
@@ -334,7 +353,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       </span>
                       {task.farmerNote && (
                         <span className="text-amber-800 font-sans font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                          {t('Ghi chú:', 'Note:')} {task.farmerNote}
+                          {t('Ghi chú:', 'Note:')}{' '}
+                          {lang === 'en' ? task.farmerNoteEn || task.farmerNote : task.farmerNote}
                         </span>
                       )}
                     </div>

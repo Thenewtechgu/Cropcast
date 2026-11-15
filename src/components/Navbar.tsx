@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Sprout,
   Menu,
   X,
   ChevronDown,
@@ -54,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         { id: 'rotation', label: t('Luân canh', 'Rotation'), matchTabs: ['rotation', 'calendar', 'analytics'] },
         { id: 'fields', label: t('Ruộng của tôi', 'My Fields'), matchTabs: ['fields'] },
         { id: 'community', label: t('Cộng đồng', 'Community'), matchTabs: ['community'] },
+        { id: 'sources', label: t('Nguồn NASA', 'NASA Data'), matchTabs: ['sources'] },
         { id: 'assistant', label: t('Trợ lý AI', 'AI Assistant'), matchTabs: ['assistant'] },
       ];
 
@@ -62,15 +62,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-4">
           {/* Zone 1: Brand + Compact Field Selector */}
-          <div className="flex items-center gap-4 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setActiveTab(authUser?.isAdmin ? 'admin' : 'home')}
               className="flex items-center gap-2 cursor-pointer shrink-0"
             >
-              <div className="w-8 h-8 rounded-lg bg-emerald-800 flex items-center justify-center text-white">
-                <Sprout className="w-4 h-4" />
-              </div>
+              <img
+                src="/assets/aistudio/cropcast-icon_aa50b3f6.png"
+                alt="CropCast"
+                className="w-8 h-8 rounded-lg object-cover shrink-0 shadow-2xs"
+              />
               <span className="font-bold text-base text-stone-900 tracking-tight whitespace-nowrap">
                 CropCast
               </span>
@@ -81,10 +83,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setFieldDropdownOpen(!fieldDropdownOpen)}
-                  className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200/80 px-3 py-1.5 rounded-lg text-xs text-stone-800 font-medium transition cursor-pointer max-w-[190px]"
+                  className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200/80 px-3 py-1.5 rounded-lg text-xs text-stone-800 font-medium transition cursor-pointer max-w-[180px]"
                 >
                   <span className="truncate font-semibold text-stone-900">
-                    {activeField?.name || (authUser ? t('Chọn ruộng', 'Select field') : t('Chưa chọn ruộng', 'No field selected'))}
+                    {(lang === 'en' ? activeField?.nameEn || activeField?.name : activeField?.name) ||
+                      (authUser ? t('Chọn ruộng', 'Select field') : t('Chưa chọn ruộng', 'No field selected'))}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-stone-500 shrink-0" />
                 </button>
@@ -114,9 +117,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                           }`}
                         >
                           <div>
-                            <div className="text-xs font-semibold text-stone-900">{f.name}</div>
+                            <div className="text-xs font-semibold text-stone-900">
+                              {lang === 'en' ? f.nameEn || f.name : f.name}
+                            </div>
                             <div className="text-[11px] text-stone-500">
-                              {getPlantDisplayName(f.crop.name, lang)} · {getLocalizedRegionName(f.province, lang)}
+                              {lang === 'en' && f.crop.nameEn ? f.crop.nameEn : getPlantDisplayName(f.crop.name, lang)} ·{' '}
+                              {getLocalizedRegionName(f.province, lang)}
                             </div>
                           </div>
                           {f.id === activeField?.id && (
@@ -144,7 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Zone 2: Clean Single-Line Nav Links */}
-          <nav className="hidden lg:flex items-center gap-6">
+          <nav className="hidden lg:flex items-center gap-4 xl:gap-5">
             {navItems.map((item) => {
               const isActive = item.matchTabs.includes(activeTab);
               return (
@@ -197,7 +203,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
-            <PWAInstallButton />
+            <div className="hidden sm:inline-flex">
+              <PWAInstallButton variant="compact" />
+            </div>
 
             {/* Bilingual Language Toggle right on Navbar */}
             <div
@@ -259,7 +267,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg text-stone-600 hover:text-stone-900 hover:bg-stone-100 cursor-pointer lg:hidden"
+              aria-label={t('Mở menu điều hướng', 'Toggle navigation menu')}
+              className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-stone-600 hover:text-stone-900 hover:bg-stone-100 cursor-pointer lg:hidden"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -277,7 +286,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setViewMode('simple')}
-                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                className={`px-3 py-1.5 min-h-[36px] rounded-md transition cursor-pointer ${
                   viewMode === 'simple'
                     ? 'bg-emerald-800 text-white shadow-2xs'
                     : 'text-stone-600'
@@ -288,7 +297,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setViewMode('detailed')}
-                className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                className={`px-3 py-1.5 min-h-[36px] rounded-md transition cursor-pointer ${
                   viewMode === 'detailed'
                     ? 'bg-emerald-800 text-white shadow-2xs'
                     : 'text-stone-600'
@@ -301,7 +310,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('community')}
-              className={`px-2.5 py-1 rounded-lg border font-bold transition cursor-pointer ${
+              className={`px-3 py-1.5 min-h-[36px] rounded-lg border font-bold transition cursor-pointer whitespace-nowrap ${
                 activeTab === 'community'
                   ? 'bg-emerald-800 text-white border-emerald-800'
                   : 'bg-stone-50 text-stone-700 border-stone-200'
@@ -315,7 +324,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-stone-200 bg-white px-4 py-3 space-y-2 shadow-md max-h-[82dvh] overflow-y-auto">
+        <div className="lg:hidden border-t border-stone-200 bg-white px-4 py-3 space-y-2.5 shadow-md max-h-[82dvh] overflow-y-auto">
+          <PWAInstallButton variant="drawer" />
+
           {authUser ? (
             <div className="pb-2 border-b border-stone-100 flex items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -328,7 +339,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onSignOut();
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 bg-stone-100 text-stone-700 rounded-lg font-semibold shrink-0"
+                className="px-3 py-2 min-h-[44px] bg-stone-100 text-stone-700 rounded-lg font-semibold shrink-0 cursor-pointer"
               >
                 {t('Đăng xuất', 'Sign out')}
               </button>
@@ -341,7 +352,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setMobileMenuOpen(false);
                   onSignIn();
                 }}
-                className="w-full py-2 px-3 bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 px-3 min-h-[44px] bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <LogIn className="w-3.5 h-3.5" /> {t('Đăng nhập / Tạo tài khoản', 'Sign in / Create account')}
               </button>
@@ -355,7 +366,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setViewMode('simple')}
-                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                  className={`px-2.5 py-1.5 rounded-md transition cursor-pointer ${
                     viewMode === 'simple' ? 'bg-emerald-800 text-white' : 'text-stone-600'
                   }`}
                 >
@@ -364,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setViewMode('detailed')}
-                  className={`px-2.5 py-1 rounded-md transition cursor-pointer ${
+                  className={`px-2.5 py-1.5 rounded-md transition cursor-pointer ${
                     viewMode === 'detailed' ? 'bg-emerald-800 text-white' : 'text-stone-600'
                   }`}
                 >
@@ -389,16 +400,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                         onSelectField(f.id);
                         setMobileMenuOpen(false);
                       }}
-                      className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between text-xs border ${
+                      className={`w-full px-3 py-2.5 min-h-[44px] rounded-xl text-left flex items-center justify-between text-xs border cursor-pointer ${
                         f.id === activeField?.id
                           ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold'
                           : 'bg-stone-50 border-stone-200 text-stone-700'
                       }`}
                     >
                       <div className="min-w-0 pr-2">
-                        <div className="truncate">{f.name}</div>
+                        <div className="truncate">{lang === 'en' ? f.nameEn || f.name : f.name}</div>
                         <div className="text-[10px] text-stone-500 truncate">
-                          {getPlantDisplayName(f.crop.name, lang)} · {getLocalizedRegionName(f.province, lang)}
+                          {lang === 'en' && f.crop.nameEn ? f.crop.nameEn : getPlantDisplayName(f.crop.name, lang)} ·{' '}
+                          {getLocalizedRegionName(f.province, lang)}
                         </div>
                       </div>
                       {f.id === activeField?.id && (
@@ -414,7 +426,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setMobileMenuOpen(false);
                   onOpenNewFieldModal();
                 }}
-                className="w-full py-2 px-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 px-3 min-h-[44px] bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" /> {t('Thêm thửa ruộng mới', 'Add New Field')}
               </button>
@@ -432,7 +444,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setActiveTab(item.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium transition ${
+                  className={`w-full text-left px-3 py-2.5 min-h-[44px] rounded-xl text-sm font-medium transition cursor-pointer ${
                     isActive ? 'bg-emerald-800 text-white' : 'text-stone-700 hover:bg-stone-100'
                   }`}
                 >

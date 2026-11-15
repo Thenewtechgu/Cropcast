@@ -167,9 +167,12 @@ service cloud.firestore {
         'province',
         'district',
         'cropName',
+        'cropNameEn',
         'category',
         'title',
+        'titleEn',
         'content',
+        'contentEn',
         'likesCount',
         'upvotedUids',
         'replies',
@@ -181,9 +184,12 @@ service cloud.firestore {
       data.province is string && data.province.size() > 0 && data.province.size() <= 100 &&
       (!('district' in data) || (data.district is string && data.district.size() <= 120)) &&
       (!('cropName' in data) || (data.cropName is string && data.cropName.size() <= 120)) &&
+      (!('cropNameEn' in data) || (data.cropNameEn is string && data.cropNameEn.size() <= 150)) &&
       data.category in ['weather_alert', 'rotation_tips', 'pest_disease', 'soil_water', 'market_harvest'] &&
       data.title is string && data.title.size() > 0 && data.title.size() <= 180 &&
+      (!('titleEn' in data) || (data.titleEn is string && data.titleEn.size() <= 220)) &&
       data.content is string && data.content.size() > 0 && data.content.size() <= 3000 &&
+      (!('contentEn' in data) || (data.contentEn is string && data.contentEn.size() <= 3500)) &&
       data.likesCount is number && data.likesCount >= 0 && data.likesCount <= 100000 &&
       data.upvotedUids is list && data.upvotedUids.size() <= 500 &&
       data.replies is list && data.replies.size() <= 200 &&
@@ -193,7 +199,7 @@ service cloud.firestore {
     // Community Forum Posts (local city & nationwide farmer Q&A, non-PII)
     match /community_posts/{postId} {
       allow get: if isValidId(postId);
-      allow list: if resource.data.category is string;
+      allow list: if resource.data.category in ['weather_alert', 'rotation_tips', 'pest_disease', 'soil_water', 'market_harvest'];
       allow create: if isValidId(postId) && isSignedIn() &&
         isValidCommunityPost(request.resource.data) &&
         request.resource.data.createdAt == request.time;

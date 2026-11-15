@@ -1,6 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  doc,
+  getDocFromServer,
+  type Firestore,
+} from 'firebase/firestore';
 import appletConfig from '../firebase-applet-config.json';
 
 const env = import.meta.env;
@@ -35,9 +41,25 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = resolvedDatabaseId
-  ? getFirestore(app, resolvedDatabaseId)
-  : getFirestore(app);
+
+function createFirestoreInstance(): Firestore {
+  if (typeof window !== 'undefined') {
+    try {
+      return initializeFirestore(
+        app,
+        { experimentalForceLongPolling: true },
+        resolvedDatabaseId || undefined
+      );
+    } catch {
+      // Fallback if Firestore instance was already initialized
+    }
+  }
+  return resolvedDatabaseId
+    ? getFirestore(app, resolvedDatabaseId)
+    : getFirestore(app);
+}
+
+export const db = createFirestoreInstance();
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -109,6 +131,9 @@ export function handleFirestoreError(
 }
 
 async function testConnection() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return;
+  }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {

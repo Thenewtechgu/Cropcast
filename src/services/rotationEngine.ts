@@ -12,6 +12,7 @@ import {
   getPlantDisplayName,
 } from '../data/cropTaxonomy';
 import { getSoilLabel, getDrainageLabel } from './agronomyEngine';
+import { getCalendarMonthName } from './translationService';
 import type { AppLanguage } from '../contexts/LanguageContext';
 
 export function getLocalizedEvapRisk(risk: 'Thấp' | 'Trung bình' | 'Cao' | string, lang: AppLanguage = 'vi'): string {
@@ -337,7 +338,7 @@ export function analyzeBareFieldAndStressTimeline(
 
     return {
       month: monthNum,
-      monthLabel: isEn ? `Month ${monthNum}` : `Tháng ${monthNum}`,
+      monthLabel: getCalendarMonthName(monthNum, lang),
       fieldState,
       stressLevel,
       dominantRisk,
@@ -556,8 +557,8 @@ export function generateRotationStrategies(
           ? `Nitrogen-Fixing & Low-Emission Rotation: ${legumeCrop} (Fabaceae)`
           : `Luân canh Cố định đạm & Giảm phát thải: Xen vụ ${legumeCrop} (Họ Đậu)`,
         sequenceSummary: isEn
-          ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentBotanicalFamily}) → ${legumeCrop} (Fabaceae) → Main season`
-          : `${field.crop.name} (${currentBotanicalFamily}) → ${legumeCrop} (Họ Đậu — Fabaceae) → Vụ chính kế tiếp`,
+          ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentFamilyLabel}) → ${legumeCrop} (Fabaceae) → Main season`
+          : `${field.crop.name} (${currentFamilyLabel}) → ${legumeCrop} (Họ Đậu — Fabaceae) → Vụ chính kế tiếp`,
         nextCropFamily: 'fabaceae',
         nextCropName: legumeCrop,
         suitabilityScore: Math.min(98, Math.max(40, legumeRawScore)),
@@ -579,8 +580,8 @@ export function generateRotationStrategies(
           waterDemand: isEn ? 'Deep taproot & short 65–95 day cycle saves groundwater.' : 'Rễ cọc hút ẩm sâu và chu kỳ ngắn 65–95 ngày tiết kiệm nước.',
           erosionAndOrganicMatter: isEn ? 'Biomass residues build topsoil carbon.' : 'Thân lá đậu cày vùi giúp tăng mùn và giữ ẩm tầng mặt.',
           pestCycleDisruption: isEn
-            ? `Switches from ${currentBotanicalFamily} to Fabaceae, breaking host-specific soil pathogens.`
-            : `Khác họ thực vật (${currentBotanicalFamily} → Họ Đậu Fabaceae), giúp ngắt triệt để sâu bệnh chuyên tính cũ.`,
+            ? `Switches from ${currentFamilyLabel} to Fabaceae, breaking host-specific soil pathogens.`
+            : `Khác họ thực vật (${currentFamilyLabel} → Họ Đậu Fabaceae), giúp ngắt triệt để sâu bệnh chuyên tính cũ.`,
           forageAndIncome: isEn ? 'High-value grain plus protein-rich haulms for livestock.' : 'Thu hạt thương phẩm giá tốt kèm phụ phẩm làm thức ăn gia súc.',
         },
         informationGaps: [
@@ -651,14 +652,14 @@ export function generateRotationStrategies(
       ? `Cross-Family Resilient & Income Rotation: ${resilientCrop} (${resilientBotanicalLabel})`
       : `Luân canh Khác họ Chịu hạn & Tăng thu nhập: ${resilientCrop} (${resilientBotanicalLabel})`,
     sequenceSummary: isEn
-      ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentBotanicalFamily}) → ${resilientCrop} (${resilientBotanicalLabel}) → Main crop`
-      : `${field.crop.name} (${currentBotanicalFamily}) → ${resilientCrop} (${resilientBotanicalLabel}) → Vụ chính`,
+      ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentFamilyLabel}) → ${resilientCrop} (${resilientBotanicalLabel}) → Main crop`
+      : `${field.crop.name} (${currentFamilyLabel}) → ${resilientCrop} (${resilientBotanicalLabel}) → Vụ chính`,
     nextCropFamily: resilientFamily,
     nextCropName: resilientCrop,
     suitabilityScore: Math.min(96, Math.max(45, resilientScore)),
     whySuggested: isEn
-      ? `Switches botanical family from ${currentBotanicalFamily} to ${resilientBotanicalLabel}, adapting to groundwater deficits while diversifying farm income or livestock fodder.`
-      : `Chuyển đổi từ ${currentBotanicalFamily} sang ${resilientBotanicalLabel} giúp ngắt mầm bệnh lưu tồn, thích nghi khi mực nước ngầm giảm và tăng thu nhập.`,
+      ? `Switches botanical family from ${currentFamilyLabel} to ${resilientBotanicalLabel}, adapting to groundwater deficits while diversifying farm income or livestock fodder.`
+      : `Chuyển đổi từ ${currentFamilyLabel} sang ${resilientBotanicalLabel} giúp ngắt mầm bệnh lưu tồn, thích nghi khi mực nước ngầm giảm và tăng thu nhập.`,
     supportingEvidence: [
       earth?.groundwaterAnomalyGrace
         ? isEn
@@ -673,8 +674,8 @@ export function generateRotationStrategies(
       waterDemand: isEn ? 'Tolerates dry intervals with residual soil moisture.' : 'Chịu khô hạn tốt, tận dụng ẩm dư sau vụ mưa.',
       erosionAndOrganicMatter: isEn ? 'Broad canopy shields topsoil from heavy raindrop impact.' : 'Tán lá che phủ giảm xói mòn khi mưa lớn.',
       pestCycleDisruption: isEn
-        ? `True botanical shift (${currentBotanicalFamily} → ${resilientBotanicalLabel}) disrupts specialist soil pests.`
-        : `Khác hẳn họ thực vật (${currentBotanicalFamily} → ${resilientBotanicalLabel}), cắt đứt sâu bệnh chuyên tính.`,
+        ? `True botanical shift (${currentFamilyLabel} → ${resilientBotanicalLabel}) disrupts specialist soil pests.`
+        : `Khác hẳn họ thực vật (${currentFamilyLabel} → ${resilientBotanicalLabel}), cắt đứt sâu bệnh chuyên tính.`,
       forageAndIncome: isEn ? 'Dual-purpose cash crop and livestock silage/vines.' : 'Dễ bán củ/quả hoặc tận dụng thân lá nuôi gia súc.',
     },
     informationGaps: [
@@ -744,8 +745,8 @@ export function generateRotationStrategies(
           ? 'Carbon Cover Crop & Soil Recovery: Sesbania / Sunn Hemp / Black Bean (Fabaceae)'
           : 'Luân canh Cây che phủ & Phục hồi Carbon đất: Gieo Điền thanh / Muồng hoa vàng (Họ Đậu)',
         sequenceSummary: isEn
-          ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentBotanicalFamily}) → Green Manure Cover (45–55d, Fabaceae) → Main crop`
-          : `${field.crop.name} (${currentBotanicalFamily}) → Cây che phủ họ Đậu (45–55 ngày) → Vụ chính`,
+          ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentFamilyLabel}) → Green Manure Cover (45–55d, Fabaceae) → Main crop`
+          : `${field.crop.name} (${currentFamilyLabel}) → Cây che phủ họ Đậu (45–55 ngày) → Vụ chính`,
         nextCropFamily: 'fabaceae',
         nextCropName: isEn
           ? 'Sesbania / Sunn Hemp / Cover Black Bean (Fabaceae)'
@@ -800,6 +801,9 @@ export function pickBestRotationStrategy(
     field.crop.category
   );
   const currentBotanicalFamily = resolvedBotanical.botanicalFamily;
+  const currentFamilyLabel = isEn
+    ? resolvedBotanical.familyLabelEn
+    : resolvedBotanical.familyLabelVi;
   const all = generateRotationStrategies(
     field,
     weather,
@@ -841,30 +845,30 @@ export function pickBestRotationStrategy(
     if (currentBotanicalFamily === 'Araceae') {
       altCrop = isEn ? 'Short-Season Paddy Rice (Poaceae)' : 'Lúa ngắn ngày chịu ngập (Họ Hòa thảo)';
       altFamily = 'poaceae';
-      altBotanicalNote = 'Poaceae';
+      altBotanicalNote = isEn ? 'Grasses (Poaceae)' : 'Họ Hòa thảo (Poaceae)';
     } else {
       altCrop = isEn ? 'Wetland Taro (Araceae)' : 'Khoai môn nước lên luống (Họ Ráy)';
       altFamily = 'other_perennial';
-      altBotanicalNote = 'Araceae';
+      altBotanicalNote = isEn ? 'Arums (Araceae)' : 'Họ Ráy (Araceae)';
     }
   } else if (isMarketConcern) {
     if (currentBotanicalFamily === 'Cucurbitaceae') {
       altCrop = isEn ? 'Choy Sum / Leafy Brassicas or Okra' : 'Rau cải ngọt (Họ Cải) hoặc Đậu bắp (Họ Bông)';
       altFamily = 'brassicaceae';
-      altBotanicalNote = 'Brassicaceae / Malvaceae';
+      altBotanicalNote = isEn ? 'Brassicas / Mallows' : 'Họ Cải / Họ Bông';
     } else {
       altCrop = isEn ? 'Cucumber / Wax Gourd (Cucurbitaceae)' : 'Dưa leo / Bí xanh dễ bán (Họ Bầu bí)';
       altFamily = 'cucurbitaceae';
-      altBotanicalNote = 'Cucurbitaceae';
+      altBotanicalNote = isEn ? 'Cucurbits (Cucurbitaceae)' : 'Họ Bầu bí (Cucurbitaceae)';
     }
   } else if (currentBotanicalFamily === 'Pedaliaceae' || currentBotanicalFamily === 'Malvaceae') {
     altCrop = isEn ? 'Short-Season Sweet Corn (Poaceae)' : 'Ngô nếp ngắn ngày (Họ Hòa thảo)';
     altFamily = 'poaceae';
-    altBotanicalNote = 'Poaceae';
+    altBotanicalNote = isEn ? 'Grasses (Poaceae)' : 'Họ Hòa thảo (Poaceae)';
   } else {
     altCrop = isEn ? 'Drought-Tolerant Black Sesame (Pedaliaceae) or Okra (Malvaceae)' : 'Vừng (Mè) đen chịu hạn (Họ Vừng) hoặc Đậu bắp (Họ Bông)';
     altFamily = 'other_perennial';
-    altBotanicalNote = 'Pedaliaceae / Malvaceae';
+    altBotanicalNote = isEn ? 'Sesame / Mallows' : 'Họ Vừng / Họ Bông';
   }
 
   const indicators = computeHarmonizedIndicators(field, weather, { rainDeltaPct: 0, tempDeltaC: 0 }, lang);
@@ -876,18 +880,18 @@ export function pickBestRotationStrategy(
       ? `Tailored Rotation for Your Field: ${altCrop}`
       : `Phương án điều chỉnh riêng cho ruộng của bạn: Trồng ${altCrop}`,
     sequenceSummary: isEn
-      ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentBotanicalFamily}) → ${altCrop} (${altBotanicalNote}) → Straw Mulch`
-      : `${field.crop.name} (${currentBotanicalFamily}) → ${altCrop} → Phủ rơm giữ ẩm`,
+      ? `${getPlantDisplayName(field.crop.name, 'en')} (${currentFamilyLabel}) → ${altCrop} (${altBotanicalNote}) → Straw Mulch`
+      : `${field.crop.name} (${currentFamilyLabel}) → ${altCrop} → Phủ rơm giữ ẩm`,
     nextCropFamily: altFamily,
     nextCropName: altCrop,
     suitabilityScore: 89,
     whySuggested: rejectionReason
       ? isEn
-        ? `Tailored directly to your feedback ("${rejectionReason}") while switching botanical family (${currentBotanicalFamily} → ${altBotanicalNote}).`
-        : `Được điều chỉnh trực tiếp theo phản hồi thực tế của bạn ("${rejectionReason}"), đảm bảo khác họ thực vật (${currentBotanicalFamily} → ${altBotanicalNote}).`
+        ? `Tailored directly to your feedback ("${rejectionReason}") while switching botanical family (${currentFamilyLabel} → ${altBotanicalNote}).`
+        : `Được điều chỉnh trực tiếp theo phản hồi thực tế của bạn ("${rejectionReason}"), đảm bảo khác họ thực vật (${currentFamilyLabel} → ${altBotanicalNote}).`
       : isEn
-      ? `Flexible cross-family alternative (${currentBotanicalFamily} → ${altBotanicalNote}) with fast cash turnaround.`
-      : `Phương án thay thế linh hoạt khác họ (${currentBotanicalFamily} → ${altBotanicalNote}), ngắn ngày và dễ tiêu thụ.`,
+      ? `Flexible cross-family alternative (${currentFamilyLabel} → ${altBotanicalNote}) with fast cash turnaround.`
+      : `Phương án thay thế linh hoạt khác họ (${currentFamilyLabel} → ${altBotanicalNote}), ngắn ngày và dễ tiêu thụ.`,
     supportingEvidence: [
       isEn
         ? `Root moisture ${indicators.rootMoisturePct}% and ${getSoilLabel(field.soilType, 'en')} support rapid 50–70 day maturity.`
@@ -904,8 +908,8 @@ export function pickBestRotationStrategy(
         : 'Nhu cầu nước vừa phải, dễ điều tiết.',
       erosionAndOrganicMatter: isEn ? 'Covers soil during inter-season gap.' : 'Che phủ đất trong giai đoạn chuyển vụ.',
       pestCycleDisruption: isEn
-        ? `Switches host family completely (${currentBotanicalFamily} → ${altBotanicalNote}).`
-        : `Thay đổi họ thực vật hoàn toàn (${currentBotanicalFamily} → ${altBotanicalNote}).`,
+        ? `Switches host family completely (${currentFamilyLabel} → ${altBotanicalNote}).`
+        : `Thay đổi họ thực vật hoàn toàn (${currentFamilyLabel} → ${altBotanicalNote}).`,
       forageAndIncome: isEn ? 'Quick cash harvest for local markets.' : 'Dễ bán nhanh tại chợ địa phương.',
     },
     informationGaps: [

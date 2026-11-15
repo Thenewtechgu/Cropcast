@@ -5,6 +5,8 @@ import { evaluatePlantingCalendar } from '../services/agronomyEngine';
 import { getPlantDisplayName } from '../data/cropTaxonomy';
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
+import { getCalendarMonthName } from '../services/translationService';
 
 interface PlantingCalendarViewProps {
   activeField: FieldProfile;
@@ -172,6 +174,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
         </div>
       </div>
 
+      <AdvisoryDisclaimer compact />
+
       {/* Legend & Notation Guide */}
       <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -261,7 +265,7 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
                 }`}
               >
                 <div className="text-xs font-bold text-stone-700">
-                  {t(`Tháng ${ev.month}`, `Month ${ev.month}`)}
+                  {getCalendarMonthName(ev.month, lang)}
                 </div>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center my-1 ${statusIconBg}`}>
                   {getStatusIcon(ev.status)}
@@ -291,8 +295,8 @@ export const PlantingCalendarView: React.FC<PlantingCalendarViewProps> = ({
               <CalendarDays className="w-5 h-5 text-emerald-700" />
               <h3 className="font-bold text-base text-stone-900">
                 {t(
-                  `Phân tích thời vụ (2001–2026): Xuống giống vào Tháng ${activeDetail.month}`,
-                  `Seasonal Climate Stats (2001–2026): Planting in Month ${activeDetail.month}`
+                  `Phân tích thời vụ (2001–2026): Xuống giống vào ${getCalendarMonthName(activeDetail.month, 'vi')}`,
+                  `Seasonal Climate Stats (2001–2026): Planting in ${getCalendarMonthName(activeDetail.month, 'en')}`
                 )}
               </h3>
             </div>

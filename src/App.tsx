@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import { FirestoreService } from './services/firestoreService';
@@ -28,6 +28,8 @@ import { CommunityForumView } from './components/CommunityForumView';
 import { ExplanationDrawer } from './components/ExplanationDrawer';
 import { InteractiveMapModal } from './components/InteractiveMapModal';
 import { AdminDataManagementView } from './components/AdminDataManagementView';
+import { NasaSourcesView } from './components/NasaSourcesView';
+import { AdvisoryDisclaimer } from './components/AdvisoryDisclaimer';
 import { AuthModal } from './components/AuthModal';
 import { RecoveryEmailModal } from './components/RecoveryEmailModal';
 import {
@@ -74,6 +76,7 @@ import {
   saveDemoForumPosts,
 } from './data/demoData';
 import { findNearestNasaGrid } from './data/nasaVietnamGrid';
+import { translateTexts } from './services/translationService';
 
 const TAB_TO_PATH: Record<string, string> = {
   home: '/',
@@ -85,6 +88,7 @@ const TAB_TO_PATH: Record<string, string> = {
   analytics: '/phan-tich-ban-do',
   fields: '/ruong-cua-toi',
   community: '/cong-dong',
+  sources: '/nguon-du-lieu-nasa',
   assistant: '/tro-ly-ai',
   admin: '/quan-tri',
 };
@@ -100,6 +104,7 @@ const PATH_TO_TAB: Record<string, string> = {
   '/phan-tich-ban-do': 'analytics',
   '/ruong-cua-toi': 'fields',
   '/cong-dong': 'community',
+  '/nguon-du-lieu-nasa': 'sources',
   '/tro-ly-ai': 'assistant',
   '/quan-tri': 'admin',
 };
@@ -136,10 +141,12 @@ export default function App() {
   const [feedbackHistory, setFeedbackHistory] = useState<FeedbackRecord[]>([]);
   const [plansByPlotId, setPlansByPlotId] = useState<Record<string, PlotPlanRecord>>({});
   const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => loadDemoForumPosts());
+  const [communitySyncError, setCommunitySyncError] = useState<string | null>(null);
   const [demoHydrated, setDemoHydrated] = useState(false);
   const [weatherRefreshing, setWeatherRefreshing] = useState(false);
   const [datasetRefreshTick, setDatasetRefreshTick] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const prevLoginUidRef = useRef<string | null>(null);
   const isDemoMode = authReady && !authUser;
 
   const setActiveFieldId = (nextIdOrUpdater: string | ((prev: string) => string)) => {
@@ -371,17 +378,41 @@ export default function App() {
       });
   }, [authReady, authUser, pendingShareToken]);
 
+  // Real-time community forum listener — always active across Demo Mode, Farmer & Admin sessions
+  useEffect(() => {
+    if (!authReady) return;
+    const unsubCommunity = FirestoreService.subscribeCommunityPosts(
+      (cloudPosts) => {
+        setCommunitySyncError(null);
+        const localDemoPosts = loadDemoForumPosts().filter(
+          (dp) => !cloudPosts.some((cp) => cp.id === dp.id)
+        );
+        setCommunityPosts([...cloudPosts, ...localDemoPosts]);
+      },
+      (err) => {
+        setCommunitySyncError(
+          err?.message ||
+            t(
+              'Không thể đồng bộ diễn đàn cộng đồng theo thời gian thực. Đang hiển thị bản lưu cục bộ.',
+              'Could not sync real-time community posts. Showing locally cached posts.'
+            )
+        );
+      }
+    );
+    return () => unsubCommunity();
+  }, [authReady]);
+
   // Subscribe to farmer's cloud records OR hydrate default Demo Workspace when unauthenticated
   useEffect(() => {
     if (!authReady) return;
 
     if (!authUser) {
+      prevLoginUidRef.current = null;
       const demo = loadDemoWorkspace();
       setFields(demo.fields);
       setTasks(demo.tasks);
       setFeedbackHistory(demo.feedbacks);
       setPlansByPlotId(demo.plans);
-      setCommunityPosts(loadDemoForumPosts());
       setActiveFieldId((prev) =>
         prev && demo.fields.some((f) => f.id === prev) ? prev : demo.fields[0]?.id || ''
       );
@@ -396,6 +427,7 @@ export default function App() {
     setDemoHydrated(false);
 
     if (authUser.isAdmin) {
+      prevLoginUidRef.current = authUser.uid;
       setFields([]);
       setTasks([]);
       setFeedbackHistory([]);
@@ -451,13 +483,6 @@ export default function App() {
       setPlansByPlotId(cloudPlans);
     });
 
-    const unsubCommunity = FirestoreService.subscribeCommunityPosts((cloudPosts) => {
-      const localDemoPosts = loadDemoForumPosts().filter(
-        (dp) => !cloudPosts.some((cp) => cp.id === dp.id)
-      );
-      setCommunityPosts([...cloudPosts, ...localDemoPosts]);
-    });
-
     if (activeTab === 'admin') {
       navigateToTab('dashboard', true);
     }
@@ -468,9 +493,60 @@ export default function App() {
       unsubTasks();
       unsubFeedbacks();
       unsubPlans();
-      unsubCommunity();
     };
   }, [authReady, authUser]);
+
+  // Requirement #7: Instant live weather check immediately on login across active user fields
+  useEffect(() => {
+    if (!authReady || !authUser || authUser.isAdmin) return;
+    if (prevLoginUidRef.current === authUser.uid) return;
+    if (fields.length === 0) return;
+
+    prevLoginUidRef.current = authUser.uid;
+    let cancelled = false;
+
+    const refreshOnLogin = async () => {
+      const targetField = fields.find((f) => f.id === activeFieldId) || fields[0];
+      if (!targetField) return;
+      setWeatherRefreshing(true);
+      try {
+        const freshPrimary = await fetchFieldLiveWeather(
+          targetField.lat,
+          targetField.lon,
+          targetField,
+          { forceRefresh: true }
+        );
+        if (!cancelled) {
+          setWeather(freshPrimary);
+          setLastSyncedAt(new Date().toISOString());
+          OfflineCacheService.saveWeatherForField(authUser.uid, targetField.id, freshPrimary).catch(() => {});
+        }
+        // Background refresh remaining active fields (up to 5) so switching fields has fresh weather
+        const remaining = fields.filter((f) => f.id !== targetField.id).slice(0, 4);
+        await Promise.all(
+          remaining.map(async (f) => {
+            try {
+              const w = await fetchFieldLiveWeather(f.lat, f.lon, f, { forceRefresh: true });
+              if (!cancelled) {
+                await OfflineCacheService.saveWeatherForField(authUser.uid, f.id, w);
+              }
+            } catch {
+              // ignore secondary field error
+            }
+          })
+        );
+      } catch {
+        // fallback already handled by weatherService
+      } finally {
+        if (!cancelled) setWeatherRefreshing(false);
+      }
+    };
+
+    refreshOnLogin();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, authUser?.uid, authUser?.isAdmin, fields, activeFieldId]);
 
   // Persist Demo Mode workspace edits in localStorage so reloads keep farmer changes
   useEffect(() => {
@@ -738,40 +814,92 @@ export default function App() {
     status: FarmTask['status'],
     note?: string
   ) => {
+    let viNote = note;
+    let enNote = note;
+    if (note && note.trim()) {
+      try {
+        const targetLang = lang === 'en' ? 'vi' : 'en';
+        const { translations } = await translateTexts(
+          [note.trim()],
+          targetLang,
+          'Farmer note on field agronomic task status'
+        );
+        if (lang === 'en') {
+          enNote = note.trim();
+          viNote = translations[0] || note.trim();
+        } else {
+          viNote = note.trim();
+          enNote = translations[0] || note.trim();
+        }
+      } catch {
+        // fallback cleanly
+      }
+    }
+
     if (!authUser) {
       setTasks((prev) =>
         prev.map((tk) =>
-          tk.id === taskId ? { ...tk, status, ...(note ? { farmerNote: note } : {}) } : tk
+          tk.id === taskId
+            ? { ...tk, status, ...(viNote ? { farmerNote: viNote, farmerNoteEn: enNote } : {}) }
+            : tk
         )
       );
       return;
     }
-    await FirestoreService.updateTaskStatus(authUser.uid, taskId, status, note);
+    await FirestoreService.updateTaskStatus(authUser.uid, taskId, status, viNote, enNote);
   };
 
   const handleAddFeedback = async (feedback: Omit<FeedbackRecord, 'id' | 'timestamp'>) => {
     if (!activeField || activeField.isSharedWithMe) return;
+    let userCommentEn = feedback.userCommentEn;
+    let userComment = feedback.userComment;
+    if (feedback.userComment && feedback.userComment.trim() && !feedback.userCommentEn) {
+      try {
+        const targetLang = lang === 'en' ? 'vi' : 'en';
+        const { translations } = await translateTexts(
+          [feedback.userComment.trim()],
+          targetLang,
+          'Farmer field observation feedback note'
+        );
+        if (lang === 'en') {
+          userCommentEn = feedback.userComment.trim();
+          userComment = translations[0] || feedback.userComment.trim();
+        } else {
+          userComment = feedback.userComment.trim();
+          userCommentEn = translations[0] || feedback.userComment.trim();
+        }
+      } catch {
+        // fallback cleanly
+      }
+    }
+
+    const enrichedFeedback = {
+      ...feedback,
+      ...(userComment ? { userComment } : {}),
+      ...(userCommentEn ? { userCommentEn } : {}),
+    };
+
+    const adjustmentVi =
+      feedback.feedbackType === 'soil_still_dry'
+        ? 'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới'
+        : feedback.feedbackType === 'soil_too_wet'
+        ? 'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh'
+        : undefined;
+    const adjustmentEn =
+      feedback.feedbackType === 'soil_still_dry'
+        ? 'Field dried faster than forecast: Increased irrigation reminder sensitivity'
+        : feedback.feedbackType === 'soil_too_wet'
+        ? 'Field retained moisture / drained slowly: Prioritized drainage checks'
+        : undefined;
+
     if (!authUser) {
       const localFb: FeedbackRecord = {
-        ...feedback,
+        ...enrichedFeedback,
         id: `DEMO_FB_${Date.now()}`,
         timestamp: new Date().toISOString(),
       };
       setFeedbackHistory((prev) => [localFb, ...prev]);
-      if (
-        feedback.feedbackType === 'soil_still_dry' ||
-        feedback.feedbackType === 'soil_too_wet'
-      ) {
-        const adjustment =
-          feedback.feedbackType === 'soil_still_dry'
-            ? t(
-                'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
-                'Field dried faster than forecast: Increased irrigation reminder sensitivity'
-              )
-            : t(
-                'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
-                'Field retained moisture / drained slowly: Prioritized drainage checks'
-              );
+      if (adjustmentVi) {
         setFields((prev) =>
           prev.map((f) =>
             f.id === activeField.id
@@ -779,7 +907,8 @@ export default function App() {
                   ...f,
                   adaptiveMemory: {
                     ...f.adaptiveMemory,
-                    soilAdjustment: adjustment,
+                    soilAdjustment: adjustmentVi,
+                    soilAdjustmentEn: adjustmentEn,
                     lastFeedbackDate: new Date().toISOString().slice(0, 10),
                   },
                 }
@@ -789,26 +918,14 @@ export default function App() {
       }
       return;
     }
-    await FirestoreService.createFeedback(authUser.uid, feedback);
-    if (
-      feedback.feedbackType === 'soil_still_dry' ||
-      feedback.feedbackType === 'soil_too_wet'
-    ) {
-      const adjustment =
-        feedback.feedbackType === 'soil_still_dry'
-          ? t(
-              'Nông dân phản hồi đất khô nhanh hơn dự báo: Tăng độ nhạy nhắc tưới',
-              'Field dried faster than forecast: Increased irrigation reminder sensitivity'
-            )
-          : t(
-              'Nông dân phản hồi đất giữ ẩm lâu / thoát nước chậm: Ưu tiên khơi thông rãnh',
-              'Field retained moisture / drained slowly: Prioritized drainage checks'
-            );
+    await FirestoreService.createFeedback(authUser.uid, enrichedFeedback);
+    if (adjustmentVi) {
       await FirestoreService.updateField(authUser.uid, {
         ...activeField,
         adaptiveMemory: {
           ...activeField.adaptiveMemory,
-          soilAdjustment: adjustment,
+          soilAdjustment: adjustmentVi,
+          soilAdjustmentEn: adjustmentEn,
           lastFeedbackDate: new Date().toISOString().slice(0, 10),
         },
       });
@@ -823,19 +940,16 @@ export default function App() {
       userComment: note,
       systemActionTaken:
         type === 'soil_still_dry'
-          ? t(
-              'Ghi nhận đất khô nhanh: Tăng độ nhạy nhắc tưới',
-              'Recorded fast-drying soil: Increased irrigation alert sensitivity'
-            )
+          ? 'Ghi nhận đất khô nhanh: Tăng độ nhạy nhắc tưới'
           : type === 'soil_too_wet'
-          ? t(
-              'Ghi nhận đất thoát chậm: Ưu tiên thoát nước',
-              'Recorded slow drainage: Prioritized field drainage'
-            )
-          : t(
-              'Đã lưu phản hồi vào nhật ký ruộng',
-              'Saved feedback to field log'
-            ),
+          ? 'Ghi nhận đất thoát chậm: Ưu tiên thoát nước'
+          : 'Đã lưu phản hồi vào nhật ký ruộng',
+      systemActionTakenEn:
+        type === 'soil_still_dry'
+          ? 'Recorded fast-drying soil: Increased irrigation alert sensitivity'
+          : type === 'soil_too_wet'
+          ? 'Recorded slow drainage: Prioritized field drainage'
+          : 'Saved feedback to field log',
       appliedToProfile: true,
     });
   };
@@ -846,9 +960,39 @@ export default function App() {
   ): Promise<FieldCheckInDiagnostic | null> => {
     if (!activeField || activeField.isSharedWithMe) return null;
 
-    const currentBrief =
-      ruleBrief || analyzeFieldAgronomy(activeField, weather, feedbackHistory, lang);
-    const diagnostic = evaluateFieldCheckIn(activeField, weather, currentBrief, input, lang);
+    const briefVi =
+      lang === 'vi' && ruleBrief
+        ? ruleBrief
+        : analyzeFieldAgronomy(activeField, weather, feedbackHistory, 'vi');
+    const briefEn =
+      lang === 'en' && ruleBrief
+        ? ruleBrief
+        : analyzeFieldAgronomy(activeField, weather, feedbackHistory, 'en');
+    const diagnosticVi = evaluateFieldCheckIn(activeField, weather, briefVi, input, 'vi');
+    const diagnosticEn = evaluateFieldCheckIn(activeField, weather, briefEn, input, 'en');
+    const diagnostic = lang === 'en' ? diagnosticEn : diagnosticVi;
+
+    let noteVi = input.note;
+    let noteEn = input.note;
+    if (input.note && input.note.trim()) {
+      try {
+        const targetLang = lang === 'en' ? 'vi' : 'en';
+        const { translations } = await translateTexts(
+          [input.note.trim()],
+          targetLang,
+          'Farmer check-in observation note'
+        );
+        if (lang === 'en') {
+          noteEn = input.note.trim();
+          noteVi = translations[0] || input.note.trim();
+        } else {
+          noteVi = input.note.trim();
+          noteEn = translations[0] || input.note.trim();
+        }
+      } catch {
+        // fallback cleanly
+      }
+    }
 
     const feedbackType: FeedbackType =
       input.observedMoisture === 'dry'
@@ -867,12 +1011,15 @@ export default function App() {
         fieldId: activeField.id,
         timestamp: new Date().toISOString(),
         feedbackType,
-        userComment: input.note,
-        systemActionTaken: `${diagnostic.verdictTitle} — ${diagnostic.rootCauseExplanation}`,
+        userComment: noteVi,
+        userCommentEn: noteEn,
+        systemActionTaken: `${diagnosticVi.verdictTitle} — ${diagnosticVi.rootCauseExplanation}`,
+        systemActionTakenEn: `${diagnosticEn.verdictTitle} — ${diagnosticEn.rootCauseExplanation}`,
         predictionOutcome: input.predictionOutcome,
         observedMoisture: input.observedMoisture,
         observedCropHealth: input.observedCropHealth,
-        recommendedFixes: diagnostic.fixes,
+        recommendedFixes: diagnosticVi.fixes,
+        recommendedFixesEn: diagnosticEn.fixes,
         appliedToProfile: true,
       };
       setFeedbackHistory((prev) => [localFb, ...prev]);
@@ -888,12 +1035,15 @@ export default function App() {
                 },
                 adaptiveMemory: {
                   ...f.adaptiveMemory,
-                  soilAdjustment: diagnostic.soilAdjustmentNote,
+                  soilAdjustment: diagnosticVi.soilAdjustmentNote,
+                  soilAdjustmentEn: diagnosticEn.soilAdjustmentNote,
                   irrigationSensitivity: diagnostic.irrigationSensitivity,
                   lastFeedbackDate: new Date().toISOString().slice(0, 10),
                   lastPredictionOutcome: input.predictionOutcome,
-                  lastCheckInSummary: diagnostic.rootCauseExplanation,
-                  planFixRecommendations: diagnostic.fixes,
+                  lastCheckInSummary: diagnosticVi.rootCauseExplanation,
+                  lastCheckInSummaryEn: diagnosticEn.rootCauseExplanation,
+                  planFixRecommendations: diagnosticVi.fixes,
+                  planFixRecommendationsEn: diagnosticEn.fixes,
                 },
               }
             : f
@@ -908,12 +1058,15 @@ export default function App() {
     await FirestoreService.createFeedback(authUser.uid, {
       fieldId: activeField.id,
       feedbackType,
-      userComment: input.note,
-      systemActionTaken: `${diagnostic.verdictTitle} — ${diagnostic.rootCauseExplanation}`,
+      userComment: noteVi,
+      userCommentEn: noteEn,
+      systemActionTaken: `${diagnosticVi.verdictTitle} — ${diagnosticVi.rootCauseExplanation}`,
+      systemActionTakenEn: `${diagnosticEn.verdictTitle} — ${diagnosticEn.rootCauseExplanation}`,
       predictionOutcome: input.predictionOutcome,
       observedMoisture: input.observedMoisture,
       observedCropHealth: input.observedCropHealth,
-      recommendedFixes: diagnostic.fixes,
+      recommendedFixes: diagnosticVi.fixes,
+      recommendedFixesEn: diagnosticEn.fixes,
       appliedToProfile: true,
     });
 
@@ -926,12 +1079,15 @@ export default function App() {
       },
       adaptiveMemory: {
         ...activeField.adaptiveMemory,
-        soilAdjustment: diagnostic.soilAdjustmentNote,
+        soilAdjustment: diagnosticVi.soilAdjustmentNote,
+        soilAdjustmentEn: diagnosticEn.soilAdjustmentNote,
         irrigationSensitivity: diagnostic.irrigationSensitivity,
         lastFeedbackDate: new Date().toISOString().slice(0, 10),
         lastPredictionOutcome: input.predictionOutcome,
-        lastCheckInSummary: diagnostic.rootCauseExplanation,
-        planFixRecommendations: diagnostic.fixes,
+        lastCheckInSummary: diagnosticVi.rootCauseExplanation,
+        lastCheckInSummaryEn: diagnosticEn.rootCauseExplanation,
+        planFixRecommendations: diagnosticVi.fixes,
+        planFixRecommendationsEn: diagnosticEn.fixes,
       },
     });
 
@@ -1135,6 +1291,27 @@ export default function App() {
     title: string;
     content: string;
   }) => {
+    const otherLang = lang === 'en' ? 'vi' : 'en';
+    const { translations } = await translateTexts(
+      [input.title, input.content, input.cropName || ''],
+      otherLang,
+      'Vietnamese farmer community discussion post'
+    );
+    const title = lang === 'en' ? translations[0] || input.title : input.title;
+    const titleEn = lang === 'en' ? input.title : translations[0] || input.title;
+    const content = lang === 'en' ? translations[1] || input.content : input.content;
+    const contentEn = lang === 'en' ? input.content : translations[1] || input.content;
+    const cropName = input.cropName
+      ? lang === 'en'
+        ? translations[2] || input.cropName
+        : input.cropName
+      : undefined;
+    const cropNameEn = input.cropName
+      ? lang === 'en'
+        ? input.cropName
+        : translations[2] || input.cropName
+      : undefined;
+
     if (!authUser) {
       const localPost: CommunityPost = {
         id: `DEMO_POST_${Date.now()}`,
@@ -1142,10 +1319,13 @@ export default function App() {
         authorName: t('Nông hộ Demo', 'Demo Farmer'),
         province: input.province,
         district: input.district,
-        cropName: input.cropName,
+        cropName,
+        cropNameEn,
         category: input.category,
-        title: input.title,
-        content: input.content,
+        title,
+        titleEn,
+        content,
+        contentEn,
         likesCount: 0,
         upvotedUids: [],
         replies: [],
@@ -1159,11 +1339,28 @@ export default function App() {
       });
       return;
     }
-    await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, input);
+    await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, {
+      ...input,
+      cropName,
+      cropNameEn,
+      title,
+      titleEn,
+      content,
+      contentEn,
+    });
   };
 
   const handleAddCommunityReply = async (postId: string, content: string) => {
     const target = communityPosts.find((p) => p.id === postId);
+    const otherLang = lang === 'en' ? 'vi' : 'en';
+    const { translations } = await translateTexts(
+      [content],
+      otherLang,
+      'Farmer reply in agricultural community forum'
+    );
+    const contentVi = lang === 'en' ? translations[0] || content : content;
+    const contentEn = lang === 'en' ? content : translations[0] || content;
+
     if (!authUser || target?.isDemoSeed) {
       const replyAuthorUid = authUser?.uid || 'DEMO_FARMER';
       const replyAuthorName = authUser?.displayName || t('Nông hộ Demo', 'Demo Farmer');
@@ -1179,7 +1376,8 @@ export default function App() {
                     authorUid: replyAuthorUid,
                     authorName: replyAuthorName,
                     authorProvince: activeField?.province,
-                    content,
+                    content: contentVi,
+                    contentEn,
                     createdAt: new Date().toISOString(),
                   },
                 ],
@@ -1196,7 +1394,8 @@ export default function App() {
       authUser.uid,
       authUser.displayName,
       activeField?.province,
-      content
+      contentVi,
+      contentEn
     );
   };
 
@@ -1602,10 +1801,15 @@ export default function App() {
             authUser={authUser}
             isDemoMode={isDemoMode}
             posts={communityPosts}
+            syncError={communitySyncError}
             onCreatePost={handleCreateCommunityPost}
             onAddReply={handleAddCommunityReply}
             onToggleUpvote={handleToggleCommunityUpvote}
           />
+        )}
+
+        {!authUser?.isAdmin && activeTab === 'sources' && (
+          <NasaSourcesView onNavigateTab={navigateToTab} />
         )}
 
         {authUser?.isAdmin && (
@@ -1658,7 +1862,7 @@ export default function App() {
       {!authUser?.isAdmin && (
         <nav
           aria-label={t('Điều hướng nhanh trên điện thoại', 'Mobile quick navigation')}
-          className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]"
+          className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] pb-[env(safe-area-inset-bottom)]"
         >
           <div className="grid grid-cols-5 h-16 max-w-lg mx-auto">
             {[
@@ -1684,7 +1888,7 @@ export default function App() {
                 id: 'analytics',
                 label: t('Khí hậu', 'Climate'),
                 icon: Globe,
-                matchTabs: ['analytics'],
+                matchTabs: ['analytics', 'sources'],
               },
               {
                 id: 'assistant',
@@ -1700,7 +1904,7 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => navigateToTab(item.id)}
-                  className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold transition cursor-pointer ${
+                  className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold transition cursor-pointer ${
                     isActive
                       ? 'text-emerald-800 bg-emerald-50/70'
                       : 'text-stone-500 hover:text-stone-900'
@@ -1715,29 +1919,39 @@ export default function App() {
         </nav>
       )}
 
-      {/* Attribution Footer (NASA Space Apps Challenge + AI Transparency) */}
-      <footer className="bg-white border-t border-stone-200 py-5 pb-24 lg:pb-5 px-4 text-xs text-stone-500 mt-10">
-        <div className="max-w-7xl mx-auto flex flex-col gap-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <span className="font-semibold text-stone-700">CropCast</span>
-            <span>
-              {t(
-                'Hỗ trợ canh tác & luân canh bền vững dựa trên dữ liệu khí hậu 25+ năm (2001–2026) & thời tiết thực địa',
-                'Sustainable farming & crop rotation powered by 25+ year (2001–2026) climate & field weather data'
-              )}
-            </span>
+      {/* Attribution, Copyright Compliance & Advisory Disclaimer Footer */}
+      <footer className="bg-white border-t border-stone-200 py-6 pb-28 lg:pb-6 px-4 text-xs text-stone-500 mt-10">
+        <div className="max-w-7xl mx-auto flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <img
+              src="/assets/aistudio/cropcast-logo_7ee55ee8.png"
+              alt="CropCast — Learn from the past. Grow the future."
+              className="h-9 w-auto object-contain self-start"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigateToTab('sources')}
+                className="px-3 py-1.5 min-h-[36px] rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 font-bold text-xs cursor-pointer transition"
+              >
+                {t('Xem Trang Nguồn dữ liệu NASA & Bản quyền', 'View NASA Data & Sources Page')}
+              </button>
+            </div>
           </div>
-          <div className="pt-2 border-t border-stone-100 text-[11px] text-stone-400 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+
+          <AdvisoryDisclaimer compact />
+
+          <div className="pt-2 border-t border-stone-100 text-[11px] text-stone-500 flex flex-col md:flex-row md:items-center justify-between gap-2 leading-relaxed">
             <span>
               {t(
-                'Nguồn dữ liệu vệ tinh & khí tượng: NASA POWER, SMAP, GPM, PRISM, OCO-2/3, GRACE-FO, GHG Center STAC & Open-Meteo.',
-                'Earth Observation & Weather Sources: NASA POWER, SMAP, GPM, PRISM, OCO-2/3, GRACE-FO, GHG Center STAC & Open-Meteo.'
+                'Nguồn dữ liệu vệ tinh & khí tượng: NASA POWER (2001–2026), SMAP, GPM, MODIS NDVI, OCO-2/3, GRACE-FO, US GHG Center STAC & Open-Meteo.',
+                'Earth Observation & Weather Sources: NASA POWER (2001–2026), SMAP, GPM, MODIS NDVI, OCO-2/3, GRACE-FO, US GHG Center STAC & Open-Meteo.'
               )}
             </span>
             <span>
               {t(
-                'Minh bạch AI: Phân tích khuyến nghị có hỗ trợ AI/quy tắc nông học — kiểm chứng thực địa trước khi quyết định.',
-                'AI Transparency: Recommendations use AI & agronomic models — verify on-field before operational action.'
+                'Tuyên bố bản quyền: Đội ngũ không sử dụng nhạc, hình ảnh hay văn bản có bản quyền trái phép; sử dụng Trợ lý AI Gemini (Google AI) qua cấu hình API phía máy chủ.',
+                'Copyright Compliance: No copyrighted music, images, or third-party text used without permission; powered by Google Gemini AI via secure server-side API configuration.'
               )}
             </span>
           </div>

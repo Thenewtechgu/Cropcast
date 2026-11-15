@@ -106,8 +106,11 @@ export interface FieldProfile {
   activeShareToken?: string;
   isSharedWithMe?: boolean;
   name: string;
+  nameEn?: string;
   province: string;
+  provinceEn?: string;
   district: string;
+  districtEn?: string;
   lat: number;
   lon: number;
   areaHa: number;
@@ -119,6 +122,7 @@ export interface FieldProfile {
     proneToFlooding: boolean;
     ph?: number;
     customNote?: string;
+    customNoteEn?: string;
   };
   // Water
   waterSource: {
@@ -128,18 +132,24 @@ export interface FieldProfile {
     hasTestResult: boolean;
     salinityRisk: boolean;
     notes?: string;
+    notesEn?: string;
   };
   // Crop
   crop: {
     seedFamily?: SeedFamilyId;
     name: string;
+    nameEn?: string;
     category: CropCategory;
     variety: string;
+    varietyEn?: string;
     plantingDate: string;
     currentStage: string;
+    currentStageEn?: string;
     stageIndex: number;
     farmingMethod: string;
+    farmingMethodEn?: string;
     irrigationMethod: string;
+    irrigationMethodEn?: string;
     lastFertilizerDate?: string;
     healthStatus: 'healthy' | 'stressed' | 'pest_risk' | 'unknown';
   };
@@ -157,12 +167,15 @@ export interface FieldProfile {
   // Learned farmer behavioral adjustments + synced earth metrics
   adaptiveMemory?: {
     soilAdjustment?: string;
+    soilAdjustmentEn?: string;
     irrigationSensitivity?: 'higher' | 'normal' | 'lower';
     consecutiveDryAlerts?: number;
     lastFeedbackDate?: string;
     lastPredictionOutcome?: 'on_track' | 'needs_adjustment' | 'off_track';
     lastCheckInSummary?: string;
+    lastCheckInSummaryEn?: string;
     planFixRecommendations?: string[];
+    planFixRecommendationsEn?: string[];
     earthMetrics?: EarthEnvironmentSnapshot;
   };
 }
@@ -194,11 +207,13 @@ export interface AdminUserSummary {
 export interface AdminFieldSummary {
   id: string;
   name: string;
+  nameEn?: string;
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
   province: string;
   district: string;
+  districtEn?: string;
   lat: number;
   lon: number;
   areaHa: number;
@@ -272,6 +287,7 @@ export interface WeatherObservation {
   et0MmDay?: number;
   forecastDays?: DailyForecastPoint[];
   observationDate: string;
+  observationDateEn?: string;
   isRealtimeAvailable: boolean;
   cachedAt?: string;
   fromCache?: boolean;
@@ -329,6 +345,7 @@ export interface FarmTask {
   status: 'pending' | 'completed' | 'postponed' | 'skipped';
   createdAt: string;
   farmerNote?: string;
+  farmerNoteEn?: string;
 }
 
 export type FeedbackType =
@@ -352,11 +369,14 @@ export interface FeedbackRecord {
   timestamp: string;
   feedbackType: FeedbackType;
   userComment?: string;
+  userCommentEn?: string;
   systemActionTaken?: string;
+  systemActionTakenEn?: string;
   predictionOutcome?: PredictionOutcome;
   observedMoisture?: ObservedMoistureState;
   observedCropHealth?: ObservedCropHealthState;
   recommendedFixes?: string[];
+  recommendedFixesEn?: string[];
   appliedToProfile: boolean;
 }
 
@@ -591,6 +611,7 @@ export interface CommunityReply {
   authorName: string;
   authorProvince?: string;
   content: string;
+  contentEn?: string;
   createdAt: string;
 }
 
@@ -600,10 +621,14 @@ export interface CommunityPost {
   authorName: string;
   province: string;
   district?: string;
+  districtEn?: string;
   cropName?: string;
+  cropNameEn?: string;
   category: CommunityCategory;
   title: string;
+  titleEn?: string;
   content: string;
+  contentEn?: string;
   likesCount: number;
   upvotedUids: string[];
   replies: CommunityReply[];

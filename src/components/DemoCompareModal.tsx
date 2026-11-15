@@ -36,6 +36,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
     solarRadiation: 9.5,
     windSpeed: 3.2,
     observationDate: 'Sự kiện: Đợt mưa rét mùa đông 26mm, 18.5°C',
+    observationDateEn: 'Event: Winter Cold Rain 26mm, 18.5°C',
     isRealtimeAvailable: true,
     source: 'NASA_POWER_UPDATED',
     historicalBaseline: {
@@ -53,6 +54,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
   const [fieldA, setFieldA] = useState<FieldProfile>({
     id: 'DEMO_FIELD_A',
     name: 'Nông dân A: Ruộng rau cải',
+    nameEn: 'Farmer A: Mustard Greens Plot',
     province: 'Hà Nội',
     district: 'Mê Linh',
     lat: 21.18,
@@ -78,6 +80,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
       variety: 'Cải thìa F1',
       plantingDate: '2026-11-05',
       currentStage: 'Cây con (mới gieo 7 ngày)',
+      currentStageEn: 'Seedling (7 days after sowing)',
       stageIndex: 1,
       farmingMethod: 'VietGAP',
       irrigationMethod: 'Tưới ô doa',
@@ -93,6 +96,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
   const [fieldB, setFieldB] = useState<FieldProfile>({
     id: 'DEMO_FIELD_B',
     name: 'Nông dân B: Ruộng ngô lai',
+    nameEn: 'Farmer B: Hybrid Maize Plot',
     province: 'Hưng Yên',
     district: 'Khoái Châu',
     lat: 20.84,
@@ -118,6 +122,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
       variety: 'NK7328',
       plantingDate: '2026-10-10',
       currentStage: 'Sinh trưởng mạnh (vươn lóng)',
+      currentStageEn: 'Rapid Vegetative Growth (Stem Elongation)',
       stageIndex: 2,
       farmingMethod: 'Hóa học kết hợp hữu cơ',
       irrigationMethod: 'Tưới rãnh',
@@ -149,6 +154,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         gwetroot: 0.81,
         solarRadiation: 9.5,
         observationDate: 'Đợt mưa lạnh 26mm, 18.5°C',
+        observationDateEn: 'Cold Rain Spell 26mm, 18.5°C',
       });
     } else if (preset === 'heatwave') {
       setSharedWeather({
@@ -162,6 +168,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         gwetroot: 0.38,
         solarRadiation: 24.5,
         observationDate: 'Đợt nắng nóng gay gắt 38.5°C, bức xạ 24.5 MJ/m²',
+        observationDateEn: 'Severe Heatwave 38.5°C, Solar 24.5 MJ/m²',
       });
     } else {
       setSharedWeather({
@@ -175,6 +182,7 @@ export const DemoCompareModal: React.FC<DemoCompareModalProps> = ({ isOpen, onCl
         gwetroot: 0.65,
         solarRadiation: 17.0,
         observationDate: 'Thời tiết ấm áp ôn hòa 25°C',
+        observationDateEn: 'Mild Ideal Weather 25°C',
       });
     }
   };

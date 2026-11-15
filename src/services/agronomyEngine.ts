@@ -45,16 +45,16 @@ export function analyzeFieldAgronomy(
     provenances.push({
       label: isEn ? 'Live Field Weather & Moisture' : 'Thời tiết & Ẩm đất Thực tế',
       type: 'NASA_CURRENT',
-      lastUpdated: earth?.nasaPowerLastUpdated || weather.observationDate,
+      lastUpdated: earth?.nasaPowerLastUpdated || (isEn ? weather.observationDateEn || weather.observationDate : weather.observationDate),
       description: isEn
-        ? `Observed ${weather.observationDate}: ${weather.temp}°C, rain ${weather.rain}mm, humidity ${weather.humidity}%${weather.vpdHpa !== undefined ? `, drying demand ${weather.vpdHpa} hPa` : ''}.`
+        ? `Observed ${weather.observationDateEn || weather.observationDate}: ${weather.temp}°C, rain ${weather.rain}mm, humidity ${weather.humidity}%${weather.vpdHpa !== undefined ? `, drying demand ${weather.vpdHpa} hPa` : ''}.`
         : `Ghi nhận ${weather.observationDate}: ${weather.temp}°C, mưa ${weather.rain}mm, ẩm ${weather.humidity}%${weather.vpdHpa !== undefined ? `, sức hút bốc hơi ${weather.vpdHpa} hPa` : ''}.`,
     });
   } else {
     provenances.push({
       label: isEn ? 'Regional Seasonal Baseline' : 'Dữ liệu Nền Khí hậu Theo Mùa',
       type: 'USER_OBSERVATION',
-      lastUpdated: weather.observationDate,
+      lastUpdated: isEn ? weather.observationDateEn || weather.observationDate : weather.observationDate,
       description: isEn
         ? 'Using your field profile and 25-year seasonal climate baseline.'
         : 'Sử dụng thông số thửa ruộng và chuỗi khí hậu trung bình 25 năm theo tháng.',
@@ -140,14 +140,21 @@ export function analyzeFieldAgronomy(
     field.crop.currentStage.toLowerCase().includes('flower');
 
   let riskLevel: DailyAgronomicBrief['riskLevel'] = 'LOW';
-  const cropDisplay = getPlantDisplayName(field.crop.name, lang);
-  const stageDisplay = getCommonStageLabel(field.crop.currentStage, lang);
-  const varietyDisplay = getCommonVarietyLabel(field.crop.variety, lang);
+  const fieldDisplayName = isEn ? field.nameEn || field.name : field.name;
+  const cropDisplay = isEn
+    ? field.crop.nameEn || getPlantDisplayName(field.crop.name, 'en')
+    : field.crop.name;
+  const stageDisplay = isEn
+    ? field.crop.currentStageEn || getCommonStageLabel(field.crop.currentStage, 'en')
+    : field.crop.currentStage;
+  const varietyDisplay = isEn
+    ? field.crop.varietyEn || getCommonVarietyLabel(field.crop.variety, 'en')
+    : field.crop.variety;
   let headline = isEn
     ? `STABLE: Favorable conditions for ${cropDisplay}`
     : `ỔN ĐỊNH: Điều kiện thuận lợi cho ${field.crop.name}`;
   let situation = isEn
-    ? `Temperature ${weather.temp}°C, rainfall ${weather.rain}mm${weather.vpdHpa !== undefined ? `, drying demand ${weather.vpdHpa} hPa` : ''}. Field "${field.name}" remains in stable condition.`
+    ? `Temperature ${weather.temp}°C, rainfall ${weather.rain}mm${weather.vpdHpa !== undefined ? `, drying demand ${weather.vpdHpa} hPa` : ''}. Field "${fieldDisplayName}" remains in stable condition.`
     : `Nhiệt độ ${weather.temp}°C, lượng mưa ${weather.rain}mm${weather.vpdHpa !== undefined ? `, sức hút bốc hơi ${weather.vpdHpa} hPa` : ''}. Điều kiện ruộng ${field.name} duy trì trạng thái tốt.`;
   let analysis = isEn
     ? `Root-zone moisture is ${(weather.gwetroot * 100).toFixed(0)}%${smapMoistPct !== undefined ? ` (surface: ${smapMoistPct}%)` : ''}. ${getSoilLabel(field.soilType, lang)} maintains suitable water retention for ${cropDisplay} at ${stageDisplay}${weather.et0MmDay !== undefined ? `, with daily crop water loss ~${weather.et0MmDay} mm/day` : ''}.`
@@ -167,7 +174,7 @@ export function analyzeFieldAgronomy(
       ['clay', 'clay_loam', 'acid_sulfate', 'peat_muck'].includes(field.soilType);
     if (isSlowSoil) {
       analysis = isEn
-        ? `${field.name} has slow-draining ${getSoilLabel(field.soilType, lang)} during ${stageDisplay}. Standing moisture below 20°C restricts root oxygen and increases fungal pressure.`
+        ? `${fieldDisplayName} has slow-draining ${getSoilLabel(field.soilType, lang)} during ${stageDisplay}. Standing moisture below 20°C restricts root oxygen and increases fungal pressure.`
         : `Thửa ruộng ${field.name} có kết cấu ${getSoilLabel(field.soilType, lang).toLowerCase()} thoát nước chậm, kết hợp giai đoạn ${field.crop.currentStage}. Nước đọng lâu ngày dưới 20°C cản trở hô hấp rễ và kích hoạt nấm hại.`;
       topActions.push({
         id: 'act-drain',
@@ -1075,17 +1082,52 @@ export function evaluateFieldCheckIn(
   }
 
   const nowIso = new Date().toISOString();
-  const viMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, fixes, weather, rootPct, input, false);
-  const enMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, fixes, weather, rootPct, input, true);
+  const fixesVi = fixes.slice(0, 3);
+  const enDiagnosticFixes: string[] = [];
+  if (!isPredictionAccurate) {
+    if (input.observedMoisture === 'dry') {
+      enDiagnosticFixes.push(
+        `Irrigate ${Math.round(Math.max(10, field.areaHa * 25))} m³ gently early tomorrow (05:30–07:00) to moisten 10–15 cm root zone.`,
+        'Spread straw or dry grass mulch around beds to reduce surface evaporation by 30–40%.',
+        'Check bunds/pipes for hidden leaks and break surface soil crust before watering.'
+      );
+    } else if (input.observedMoisture === 'wet') {
+      enDiagnosticFixes.push(
+        'Pause all scheduled irrigation for 48–72 hours until topsoil drains.',
+        'Clear outlet ditches and cut shallow cross-furrows to drain standing water within 12h.',
+        'Hold Urea/Nitrogen top-dressing until roots regain oxygen.'
+      );
+    }
+    if (input.observedCropHealth === 'stressed') {
+      enDiagnosticFixes.push(
+        `Inspect feeder roots on 1–2 weak ${getPlantDisplayName(field.crop.name, 'en')} plants and check leaf yellowing pattern.`,
+        'Avoid spraying strong chemicals in midday heat; apply mild foliar nutrients in late afternoon.'
+      );
+    } else if (input.observedCropHealth === 'pest_risk') {
+      enDiagnosticFixes.push(
+        `Scout 5 diagonal points across ${field.nameEn || field.name} under leaves to verify pest/fungal threshold.`,
+        'Remove severely infected leaves away from bunds and improve airflow.'
+      );
+    }
+    if (enDiagnosticFixes.length === 0) {
+      enDiagnosticFixes.push(
+        'Verify field crop growth stage and soil drainage setting in My Fields → Edit.',
+        'Review Today’s Recommended Actions on the Dashboard and hold high-risk operations.'
+      );
+    }
+  }
+
+  const viMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, fixesVi, weather, rootPct, input, false);
+  const enMapFixes = evaluateSuggestedTaskFixes(isPredictionAccurate, enDiagnosticFixes, weather, rootPct, input, true);
 
   const suggestedTasks: FarmTask[] = isPredictionAccurate
     ? []
-    : fixes.slice(0, 3).map((fixText, idx) => ({
+    : fixesVi.map((fixText, idx) => ({
         id: `FIX_${field.id}_${Date.now()}_${idx}`,
         fieldId: field.id,
         title: fixText.slice(0, 180),
-        titleEn: enMapFixes.titles[idx] || fixText.slice(0, 180),
-        scheduledTime: isEn ? 'Within 24 hours' : 'Trong 24 giờ tới',
+        titleEn: (enMapFixes.titles[idx] || fixText).slice(0, 180),
+        scheduledTime: 'Trong 24 giờ tới',
         scheduledTimeEn: 'Within 24 hours',
         priority: idx === 0 ? 'HIGH' : 'MEDIUM',
         reason: viMapFixes.reason,

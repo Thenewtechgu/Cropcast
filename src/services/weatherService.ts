@@ -5,6 +5,23 @@ import {
   getCellMonthlyProfile,
 } from '../data/nasaVietnamGrid';
 import { weatherCacheService } from './weatherCache';
+import { getCalendarMonthName } from './translationService';
+import type { AppLanguage } from '../contexts/LanguageContext';
+
+export function getWeatherObservationDate(weather: WeatherObservation, lang: AppLanguage = 'vi'): string {
+  if (lang === 'en') {
+    if (weather.observationDateEn) return weather.observationDateEn;
+    if (weather.observationDate?.includes('Hôm nay')) {
+      return weather.observationDate.replace('Hôm nay', 'Today').replace('Cập nhật', 'Updated');
+    }
+    const monthMatch = weather.observationDate?.match(/tháng\s*(\d+)/i);
+    if (monthMatch) {
+      const mName = getCalendarMonthName(Number(monthMatch[1]), 'en');
+      return `${mName} Climate Baseline (2001–2026)`;
+    }
+  }
+  return weather.observationDate;
+}
 
 /**
  * Builds a monthly 2001–2025 baseline WeatherObservation for any coordinate in Vietnam
@@ -39,7 +56,8 @@ export function buildClimaticBaselineWeather(lat: number, lon: number): WeatherO
     vpdMinHpa: m.VPDMIN,
     vpdMaxHpa: m.VPDMAX,
     et0MmDay: et0Base,
-    observationDate: `Nền khí hậu tháng ${currentMonthIdx + 1} (2001–2026)`,
+    observationDate: `Nền khí hậu ${getCalendarMonthName(currentMonthIdx + 1, 'vi')} (2001–2026)`,
+    observationDateEn: `${getCalendarMonthName(currentMonthIdx + 1, 'en')} Climate Baseline (2001–2026)`,
     isRealtimeAvailable: false,
     source: 'ESTIMATED_CLIMATE',
     historicalBaseline: {
@@ -203,6 +221,7 @@ export async function fetchFieldLiveWeather(
       et0MmDay,
       forecastDays,
       observationDate: `Hôm nay (Cập nhật ${hh}:${mm})`,
+      observationDateEn: `Today (Updated ${hh}:${mm})`,
       isRealtimeAvailable: true,
       source: 'LIVE_WEATHER',
       cachedAt: nowIso,

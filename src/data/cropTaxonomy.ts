@@ -44,8 +44,8 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
     scientificName: 'Poaceae',
     shortTag: 'Rễ chùm · Cần đạm cao',
     shortTagEn: 'Fibrous roots · High N demand',
-    description: 'Nhóm cây lương thực chủ lực như lúa, ngô, cao lương và cỏ thức ăn gia súc.',
-    descriptionEn: 'Core cereal crops such as rice, maize, sorghum, and forage grasses.',
+    description: 'Nhóm cây lương thực và công nghiệp chủ lực như lúa, ngô, cao lương, mía và cỏ chăn nuôi.',
+    descriptionEn: 'Core cereals, industrial grasses, and forage such as rice, maize, sorghum, sugarcane, and Napier grass.',
     soilImpactNote: 'Hấp thu đạm mạnh, nên luân canh sau cây họ Đậu để tận dụng đạm tự nhiên và cắt mạch sâu bệnh.',
     soilImpactNoteEn: 'Heavy nitrogen feeders; rotate after legumes to reuse biological nitrogen and break pest cycles.',
     plants: [
@@ -108,6 +108,46 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         forageValue: 'Cung cấp nguồn thức ăn xanh chịu hạn xuất sắc cho gia súc',
         typicalGrowthDays: 90,
         rotationBenefitNote: 'Tiết kiệm nước tối đa vào mùa khô, thích hợp vùng thiếu nước tưới.',
+      },
+      {
+        id: 'sugarcane',
+        name: 'Mía đường',
+        nameEn: 'Sugarcane',
+        botanicalFamily: 'Poaceae',
+        botanicalFamilyVi: 'Họ Hòa thảo',
+        botanicalFamilyEn: 'Grasses & Cereals (Poaceae)',
+        category: 'industrial',
+        commonVarieties: ['KK3', 'LK92-11', 'ROC16', 'Mía tím Hòa Bình'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'heavy_feeder',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Ngọn mía và lá mía ủ chua làm thức ăn thô xanh mùa khô',
+        typicalGrowthDays: 300,
+        rotationBenefitNote: 'Nên trồng xen Đậu xanh/Đậu tương hàng mía tơ để che phủ đất và cố định đạm.',
+      },
+      {
+        id: 'forage_grass',
+        name: 'Cỏ voi / Cỏ chăn nuôi',
+        nameEn: 'Napier Grass / Forage Grass',
+        botanicalFamily: 'Poaceae',
+        botanicalFamilyVi: 'Họ Hòa thảo',
+        botanicalFamilyEn: 'Grasses & Cereals (Poaceae)',
+        category: 'maize',
+        commonVarieties: ['Cỏ voi VA06', 'Cỏ Mulato II', 'Cỏ Mombasa Ghine'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Nguồn thức ăn thô xanh chủ lực năng suất cao cho trâu bò',
+        typicalGrowthDays: 120,
+        rotationBenefitNote: 'Rễ chùm dày giữ đất chống xói mòn bờ dốc rất tốt.',
       },
     ],
   },
@@ -184,6 +224,46 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         rotationBenefitNote: 'Rất hợp đất cát pha hoặc đất thịt nhẹ, nên luân canh với Lúa, Ngô hoặc Dưa hấu (tránh trồng lạc liên tiếp).',
       },
       {
+        id: 'black_bean',
+        name: 'Đậu đen / Đậu đỏ',
+        nameEn: 'Black Bean / Red Bean',
+        botanicalFamily: 'Fabaceae',
+        botanicalFamilyVi: 'Họ Đậu',
+        botanicalFamilyEn: 'Legumes (Fabaceae)',
+        category: 'legume',
+        commonVarieties: ['Đậu đen xanh lòng', 'Đậu đỏ hạt nhỏ'],
+        rootDepth: 'medium',
+        waterDemand: 'low',
+        nitrogenRole: 'fixer',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Thân lá giàu đạm dùng làm phân xanh cải tạo đất bạc màu',
+        typicalGrowthDays: 75,
+        rotationBenefitNote: 'Chịu hạn tốt trên đất đồi gò miền Trung và Tây Nguyên.',
+      },
+      {
+        id: 'yardlong_bean',
+        name: 'Đậu đũa / Đậu cô ve',
+        nameEn: 'Yardlong Bean / French Bean',
+        botanicalFamily: 'Fabaceae',
+        botanicalFamilyVi: 'Họ Đậu',
+        botanicalFamilyEn: 'Legumes (Fabaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Đậu đũa Rạng Đông', 'Đậu cô ve leo F1'],
+        rootDepth: 'medium',
+        waterDemand: 'medium',
+        nitrogenRole: 'fixer',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Thu hoạch liên tục 30–40 ngày, tạo dòng tiền nhanh',
+        typicalGrowthDays: 65,
+        rotationBenefitNote: 'Luân canh tốt với cà chua, bắp cải và dưa leo để giảm sâu đục quả và cố định đạm.',
+      },
+      {
         id: 'sesbania',
         name: 'Điền thanh / Muồng che phủ đất',
         nameEn: 'Sesbania / Sunn Hemp Cover',
@@ -212,8 +292,8 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
     scientificName: 'Brassicaceae',
     shortTag: 'Ưa mát · Rễ nông',
     shortTagEn: 'Cool-season · Shallow roots',
-    description: 'Nhóm rau ăn lá và củ ngắn ngày ưa khí hậu mát mẻ như cải xanh, bắp cải, củ cải.',
-    descriptionEn: 'Cool-climate leafy vegetables and root brassicas like mustard greens, cabbage, and radish.',
+    description: 'Nhóm rau ăn lá và củ ngắn ngày ưa khí hậu mát mẻ như cải xanh, bắp cải, súp lơ, su hào, củ cải.',
+    descriptionEn: 'Cool-climate leafy vegetables and root brassicas like mustard greens, cabbage, kohlrabi, and radish.',
     soilImpactNote: 'Không nên trồng họ Cải liên tiếp nhiều vụ trên cùng một luống vì dễ tích tụ bệnh sưng rễ và bọ nhảy.',
     soilImpactNoteEn: 'Avoid planting consecutive brassicas on the same beds to prevent clubroot and flea beetles.',
     plants: [
@@ -245,7 +325,7 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         botanicalFamilyVi: 'Họ Cải',
         botanicalFamilyEn: 'Brassicas (Brassicaceae)',
         category: 'vegetable',
-        commonVarieties: ['Bắp cải KK Cross', 'Súp lơ xanh F1'],
+        commonVarieties: ['Bắp cải KK Cross', 'Súp lơ xanh F1', 'Súp lơ trắng'],
         rootDepth: 'shallow',
         waterDemand: 'medium',
         nitrogenRole: 'heavy_feeder',
@@ -256,6 +336,26 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         forageValue: 'Lá ngoài làm thức ăn cho cá, gia cầm',
         typicalGrowthDays: 75,
         rotationBenefitNote: 'Ưa thời tiết mát vụ Đông ở miền Bắc và vùng cao.',
+      },
+      {
+        id: 'kohlrabi',
+        name: 'Su hào',
+        nameEn: 'Kohlrabi',
+        botanicalFamily: 'Brassicaceae',
+        botanicalFamilyVi: 'Họ Cải',
+        botanicalFamilyEn: 'Brassicas (Brassicaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Su hào Trứng', 'Su hào tím F1'],
+        rootDepth: 'shallow',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Thấp',
+        droughtToleranceEn: 'Low',
+        frostSensitivity: 'Chịu lạnh tốt',
+        frostSensitivityEn: 'Cold tolerant',
+        forageValue: 'Lá su hào làm thức ăn chăn nuôi hoặc ủ phân xanh',
+        typicalGrowthDays: 60,
+        rotationBenefitNote: 'Phù hợp xen canh trên đất màu vụ Thu–Đông ở Đồng bằng Sông Hồng.',
       },
       {
         id: 'radish',
@@ -339,7 +439,7 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         botanicalFamilyVi: 'Họ Cà',
         botanicalFamilyEn: 'Nightshades (Solanaceae)',
         category: 'vegetable',
-        commonVarieties: ['Ớt chỉ thiên F1', 'Ớt sừng vàng'],
+        commonVarieties: ['Ớt chỉ thiên F1', 'Ớt sừng vàng', 'Ớt hiểm'],
         rootDepth: 'medium',
         waterDemand: 'low',
         nitrogenRole: 'moderate',
@@ -351,6 +451,26 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         typicalGrowthDays: 120,
         rotationBenefitNote: 'Cần đất thoát nước tốt, lên luống cao vào mùa mưa.',
       },
+      {
+        id: 'eggplant',
+        name: 'Cà tím / Cà pháo',
+        nameEn: 'Eggplant / Tropical Eggplant',
+        botanicalFamily: 'Solanaceae',
+        botanicalFamilyVi: 'Họ Cà',
+        botanicalFamilyEn: 'Nightshades (Solanaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Cà tím dài F1', 'Cà pháo trắng'],
+        rootDepth: 'medium',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Quả thu liên tục trong 3–4 tháng',
+        typicalGrowthDays: 100,
+        rotationBenefitNote: 'Không trồng ngay sau cà chua hoặc ớt để tránh héo rũ.',
+      },
     ],
   },
   {
@@ -360,8 +480,8 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
     scientificName: 'Cucurbitaceae',
     shortTag: 'Phủ mặt đất · Chịu nắng khá',
     shortTagEn: 'Ground cover · Sun-tolerant',
-    description: 'Dưa hấu, dưa leo, bí đỏ, mướp đắng — thân bò che phủ mặt đất tốt.',
-    descriptionEn: 'Watermelon, cucumber, pumpkin, and gourds with broad ground-covering vines.',
+    description: 'Dưa hấu, dưa leo, dưa lưới, bí đỏ, bí đao, mướp hương, khổ qua — thân bò che phủ mặt đất tốt.',
+    descriptionEn: 'Watermelon, cucumber, cantaloupe, pumpkin, wax gourd, loofah, and bitter gourd.',
     soilImpactNote: 'Tán lá rộng giúp hạn chế cỏ dại và giảm bốc hơi nước tầng mặt; cần luân canh để tránh bệnh nứt thân chảy nhựa.',
     soilImpactNoteEn: 'Broad vines suppress weeds and cut surface evaporation; rotate to prevent gummy stem blight.',
     plants: [
@@ -425,20 +545,200 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         typicalGrowthDays: 60,
         rotationBenefitNote: 'Tránh trồng liền kề sau bí, bầu hoặc dưa hấu (cùng họ Bầu bí).',
       },
+      {
+        id: 'wax_gourd',
+        name: 'Bí đao / Mướp hương',
+        nameEn: 'Wax Gourd / Loofah',
+        botanicalFamily: 'Cucurbitaceae',
+        botanicalFamilyVi: 'Họ Bầu bí',
+        botanicalFamilyEn: 'Cucurbits (Cucurbitaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Bí xanh chanh', 'Mướp hương F1'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Làm giàn tiết kiệm diện tích và hạn chế úng thối quả mùa mưa',
+        typicalGrowthDays: 80,
+        rotationBenefitNote: 'Luân canh tốt sau vụ lúa xuân hoặc cây họ Đậu.',
+      },
+      {
+        id: 'bitter_gourd',
+        name: 'Khổ qua (Mướp đắng)',
+        nameEn: 'Bitter Gourd',
+        botanicalFamily: 'Cucurbitaceae',
+        botanicalFamilyVi: 'Họ Bầu bí',
+        botanicalFamilyEn: 'Cucurbits (Cucurbitaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Khổ qua F1 trái xanh', 'Khổ qua rừng'],
+        rootDepth: 'medium',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Giá trị hàng hóa ổn định quanh năm tại Đồng bằng Sông Cửu Long',
+        typicalGrowthDays: 70,
+        rotationBenefitNote: 'Giữ giàn thông thoáng, luân canh sau lúa để cắt bệnh phấn trắng.',
+      },
+      {
+        id: 'cantaloupe',
+        name: 'Dưa lưới',
+        nameEn: 'Cantaloupe / Muskmelon',
+        botanicalFamily: 'Cucurbitaceae',
+        botanicalFamilyVi: 'Họ Bầu bí',
+        botanicalFamilyEn: 'Cucurbits (Cucurbitaceae)',
+        category: 'fruit',
+        commonVarieties: ['Dưa lưới TL3', 'Dưa lưới Ichiba'],
+        rootDepth: 'medium',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Cây ăn trái hàng hóa giá trị kinh tế cao',
+        typicalGrowthDays: 75,
+        rotationBenefitNote: 'Ưa đất tơi xốp thoát nước nhanh hoặc nhà màng tưới nhỏ giọt.',
+      },
     ],
   },
   {
     id: 'other_perennial',
-    name: 'Họ Rễ củ, Cây ăn trái & Công nghiệp',
-    nameEn: 'Tubers, Orchards & Industrial',
-    scientificName: 'Convolvulaceae / Rubiaceae / Piperaceae / Malvaceae / Cactaceae',
-    shortTag: 'Rễ sâu · Chịu hạn / Lâu năm',
-    shortTagEn: 'Deep roots · Drought / Perennial',
-    description: 'Khoai lang (họ Bìm bìm), sắn (họ Thầu dầu), cà phê (họ Cà phê), hồ tiêu (họ Hồ tiêu), sầu riêng (họ Bông), thanh long (họ Xương rồng).',
-    descriptionEn: 'Sweet potato (Convolvulaceae), cassava (Euphorbiaceae), coffee (Rubiaceae), black pepper (Piperaceae), durian (Malvaceae), and dragon fruit (Cactaceae).',
-    soilImpactNote: 'Với cây ngắn ngày lấy củ (khoai lang), cần luân canh với cây họ Đậu hoặc họ Hòa thảo để tránh thoái hóa đất và tuyến trùng.',
-    soilImpactNoteEn: 'Rotate annual root tubers (like sweet potato) with legumes or cereals to prevent nutrient depletion and nematodes.',
+    name: 'Rau màu khác, Lấy củ, Cây ăn trái & Công nghiệp',
+    nameEn: 'Other Vegetables, Tubers, Orchards & Industrial',
+    scientificName: 'Convolvulaceae / Euphorbiaceae / Rubiaceae / Malvaceae / Rutaceae / Sapindaceae',
+    shortTag: 'Đa dạng cây trồng Việt Nam',
+    shortTagEn: 'Diverse Vietnam crops & orchards',
+    description: 'Rau muống, mồng tơi, xà lách, hành tỏi, cà rốt, đậu bắp; cây lấy củ (khoai lang, sắn, khoai môn); cây công nghiệp (vừng, cà phê, hồ tiêu, chè, điều, cao su) & cây ăn trái (chuối, xoài, cam/bưởi, dừa, dứa, nhãn/vải, sầu riêng, thanh long).',
+    descriptionEn: 'Water spinach, herbs, alliums, carrot, okra; tubers (sweet potato, cassava, taro); industrial crops (sesame, coffee, pepper, tea, cashew, rubber) & orchards (banana, mango, citrus, coconut, pineapple, longan/lychee, durian, dragon fruit).',
+    soilImpactNote: 'Các loại rau ăn lá ngắn ngày (rau muống, xà lách, hành lá) và cây lấy củ (khoai lang, sắn) rất hiệu quả khi xen hoặc luân canh với cây họ Đậu để cân bằng dinh dưỡng đất.',
+    soilImpactNoteEn: 'Short-cycle greens, alliums, and tubers pair well with legumes in rotation to restore topsoil structure and nitrogen.',
     plants: [
+      {
+        id: 'water_spinach',
+        name: 'Rau muống',
+        nameEn: 'Water Spinach',
+        botanicalFamily: 'Convolvulaceae',
+        botanicalFamilyVi: 'Họ Bìm bìm',
+        botanicalFamilyEn: 'Morning Glory (Convolvulaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Rau muống hạt lá tre', 'Rau muống cạn', 'Rau muống nước'],
+        rootDepth: 'shallow',
+        waterDemand: 'high',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Thấp',
+        droughtToleranceEn: 'Low',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Thu hái nhiều lứa liên tục mùa nắng nóng',
+        typicalGrowthDays: 30,
+        rotationBenefitNote: 'Khác họ hoàn toàn với họ Cải nên rất tốt để luân canh rau mùa hè.',
+      },
+      {
+        id: 'malabar_spinach',
+        name: 'Mồng tơi / Rau dền',
+        nameEn: 'Malabar Spinach / Amaranth Greens',
+        botanicalFamily: 'Basellaceae / Amaranthaceae',
+        botanicalFamilyVi: 'Họ Mồng tơi / Họ Dền',
+        botanicalFamilyEn: 'Basella / Amaranths',
+        category: 'vegetable',
+        commonVarieties: ['Mồng tơi lá to', 'Rau dền đỏ', 'Rau dền cơm'],
+        rootDepth: 'shallow',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Chịu nóng tốt, phù hợp gối vụ rau hè thu',
+        typicalGrowthDays: 35,
+        rotationBenefitNote: 'Chu kỳ nhanh, ít trùng sâu bệnh với họ Cà và họ Cải.',
+      },
+      {
+        id: 'lettuce_herbs',
+        name: 'Xà lách / Rau thơm',
+        nameEn: 'Lettuce & Culinary Herbs',
+        botanicalFamily: 'Asteraceae / Lamiaceae',
+        botanicalFamilyVi: 'Họ Cúc / Hoa môi',
+        botanicalFamilyEn: 'Asters & Herbs (Asteraceae)',
+        category: 'vegetable',
+        commonVarieties: ['Xà lách xoăn', 'Xà lách Carol', 'Rau húng quế / Kinh giới'],
+        rootDepth: 'shallow',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Thấp',
+        droughtToleranceEn: 'Low',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Thích hợp trồng xen giữa các luống cây cao để xua đuổi côn trùng',
+        typicalGrowthDays: 45,
+        rotationBenefitNote: 'Hương tinh dầu rau thơm hỗ trợ giảm mật độ bọ trĩ và rệp.',
+      },
+      {
+        id: 'alliums',
+        name: 'Hành lá / Tỏi / Hẹ',
+        nameEn: 'Scallion / Garlic / Shallot',
+        botanicalFamily: 'Amaryllidaceae',
+        botanicalFamilyVi: 'Họ Hành tỏi',
+        botanicalFamilyEn: 'Alliums (Amaryllidaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Hành tím Vĩnh Châu', 'Tỏi Lý Sơn / Kinh Môn', 'Hành hương'],
+        rootDepth: 'shallow',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Chịu lạnh tốt',
+        frostSensitivityEn: 'Cold tolerant',
+        forageValue: 'Cây gia vị giá trị cao, bảo quản tốt',
+        typicalGrowthDays: 65,
+        rotationBenefitNote: 'Tinh chất lưu huỳnh từ họ Hành tỏi giúp xua sâu bệnh và làm sạch đất trước khi trồng rau ăn quả.',
+      },
+      {
+        id: 'carrot',
+        name: 'Cà rốt',
+        nameEn: 'Carrot',
+        botanicalFamily: 'Apiaceae',
+        botanicalFamilyVi: 'Họ Hoa tán',
+        botanicalFamilyEn: 'Umbellifers (Apiaceae)',
+        category: 'tuber',
+        commonVarieties: ['Cà rốt Ti-103', 'Cà rốt Nhật Bản', 'Cà rốt New Kuroda'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Chịu lạnh tốt',
+        frostSensitivityEn: 'Cold tolerant',
+        forageValue: 'Lá cà rốt dùng trong chăn nuôi thỏ, dê',
+        typicalGrowthDays: 95,
+        rotationBenefitNote: 'Rất thích hợp đất bãi cát pha ven sông vào vụ Đông Xuân.',
+      },
+      {
+        id: 'okra',
+        name: 'Đậu bắp',
+        nameEn: 'Okra',
+        botanicalFamily: 'Malvaceae',
+        botanicalFamilyVi: 'Họ Bông (Cẩm quỳ)',
+        botanicalFamilyEn: 'Mallows (Malvaceae)',
+        category: 'vegetable',
+        commonVarieties: ['Đậu bắp xanh cao sản', 'Đậu bắp đỏ'],
+        rootDepth: 'deep',
+        waterDemand: 'low',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Thu trái non liên tục 2–3 tháng, chịu nắng nóng tốt',
+        typicalGrowthDays: 65,
+        rotationBenefitNote: 'Thuộc họ Bông (Malvaceae), không phải họ Đậu — không trồng lặp sau bông vải hoặc sầu riêng con.',
+      },
       {
         id: 'sweet_potato',
         name: 'Khoai lang',
@@ -458,6 +758,66 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         forageValue: 'Dây và lá khoai lang là thức ăn xanh tuyệt vời cho lợn, bò, gà',
         typicalGrowthDays: 100,
         rotationBenefitNote: 'Che phủ mặt ruộng nhanh, chống xói mòn; khác họ hoàn toàn với Khoai tây (Solanaceae).',
+      },
+      {
+        id: 'cassava',
+        name: 'Sắn (Khoai mì)',
+        nameEn: 'Cassava',
+        botanicalFamily: 'Euphorbiaceae',
+        botanicalFamilyVi: 'Họ Thầu dầu',
+        botanicalFamilyEn: 'Spurges (Euphorbiaceae)',
+        category: 'tuber',
+        commonVarieties: ['KM94', 'KM140', 'HLS11'],
+        rootDepth: 'deep',
+        waterDemand: 'low',
+        nitrogenRole: 'heavy_feeder',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Lá sắn ủ chua giàu đạm thực vật sau chế biến khử độc tố',
+        typicalGrowthDays: 240,
+        rotationBenefitNote: 'Hút nhiều Kali/Lân, bắt buộc trồng xen hoặc luân canh Đậu xanh/Lạc để chống thoái hóa đất đồi.',
+      },
+      {
+        id: 'taro',
+        name: 'Khoai môn / Khoai sọ',
+        nameEn: 'Taro / Eddoe',
+        botanicalFamily: 'Araceae',
+        botanicalFamilyVi: 'Họ Ráy',
+        botanicalFamilyEn: 'Arums (Araceae)',
+        category: 'tuber',
+        commonVarieties: ['Khoai môn Lệ Phố', 'Khoai môn cao ĐBSCL', 'Khoai sọ Thuận Châu'],
+        rootDepth: 'medium',
+        waterDemand: 'high',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Thấp',
+        droughtToleranceEn: 'Low',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Bẹ và lá khoai ủ chua phục vụ chăn nuôi nông hộ',
+        typicalGrowthDays: 150,
+        rotationBenefitNote: 'Luân canh tốt trên chân ruộng trũng sau 1–2 vụ lúa để cắt sâu bệnh lúa.',
+      },
+      {
+        id: 'sesame',
+        name: 'Vừng (Mè)',
+        nameEn: 'Sesame',
+        botanicalFamily: 'Pedaliaceae',
+        botanicalFamilyVi: 'Họ Vừng',
+        botanicalFamilyEn: 'Sesame (Pedaliaceae)',
+        category: 'industrial',
+        commonVarieties: ['Vừng đen ĐBSCL', 'Mè vàng V36'],
+        rootDepth: 'medium',
+        waterDemand: 'low',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Bã dầu mè làm thức ăn chăn nuôi giàu đạm',
+        typicalGrowthDays: 80,
+        rotationBenefitNote: 'Cây chịu hạn cực tốt để thay thế lúa vụ Hè Thu thiếu nước ở ĐBSCL và miền Trung.',
       },
       {
         id: 'coffee',
@@ -480,12 +840,112 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
         rotationBenefitNote: 'Cây lâu năm nên ưu tiên trồng cây che phủ họ Đậu giữa các hàng để giữ ẩm mùa khô.',
       },
       {
+        id: 'tea',
+        name: 'Chè (Trà)',
+        nameEn: 'Tea Plant',
+        botanicalFamily: 'Theaceae',
+        botanicalFamilyVi: 'Họ Chè',
+        botanicalFamilyEn: 'Tea Family (Theaceae)',
+        category: 'industrial',
+        commonVarieties: ['Chè LDP1', 'Chè Kim Tuyên', 'Chè Shan tuyết'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Chịu lạnh tốt',
+        frostSensitivityEn: 'Cold tolerant',
+        forageValue: 'Trồng xen cốt khí hoặc cây họ Đậu chống xói mòn nương đồi',
+        typicalGrowthDays: 365,
+        rotationBenefitNote: 'Cần giữ độ ẩm tầng mặt ổn định và che bóng nhẹ vào mùa nắng gắt.',
+      },
+      {
+        id: 'cashew_rubber',
+        name: 'Điều / Cao su',
+        nameEn: 'Cashew / Natural Rubber',
+        botanicalFamily: 'Anacardiaceae / Euphorbiaceae',
+        botanicalFamilyVi: 'Họ Đào lộn hột / Thầu dầu',
+        botanicalFamilyEn: 'Cashew & Rubber Trees',
+        category: 'industrial',
+        commonVarieties: ['Điều AB05-08', 'Điều PN1', 'Cao su RRIV 106'],
+        rootDepth: 'deep',
+        waterDemand: 'low',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Tận dụng khoảng trống vườn kiến thiết cơ bản trồng xen Đậu/Ngô',
+        typicalGrowthDays: 365,
+        rotationBenefitNote: 'Giữ thảm cỏ tự nhiên hoặc cây họ Đậu che phủ chống rửa trôi đất xám/bazan.',
+      },
+      {
+        id: 'citrus_mango',
+        name: 'Bưởi / Cam / Xoài',
+        nameEn: 'Pomelo / Orange / Mango',
+        botanicalFamily: 'Rutaceae / Anacardiaceae',
+        botanicalFamilyVi: 'Họ Cam chanh / Xoài',
+        botanicalFamilyEn: 'Citrus & Mango Orchards',
+        category: 'fruit',
+        commonVarieties: ['Bưởi Da xanh', 'Bưởi Diễn', 'Cam Sành / Vinh', 'Xoài Cát Hòa Lộc'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Trồng thảm lạc dại giữ ẩm và nuôi thiên địch diệt rầy chổng cánh',
+        typicalGrowthDays: 365,
+        rotationBenefitNote: 'Lên mô cao ở ĐBSCL và cắt tỉa tán thông thoáng trước mùa mưa.',
+      },
+      {
+        id: 'banana_pineapple',
+        name: 'Chuối / Dứa (Thơm)',
+        nameEn: 'Banana / Pineapple',
+        botanicalFamily: 'Musaceae / Bromeliaceae',
+        botanicalFamilyVi: 'Họ Chuối / Họ Dứa',
+        botanicalFamilyEn: 'Banana & Pineapple',
+        category: 'fruit',
+        commonVarieties: ['Chuối tiêu hồng', 'Chuối Laba', 'Dứa Queen', 'Dứa Cayenne'],
+        rootDepth: 'medium',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Trung bình',
+        droughtToleranceEn: 'Moderate',
+        frostSensitivity: 'Nhạy cảm',
+        frostSensitivityEn: 'Sensitive',
+        forageValue: 'Thân chuối thái mỏng làm thức ăn chăn nuôi sinh học',
+        typicalGrowthDays: 300,
+        rotationBenefitNote: 'Dứa thích hợp đất phèn nhẹ hoặc đồi thoát nước tốt; tránh trồng chuối lặp nếu có bệnh héo vàng Panama.',
+      },
+      {
+        id: 'coconut_longan',
+        name: 'Dừa / Nhãn / Vải thiều',
+        nameEn: 'Coconut / Longan / Lychee',
+        botanicalFamily: 'Arecaceae / Sapindaceae',
+        botanicalFamilyVi: 'Họ Cau dừa / Họ Bồ hòn',
+        botanicalFamilyEn: 'Coconut Palms / Sapindaceae Orchards',
+        category: 'fruit',
+        commonVarieties: ['Dừa xiêm xanh', 'Nhãn lồng Hưng Yên', 'Vải thiều Lục Ngạn'],
+        rootDepth: 'deep',
+        waterDemand: 'medium',
+        nitrogenRole: 'moderate',
+        droughtTolerance: 'Cao',
+        droughtToleranceEn: 'High',
+        frostSensitivity: 'Trung bình',
+        frostSensitivityEn: 'Moderate',
+        forageValue: 'Tán dừa thoáng rất hợp trồng xen ca cao hoặc cỏ chăn nuôi',
+        typicalGrowthDays: 365,
+        rotationBenefitNote: 'Chủ động trữ nước ngọt mùa hạn mặn cho dừa/cây ăn trái ven sông.',
+      },
+      {
         id: 'durian_fruit',
-        name: 'Sầu riêng / Thanh long / Cây ăn trái',
-        nameEn: 'Durian / Dragon Fruit / Orchard',
+        name: 'Sầu riêng / Thanh long',
+        nameEn: 'Durian / Dragon Fruit',
         botanicalFamily: 'Malvaceae / Cactaceae',
         botanicalFamilyVi: 'Họ Bông / Xương rồng',
-        botanicalFamilyEn: 'Orchards (Malvaceae / Cactaceae)',
+        botanicalFamilyEn: 'Durian / Dragon Fruit (Malvaceae / Cactaceae)',
         category: 'fruit',
         commonVarieties: ['Sầu riêng Ri6', 'Sầu riêng Monthong', 'Thanh long ruột đỏ'],
         rootDepth: 'deep',
@@ -504,7 +964,7 @@ export const SEED_FAMILIES: SeedFamilyInfo[] = [
 ];
 
 export function getSeedFamilyById(familyId?: SeedFamilyId): SeedFamilyInfo {
-  return SEED_FAMILIES.find(f => f.id === familyId) || SEED_FAMILIES[0];
+  return SEED_FAMILIES.find((f) => f.id === familyId) || SEED_FAMILIES[0];
 }
 
 export function getFamilyDisplayName(fam: SeedFamilyInfo, lang: AppLanguage = 'vi'): string {
@@ -528,7 +988,7 @@ export function getPlantDisplayName(plantOrCropName: string | PlantOption, lang:
 
   for (const fam of SEED_FAMILIES) {
     const match = fam.plants.find(
-      p => p.name.toLowerCase() === clean.toLowerCase() || p.nameEn.toLowerCase() === clean.toLowerCase()
+      (p) => p.name.toLowerCase() === clean.toLowerCase() || p.nameEn.toLowerCase() === clean.toLowerCase()
     );
     if (match) return match.nameEn;
   }
@@ -542,6 +1002,20 @@ export function getPlantDisplayName(plantOrCropName: string | PlantOption, lang:
     'rau cải xanh vụ đông': 'Winter Leafy Greens',
     'ngô lai f1 (bắp)': 'Maize / Hybrid Corn',
     'đậu tương / lạc (họ đậu)': 'Soybean / Peanut (Legume)',
+    'rau muống': 'Water Spinach',
+    'sắn (khoai mì)': 'Cassava',
+    'mía': 'Sugarcane',
+    'mía đường': 'Sugarcane',
+    'cà phê': 'Coffee',
+    'hồ tiêu': 'Black Pepper',
+    'chè (trà)': 'Tea Plant',
+    'sầu riêng': 'Durian',
+    'thanh long': 'Dragon Fruit',
+    'xoài': 'Mango',
+    'bưởi': 'Pomelo',
+    'cam': 'Orange',
+    'chuối': 'Banana',
+    'dứa': 'Pineapple',
   };
   return extraMap[clean.toLowerCase()] || clean;
 }
@@ -555,6 +1029,9 @@ export function getCommonStageLabel(stage: string, lang: AppLanguage = 'vi'): st
     'sinh trưởng mạnh (vươn lóng)': 'Rapid Stem Elongation',
     'vươn lóng mạnh': 'Rapid Vegetative Elongation',
     'làm đòng trổ bông': 'Panicle Initiation & Heading',
+    'ra hoa đậu quả': 'Flowering & Fruit Set',
+    'nuôi quả / tạo củ': 'Fruit / Tuber Filling',
+    'sắp thu hoạch': 'Pre-Harvest Maturation',
   };
   return map[stage.trim().toLowerCase()] || stage;
 }
@@ -562,7 +1039,7 @@ export function getCommonStageLabel(stage: string, lang: AppLanguage = 'vi'): st
 export function getCommonVarietyLabel(variety: string, lang: AppLanguage = 'vi'): string {
   if (lang !== 'en') return variety;
   const map: Record<string, string> = {
-    'giống địa phương': 'Local variety',
+    'giống địa phương': 'Local Variety',
     'cải thìa f1': 'Pak Choi F1',
   };
   return map[variety.trim().toLowerCase()] || variety;
@@ -576,18 +1053,6 @@ export interface ResolvedBotanicalProfile {
   matchedPlant?: PlantOption;
 }
 
-/**
- * Exact botanical family classifier with edge-case guards:
- * - Watermelon / Dưa hấu / Dưa leo / Bí đỏ / Bầu / Mướp -> Cucurbitaceae (Họ Bầu bí)
- * - Peanut / Lạc / Đậu phộng / Đậu tương / Đậu xanh -> Fabaceae (Họ Đậu)
- * - Okra / Đậu bắp -> Malvaceae (NOT Fabaceae)
- * - Sweet Potato / Khoai lang -> Convolvulaceae (NOT Solanaceae)
- * - Potato / Khoai tây -> Solanaceae (NOT Convolvulaceae)
- * - Taro / Khoai môn -> Araceae; Cassava / Sắn / Khoai mì -> Euphorbiaceae
- * - Spinach / Cải bó xôi -> Amaranthaceae; Garland chrysanthemum / Cải cúc -> Asteraceae
- * - Coconut / Dừa -> Arecaceae; Pineapple / Dứa -> Bromeliaceae
- * - Black Pepper / Hồ tiêu -> Piperaceae; Chili Pepper / Ớt -> Solanaceae
- */
 export function resolveCropBotanicalProfile(
   cropName: string,
   savedSeedFamily?: SeedFamilyId,
@@ -598,7 +1063,7 @@ export function resolveCropBotanicalProfile(
   // 1. Exact or strong plant match inside SEED_FAMILIES catalog
   for (const fam of SEED_FAMILIES) {
     const exactPlant = fam.plants.find(
-      p => p.name.toLowerCase() === lower || p.nameEn.toLowerCase() === lower
+      (p) => p.name.toLowerCase() === lower || p.nameEn.toLowerCase() === lower
     );
     if (exactPlant) {
       return {
@@ -620,7 +1085,21 @@ export function resolveCropBotanicalProfile(
       familyLabelEn: 'Mallows (Malvaceae)',
     };
   }
-  if (lower.includes('cải bó xôi') || lower.includes('rau chân vịt') || lower.includes('spinach') || lower.includes('rau dền') || lower.includes('amaranth')) {
+  if (lower.includes('mồng tơi') || lower.includes('malabar')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Basellaceae',
+      familyLabelVi: 'Họ Mồng tơi (Basellaceae)',
+      familyLabelEn: 'Malabar Spinach (Basellaceae)',
+    };
+  }
+  if (
+    lower.includes('cải bó xôi') ||
+    lower.includes('rau chân vịt') ||
+    lower.includes('spinach') && !lower.includes('water spinach') ||
+    lower.includes('rau dền') ||
+    lower.includes('amaranth')
+  ) {
     return {
       seedFamilyId: 'other_perennial',
       botanicalFamily: 'Amaranthaceae',
@@ -642,7 +1121,7 @@ export function resolveCropBotanicalProfile(
       botanicalFamily: 'Convolvulaceae',
       familyLabelVi: 'Họ Bìm bìm / Khoai lang (Convolvulaceae)',
       familyLabelEn: 'Morning Glory (Convolvulaceae)',
-      matchedPlant: SEED_FAMILIES.find(f => f.id === 'other_perennial')?.plants.find(p => p.id === 'sweet_potato'),
+      matchedPlant: SEED_FAMILIES.find((f) => f.id === 'other_perennial')?.plants.find((p) => p.id === 'sweet_potato'),
     };
   }
   if (lower.includes('khoai môn') || lower.includes('khoai sọ') || lower.includes('taro')) {
@@ -653,7 +1132,7 @@ export function resolveCropBotanicalProfile(
       familyLabelEn: 'Arums (Araceae)',
     };
   }
-  if (lower.includes('khoai mì') || lower.includes('sắn') || lower.includes('cassava')) {
+  if (lower.includes('khoai mì') || lower.includes('sắn') || lower.includes('cassava') || lower.includes('cao su') || lower.includes('rubber')) {
     return {
       seedFamilyId: 'other_perennial',
       botanicalFamily: 'Euphorbiaceae',
@@ -669,7 +1148,7 @@ export function resolveCropBotanicalProfile(
       familyLabelEn: 'Sesame (Pedaliaceae)',
     };
   }
-  if (lower.includes('hành') || lower.includes('tỏi') || lower.includes('hẹ') || lower.includes('onion') || lower.includes('garlic') || lower.includes('shallot')) {
+  if (lower.includes('hành') || lower.includes('tỏi') || lower.includes('hẹ') || lower.includes('onion') || lower.includes('garlic') || lower.includes('shallot') || lower.includes('scallion')) {
     return {
       seedFamilyId: 'other_perennial',
       botanicalFamily: 'Amaryllidaceae',
@@ -691,7 +1170,47 @@ export function resolveCropBotanicalProfile(
       botanicalFamily: 'Rubiaceae',
       familyLabelVi: 'Họ Cà phê (Rubiaceae)',
       familyLabelEn: 'Coffee Family (Rubiaceae)',
-      matchedPlant: SEED_FAMILIES.find(f => f.id === 'other_perennial')?.plants.find(p => p.id === 'coffee'),
+      matchedPlant: SEED_FAMILIES.find((f) => f.id === 'other_perennial')?.plants.find((p) => p.id === 'coffee'),
+    };
+  }
+  if (lower.includes('chè') || lower.includes('trà') || lower.includes('tea')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Theaceae',
+      familyLabelVi: 'Họ Chè (Theaceae)',
+      familyLabelEn: 'Tea Family (Theaceae)',
+    };
+  }
+  if (lower.includes('xoài') || lower.includes('điều') || lower.includes('mango') || lower.includes('cashew')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Anacardiaceae',
+      familyLabelVi: 'Họ Đào lộn hột / Xoài (Anacardiaceae)',
+      familyLabelEn: 'Cashew & Mango (Anacardiaceae)',
+    };
+  }
+  if (lower.includes('bưởi') || lower.includes('cam') || lower.includes('quýt') || lower.includes('chanh') || lower.includes('pomelo') || lower.includes('orange') || lower.includes('citrus')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Rutaceae',
+      familyLabelVi: 'Họ Cam chanh (Rutaceae)',
+      familyLabelEn: 'Citrus Family (Rutaceae)',
+    };
+  }
+  if (lower.includes('chuối') || lower.includes('banana')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Musaceae',
+      familyLabelVi: 'Họ Chuối (Musaceae)',
+      familyLabelEn: 'Banana Family (Musaceae)',
+    };
+  }
+  if (lower.includes('nhãn') || lower.includes('vải') || lower.includes('chôm chôm') || lower.includes('longan') || lower.includes('lychee')) {
+    return {
+      seedFamilyId: 'other_perennial',
+      botanicalFamily: 'Sapindaceae',
+      familyLabelVi: 'Họ Bồ hòn / Nhãn vải (Sapindaceae)',
+      familyLabelEn: 'Soapberry / Longan & Lychee (Sapindaceae)',
     };
   }
   if (lower.includes('hồ tiêu') || lower.includes('black pepper')) {
@@ -735,7 +1254,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 3. Cucurbitaceae (Watermelon, Melon, Cucumber, Pumpkin, Gourd, Squash, Loofah, Bitter gourd)
+  // 3. Cucurbitaceae
   if (
     lower.includes('dưa hấu') ||
     lower.includes('dưa leo') ||
@@ -761,9 +1280,9 @@ export function resolveCropBotanicalProfile(
     lower.includes('loofah') ||
     lower.includes('chayote')
   ) {
-    const cucurbitPlants = SEED_FAMILIES.find(f => f.id === 'cucurbitaceae')?.plants || [];
+    const cucurbitPlants = SEED_FAMILIES.find((f) => f.id === 'cucurbitaceae')?.plants || [];
     const matched = cucurbitPlants.find(
-      p => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
+      (p) => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
     );
     return {
       seedFamilyId: 'cucurbitaceae',
@@ -774,7 +1293,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 4. Fabaceae (Peanut / Groundnut / Soybean / Mungbean / Black bean / Sesbania / Cowpea)
+  // 4. Fabaceae
   if (
     lower.includes('lạc') ||
     lower.includes('đậu phộng') ||
@@ -785,6 +1304,7 @@ export function resolveCropBotanicalProfile(
     lower.includes('đậu đỏ') ||
     lower.includes('đậu đũa') ||
     lower.includes('đậu cove') ||
+    lower.includes('đậu cô ve') ||
     lower.includes('đậu hà lan') ||
     lower.includes('điền thanh') ||
     lower.includes('muồng') ||
@@ -800,9 +1320,9 @@ export function resolveCropBotanicalProfile(
     lower.includes('legume') ||
     lower.includes('clover')
   ) {
-    const fabPlants = SEED_FAMILIES.find(f => f.id === 'fabaceae')?.plants || [];
+    const fabPlants = SEED_FAMILIES.find((f) => f.id === 'fabaceae')?.plants || [];
     const matched = fabPlants.find(
-      p => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
+      (p) => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
     );
     return {
       seedFamilyId: 'fabaceae',
@@ -813,7 +1333,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 5. Solanaceae (Tomato, Potato, Chili Pepper, Bell Pepper, Eggplant)
+  // 5. Solanaceae
   if (
     lower.includes('cà chua') ||
     lower.includes('khoai tây') ||
@@ -828,9 +1348,9 @@ export function resolveCropBotanicalProfile(
     lower.includes('aubergine') ||
     lower.includes('bell pepper')
   ) {
-    const solPlants = SEED_FAMILIES.find(f => f.id === 'solanaceae')?.plants || [];
+    const solPlants = SEED_FAMILIES.find((f) => f.id === 'solanaceae')?.plants || [];
     const matched = solPlants.find(
-      p => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
+      (p) => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
     );
     return {
       seedFamilyId: 'solanaceae',
@@ -841,7 +1361,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 6. Brassicaceae (Mustard greens, Choy sum, Cabbage, Cauliflower, Broccoli, Radish, Kohlrabi)
+  // 6. Brassicaceae
   if (
     lower.includes('cải') ||
     lower.includes('súp lơ') ||
@@ -857,9 +1377,9 @@ export function resolveCropBotanicalProfile(
     lower.includes('kohlrabi') ||
     lower.includes('brassica')
   ) {
-    const brassPlants = SEED_FAMILIES.find(f => f.id === 'brassicaceae')?.plants || [];
+    const brassPlants = SEED_FAMILIES.find((f) => f.id === 'brassicaceae')?.plants || [];
     const matched = brassPlants.find(
-      p => lower.includes(p.name.toLowerCase().split('/')[0].trim()) || lower.includes(p.id)
+      (p) => lower.includes(p.name.toLowerCase().split('/')[0].trim()) || lower.includes(p.id)
     );
     return {
       seedFamilyId: 'brassicaceae',
@@ -870,7 +1390,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 7. Poaceae (Rice, Maize/Corn, Sorghum, Sugarcane, Napier grass, Wheat)
+  // 7. Poaceae
   if (
     lower.includes('lúa') ||
     lower.includes('ngô') ||
@@ -883,11 +1403,12 @@ export function resolveCropBotanicalProfile(
     lower.includes('corn') ||
     lower.includes('sorghum') ||
     lower.includes('sugarcane') ||
+    lower.includes('napier') ||
     lower.includes('wheat')
   ) {
-    const poaPlants = SEED_FAMILIES.find(f => f.id === 'poaceae')?.plants || [];
+    const poaPlants = SEED_FAMILIES.find((f) => f.id === 'poaceae')?.plants || [];
     const matched = poaPlants.find(
-      p => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
+      (p) => lower.includes(p.name.toLowerCase().split('(')[0].trim()) || lower.includes(p.id)
     );
     return {
       seedFamilyId: 'poaceae',
@@ -898,7 +1419,7 @@ export function resolveCropBotanicalProfile(
     };
   }
 
-  // 8. Category fallback before falling back to savedSeedFamily
+  // 8. Category fallback
   if (category === 'legume') {
     return {
       seedFamilyId: 'fabaceae',

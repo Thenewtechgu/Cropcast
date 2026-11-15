@@ -3,7 +3,11 @@ import { Download, Share, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { useLanguage } from '../contexts/LanguageContext';
 
-export const PWAInstallButton: React.FC = () => {
+interface PWAInstallButtonProps {
+  variant?: 'compact' | 'drawer';
+}
+
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'compact' }) => {
   const { canInstall, hasNativePrompt, isInstalled, isIOS, promptInstall } = usePWAInstall();
   const { t } = useLanguage();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
@@ -23,12 +27,22 @@ export const PWAInstallButton: React.FC = () => {
       <button
         type="button"
         onClick={handleClick}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 transition shadow-xs cursor-pointer shrink-0"
+        className={
+          variant === 'drawer'
+            ? 'w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 transition shadow-xs cursor-pointer'
+            : 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-stone-950 transition shadow-xs cursor-pointer shrink-0 whitespace-nowrap'
+        }
         title={t('Cài CropCast về màn hình chính để xem ngoại tuyến', 'Install CropCast to home screen for offline use')}
       >
-        <Download className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">{t('Cài đặt App', 'Install App')}</span>
-        <span className="sm:hidden">{t('Cài App', 'Install')}</span>
+        <Download className="w-3.5 h-3.5 shrink-0" />
+        {variant === 'drawer' ? (
+          <span>{t('Cài đặt Ứng dụng CropCast (Dùng ngoại tuyến)', 'Install CropCast App (Offline Ready)')}</span>
+        ) : (
+          <>
+            <span className="hidden sm:inline">{t('Cài đặt App', 'Install App')}</span>
+            <span className="sm:hidden">{t('Cài App', 'Install')}</span>
+          </>
+        )}
       </button>
 
       {showIOSGuide && (
