@@ -5,6 +5,14 @@ import {
   FieldProfile,
   PlotPlanRecord,
 } from '../types';
+import {
+  getCommonStageLabel,
+  getCommonVarietyLabel,
+  getPlantDisplayName,
+} from './cropTaxonomy';
+import { getLocalizedRegionName } from './nasaVietnamGrid';
+import { findDistrictInProvince } from './vietnamLocations';
+import { fallbackDictionaryTranslate, looksVietnamese } from '../services/translationService';
 
 export interface DemoWorkspaceState {
   fields: FieldProfile[];
@@ -80,6 +88,7 @@ export function createDefaultDemoWorkspace(): DemoWorkspaceState {
       },
       adaptiveMemory: {
         soilAdjustment: 'Đất phù sa giữ ẩm tốt, phù hợp rút nước xen kẽ giữa vụ giảm phát thải CH₄.',
+        soilAdjustmentEn: 'Alluvial soil retains moisture well; suitable for mid-season Alternate Wetting & Drying (AWD) to reduce CH₄.',
         irrigationSensitivity: 'normal',
         lastFeedbackDate: isoToday,
         lastPredictionOutcome: 'on_track',
@@ -124,7 +133,7 @@ export function createDefaultDemoWorkspace(): DemoWorkspaceState {
               { label: 'T-3', value: 1.32 },
               { label: 'T-2', value: 1.41 },
               { label: 'T-1', value: 1.45 },
-              { label: 'Nay', value: 1.48 },
+              { label: 'Now', value: 1.48 },
             ],
           },
           groundwaterAnomalyGrace: {
@@ -142,7 +151,7 @@ export function createDefaultDemoWorkspace(): DemoWorkspaceState {
               { label: 'T-3', value: 1.5 },
               { label: 'T-2', value: 1.9 },
               { label: 'T-1', value: 2.0 },
-              { label: 'Nay', value: 2.1 },
+              { label: 'Now', value: 2.1 },
             ],
           },
           greenhouseGasEdgar: {
@@ -155,7 +164,7 @@ export function createDefaultDemoWorkspace(): DemoWorkspaceState {
             n2oKgHa: 1.9,
             co2eqTonHa: 2.8,
             emissionLevel: 'moderate',
-            cropContext: 'Lúa nước AWD (ST25)',
+            cropContext: 'ST25 AWD Rice',
             dataSource: 'NASA GHG Center / EDGAR v8',
             trendSeries: [
               { label: '2022', value: 3.9 },
@@ -223,6 +232,7 @@ export function createDefaultDemoWorkspace(): DemoWorkspaceState {
       },
       adaptiveMemory: {
         soilAdjustment: 'Đất cát pha thoát nước nhanh: ưu tiên tưới nhẹ sáng sớm giai đoạn đâm tia củ.',
+        soilAdjustmentEn: 'Fast-draining sandy loam: prioritize light morning watering during pod pegging.',
         irrigationSensitivity: 'higher',
         lastFeedbackDate: isoToday,
         lastPredictionOutcome: 'on_track',
@@ -553,21 +563,143 @@ export function createSeedCommunityPosts(): CommunityPost[] {
   ];
 }
 
+export function ensureFieldEnglishLocalization(field: FieldProfile, template?: FieldProfile): FieldProfile {
+  const districtMatch = findDistrictInProvince(field.province, field.district)?.nameEn;
+  const resolvedNameEn =
+    field.nameEn ||
+    template?.nameEn ||
+    (looksVietnamese(field.name) ? fallbackDictionaryTranslate(field.name, 'en') : field.name);
+  const resolvedProvinceEn =
+    field.provinceEn || template?.provinceEn || getLocalizedRegionName(field.province, 'en');
+  const resolvedDistrictEn =
+    field.districtEn ||
+    template?.districtEn ||
+    districtMatch ||
+    (looksVietnamese(field.district) ? fallbackDictionaryTranslate(field.district, 'en') : field.district);
+
+  const resolvedCropNameEn =
+    field.crop.nameEn ||
+    template?.crop?.nameEn ||
+    getPlantDisplayName(field.crop.name, 'en');
+  const resolvedStageEn =
+    field.crop.currentStageEn ||
+    template?.crop?.currentStageEn ||
+    getCommonStageLabel(field.crop.currentStage, 'en');
+  const resolvedVarietyEn =
+    field.crop.varietyEn ||
+    template?.crop?.varietyEn ||
+    getCommonVarietyLabel(field.crop.variety, 'en');
+  const resolvedFarmingEn =
+    field.crop.farmingMethodEn ||
+    template?.crop?.farmingMethodEn ||
+    (looksVietnamese(field.crop.farmingMethod)
+      ? fallbackDictionaryTranslate(field.crop.farmingMethod, 'en')
+      : field.crop.farmingMethod);
+  const resolvedIrrigationEn =
+    field.crop.irrigationMethodEn ||
+    template?.crop?.irrigationMethodEn ||
+    (looksVietnamese(field.crop.irrigationMethod)
+      ? fallbackDictionaryTranslate(field.crop.irrigationMethod, 'en')
+      : field.crop.irrigationMethod);
+
+  const soilAdj = field.adaptiveMemory?.soilAdjustment;
+  const resolvedSoilAdjEn =
+    field.adaptiveMemory?.soilAdjustmentEn ||
+    template?.adaptiveMemory?.soilAdjustmentEn ||
+    (soilAdj && looksVietnamese(soilAdj) ? fallbackDictionaryTranslate(soilAdj, 'en') : soilAdj);
+
+  const checkInSummary = field.adaptiveMemory?.lastCheckInSummary;
+  const resolvedCheckInEn =
+    field.adaptiveMemory?.lastCheckInSummaryEn ||
+    template?.adaptiveMemory?.lastCheckInSummaryEn ||
+    (checkInSummary && looksVietnamese(checkInSummary)
+      ? fallbackDictionaryTranslate(checkInSummary, 'en')
+      : checkInSummary);
+
+  const earth = field.adaptiveMemory?.earthMetrics;
+  const normalizedEarth = earth
+    ? {
+        ...earth,
+        rotationAdviceEn:
+          earth.rotationAdviceEn || template?.adaptiveMemory?.earthMetrics?.rotationAdviceEn,
+        carbonFluxOco2: earth.carbonFluxOco2
+          ? {
+              ...earth.carbonFluxOco2,
+              trendSeries: earth.carbonFluxOco2.trendSeries?.map((pt) => ({
+                ...pt,
+                label: pt.label === 'Nay' ? 'Now' : pt.label,
+              })),
+            }
+          : earth.carbonFluxOco2,
+        groundwaterAnomalyGrace: earth.groundwaterAnomalyGrace
+          ? {
+              ...earth.groundwaterAnomalyGrace,
+              trendSeries: earth.groundwaterAnomalyGrace.trendSeries?.map((pt) => ({
+                ...pt,
+                label: pt.label === 'Nay' ? 'Now' : pt.label,
+              })),
+            }
+          : earth.groundwaterAnomalyGrace,
+      }
+    : undefined;
+
+  return {
+    ...field,
+    nameEn: resolvedNameEn,
+    provinceEn: resolvedProvinceEn,
+    districtEn: resolvedDistrictEn,
+    waterSource: {
+      ...field.waterSource,
+      notesEn:
+        field.waterSource?.notesEn ||
+        template?.waterSource?.notesEn ||
+        (field.waterSource?.notes && looksVietnamese(field.waterSource.notes)
+          ? fallbackDictionaryTranslate(field.waterSource.notes, 'en')
+          : field.waterSource?.notes),
+    },
+    crop: {
+      ...field.crop,
+      nameEn: resolvedCropNameEn,
+      currentStageEn: resolvedStageEn,
+      varietyEn: resolvedVarietyEn,
+      farmingMethodEn: resolvedFarmingEn,
+      irrigationMethodEn: resolvedIrrigationEn,
+    },
+    adaptiveMemory: field.adaptiveMemory
+      ? {
+          ...field.adaptiveMemory,
+          soilAdjustmentEn: resolvedSoilAdjEn,
+          lastCheckInSummaryEn: resolvedCheckInEn,
+          planFixRecommendationsEn:
+            field.adaptiveMemory.planFixRecommendationsEn ||
+            template?.adaptiveMemory?.planFixRecommendationsEn,
+          earthMetrics: normalizedEarth,
+        }
+      : undefined,
+  };
+}
+
 export function loadDemoWorkspace(): DemoWorkspaceState {
+  const defaults = createDefaultDemoWorkspace();
+  const defaultFieldMap = new Map(defaults.fields.map((f) => [f.id, f]));
   try {
     const raw = localStorage.getItem(DEMO_WORKSPACE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DemoWorkspaceState;
       if (parsed && Array.isArray(parsed.fields)) {
-        return parsed;
+        return {
+          ...parsed,
+          fields: parsed.fields.map((f) =>
+            ensureFieldEnglishLocalization(f, defaultFieldMap.get(f.id))
+          ),
+        };
       }
     }
   } catch {
     // ignore corrupted storage
   }
-  const initial = createDefaultDemoWorkspace();
-  saveDemoWorkspace(initial);
-  return initial;
+  saveDemoWorkspace(defaults);
+  return defaults;
 }
 
 export function saveDemoWorkspace(state: DemoWorkspaceState): void {

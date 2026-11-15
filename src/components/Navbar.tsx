@@ -46,7 +46,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { viewMode, setViewMode } = useViewMode();
 
   const navItems = authUser?.isAdmin
-    ? [{ id: 'admin', label: t('Quản trị', 'Admin'), matchTabs: ['admin'] }]
+    ? [
+        { id: 'admin', label: t('Quản trị', 'Admin'), matchTabs: ['admin'] },
+        { id: 'community', label: t('Cộng đồng', 'Community'), matchTabs: ['community'] },
+      ]
     : [
         { id: 'home', label: t('Trang chủ', 'Home'), matchTabs: ['home'] },
         { id: 'dashboard', label: t('Tổng quan', 'Overview'), matchTabs: ['dashboard', 'tasks', 'feedback'] },

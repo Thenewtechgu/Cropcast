@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import {
   getFirestore,
-  initializeFirestore,
   doc,
   getDocFromServer,
   type Firestore,
@@ -43,17 +42,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 function createFirestoreInstance(): Firestore {
-  if (typeof window !== 'undefined') {
-    try {
-      return initializeFirestore(
-        app,
-        { experimentalForceLongPolling: true },
-        resolvedDatabaseId || undefined
-      );
-    } catch {
-      // Fallback if Firestore instance was already initialized
-    }
-  }
   return resolvedDatabaseId
     ? getFirestore(app, resolvedDatabaseId)
     : getFirestore(app);
@@ -134,11 +122,25 @@ async function testConnection() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return;
   }
+  const runProbe = () => getDocFromServer(doc(db, 'test', 'connection'));
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await runProbe();
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+      try {
+        await runProbe();
+      } catch (retryError) {
+        if (
+          retryError instanceof Error &&
+          retryError.message.includes('the client is offline')
+        ) {
+          console.error('Please check your Firebase configuration.');
+        }
+      }
     }
   }
 }

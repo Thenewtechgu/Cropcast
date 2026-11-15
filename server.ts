@@ -2,8 +2,9 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -24,6 +25,7 @@ function getGeminiClient(): GoogleGenAI | null {
 
 async function createServer() {
   const app = express();
+  const httpServer = http.createServer(app);
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req: Request, res: Response) => {
@@ -76,6 +78,7 @@ async function createServer() {
         model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
             'You are a precision bilingual agricultural translator specializing in Vietnamese and English agronomy, soil science, crop varieties, and farmer forum posts.',
           responseMimeType: 'application/json',
@@ -134,12 +137,32 @@ async function createServer() {
 
     try {
       const langLabel = language === 'en' ? 'English' : 'Vietnamese';
+      const fieldName =
+        language === 'en' ? field.nameEn || field.name || 'Field' : field.name || 'Ruộng';
+      const districtName =
+        language === 'en' ? field.districtEn || field.district || '' : field.district || '';
+      const provinceName =
+        language === 'en' ? field.provinceEn || field.province || '' : field.province || '';
+      const cropName =
+        language === 'en'
+          ? field.crop?.nameEn || field.crop?.name || 'Crop'
+          : field.crop?.name || 'Cây trồng';
+      const varietyName =
+        language === 'en'
+          ? field.crop?.varietyEn || field.crop?.variety || 'Standard'
+          : field.crop?.variety || 'Giống địa phương';
+      const stageName =
+        language === 'en'
+          ? field.crop?.currentStageEn || field.crop?.currentStage || 'Vegetative'
+          : field.crop?.currentStage || 'Đang sinh trưởng';
+      const locationStr = [districtName, provinceName].filter(Boolean).join(', ');
+
       const contextSummary = [
-        `Field: ${field.name || 'Field'} (${field.district || ''}, ${field.province || ''})`,
+        `Field: ${fieldName}${locationStr ? ` (${locationStr})` : ''}`,
         `Area: ${field.areaHa || 0} ha | Coordinates: ${field.lat}, ${field.lon}`,
         `Soil: ${field.soilType || 'loam'} | Drainage: ${field.soilCharacteristics?.drainage || 'moderate'} | pH: ${field.soilCharacteristics?.ph ?? 'untested'}`,
         `Water source: ${field.waterSource?.type || 'river'} | Salinity risk: ${Boolean(field.waterSource?.salinityRisk)}`,
-        `Crop: ${field.crop?.name || 'Rice'} (${field.crop?.variety || 'Standard'}) | Stage: ${field.crop?.currentStage || 'Vegetative'}`,
+        `Crop: ${cropName} (${varietyName}) | Stage: ${stageName}`,
         `Live Weather: Temp ${weather.temp ?? 'N/A'}°C (Min ${weather.minTemp ?? 'N/A'} / Max ${weather.maxTemp ?? 'N/A'}), Rain ${weather.rain ?? 0} mm, Humidity ${weather.humidity ?? 'N/A'}%, Root moisture ${Math.round((weather.gwetroot ?? 0.6) * 100)}%, Topsoil ${Math.round((weather.gwettop ?? 0.55) * 100)}%, VPD ${weather.vpdHpa ?? 'N/A'} hPa`,
         `Historical 25-year baseline (NASA POWER): Avg Temp ${weather.historicalBaseline?.avgTemp ?? 'N/A'}°C, Avg Rain ${weather.historicalBaseline?.avgRain ?? 'N/A'} mm/mo`,
         earth?.groundwaterAnomalyGrace
@@ -172,6 +195,7 @@ async function createServer() {
         model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: [
             `You are CropCast's agricultural field advisor.`,
             `Respond STRICTLY in ${langLabel}. Never mix Vietnamese into English responses or vice versa (except standard botanical Latin names when helpful).`,
@@ -225,13 +249,14 @@ async function createServer() {
       const response = await ai.models.generateContent({
         model: 'gemini-4-hydrogen',
         contents: [
-          `Field: ${field.name || ''} (${field.province || ''}), soil: ${field.soilType || ''}, current crop: ${field.crop?.name || ''}.`,
+          `Field: ${field.nameEn || field.name || ''} (${field.provinceEn || field.province || ''}), soil: ${field.soilType || ''}, current crop: ${field.crop?.nameEn || field.crop?.name || ''}.`,
           `Farmer rejected previous plan because: "${rejectionReason}".`,
           `Candidate next rotation strategy selected by agronomy rules: ${baseStrategy.title} (${baseStrategy.nextCropName}).`,
           `Original rationale: ${baseStrategy.whySuggested}`,
           `Write an improved, empathetic, 2-3 sentence "whySuggested" explanation in ${langLabel} explaining why "${baseStrategy.nextCropName}" addresses the farmer's concern ("${rejectionReason}") while staying faithful to soil & climate constraints.`,
         ].join('\n'),
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: `Return ONLY valid JSON: { "whySuggested": string }. Write purely in ${langLabel}.`,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -259,11 +284,61 @@ async function createServer() {
   });
 
   if (!isProduction) {
+    const disableHmr =
+      process.env.DISABLE_HMR === 'true' || Boolean(process.env.K_SERVICE);
+    if (disableHmr) {
+      app.get('/@vite/client', (_req: Request, res: Response) => {
+        res.type('application/javascript').send(`
+const sheetsMap = new Map();
+export class ErrorOverlay {}
+export function updateStyle(id, content) {
+  if (typeof document === 'undefined') return;
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    document.head.appendChild(style);
+    sheetsMap.set(id, style);
+  } else if (style.textContent !== content) {
+    style.textContent = content;
+  }
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style && style.parentNode) {
+    style.parentNode.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function injectQuery(url) {
+  return url;
+}
+`);
+      });
+    }
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR !== 'true',
+        hmr: disableHmr ? false : { server: httpServer },
+        ws: disableHmr ? false : undefined,
+        watch: disableHmr ? null : {},
       },
       appType: 'spa',
     });
@@ -285,7 +360,7 @@ async function createServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`CropCast server running at http://0.0.0.0:${PORT}`);
   });
 }

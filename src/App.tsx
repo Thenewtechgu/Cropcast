@@ -74,7 +74,9 @@ import {
   resetDemoWorkspace,
   loadDemoForumPosts,
   saveDemoForumPosts,
+  ensureFieldEnglishLocalization,
 } from './data/demoData';
+import { getCommonStageLabel } from './data/cropTaxonomy';
 import { findNearestNasaGrid } from './data/nasaVietnamGrid';
 import { translateTexts } from './services/translationService';
 
@@ -384,10 +386,13 @@ export default function App() {
     const unsubCommunity = FirestoreService.subscribeCommunityPosts(
       (cloudPosts) => {
         setCommunitySyncError(null);
-        const localDemoPosts = loadDemoForumPosts().filter(
-          (dp) => !cloudPosts.some((cp) => cp.id === dp.id)
+        const seedOnlyPosts = loadDemoForumPosts().filter(
+          (dp) =>
+            dp.isDemoSeed &&
+            !dp.id.startsWith('DEMO_POST_') &&
+            !cloudPosts.some((cp) => cp.id === dp.id || cp.title === dp.title)
         );
-        setCommunityPosts([...cloudPosts, ...localDemoPosts]);
+        setCommunityPosts([...cloudPosts, ...seedOnlyPosts]);
       },
       (err) => {
         setCommunitySyncError(
@@ -401,6 +406,45 @@ export default function App() {
     );
     return () => unsubCommunity();
   }, [authReady]);
+
+  // Migrate any legacy locally-authored DEMO_POST_* drafts up to Firestore Cloud when user signs in
+  useEffect(() => {
+    if (!authReady || !authUser) return;
+    const localPosts = loadDemoForumPosts();
+    const pendingLocalPosts = localPosts.filter((p) => p.id.startsWith('DEMO_POST_'));
+    if (pendingLocalPosts.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const migratedIds = new Set<string>();
+      for (const lp of pendingLocalPosts) {
+        if (cancelled) break;
+        try {
+          await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, {
+            province: lp.province,
+            district: lp.district,
+            cropName: lp.cropName,
+            cropNameEn: lp.cropNameEn,
+            category: lp.category,
+            title: lp.title,
+            titleEn: lp.titleEn,
+            content: lp.content,
+            contentEn: lp.contentEn,
+          });
+          migratedIds.add(lp.id);
+        } catch {
+          // leave unmigrated if offline or rejected
+        }
+      }
+      if (migratedIds.size > 0) {
+        saveDemoForumPosts(localPosts.filter((p) => !migratedIds.has(p.id)));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, authUser?.uid]);
 
   // Subscribe to farmer's cloud records OR hydrate default Demo Workspace when unauthenticated
   useEffect(() => {
@@ -433,7 +477,9 @@ export default function App() {
       setFeedbackHistory([]);
       setPlansByPlotId({});
       setLastSyncedAt(null);
-      navigateToTab('admin', true);
+      if (activeTab !== 'community') {
+        navigateToTab('admin', true);
+      }
       return;
     }
 
@@ -441,7 +487,12 @@ export default function App() {
     OfflineCacheService.loadSnapshot(authUser.uid)
       .then((cached) => {
         if (!isMounted || !cached) return;
-        setFields((prev) => (prev.length === 0 && cached.fields.length > 0 ? cached.fields : prev));
+        const localizedCachedFields = (cached.fields || []).map((f) =>
+          ensureFieldEnglishLocalization(f)
+        );
+        setFields((prev) =>
+          prev.length === 0 && localizedCachedFields.length > 0 ? localizedCachedFields : prev
+        );
         setTasks((prev) => (prev.length === 0 && cached.tasks.length > 0 ? cached.tasks : prev));
         setFeedbackHistory((prev) =>
           prev.length === 0 && cached.feedbacks.length > 0 ? cached.feedbacks : prev
@@ -454,7 +505,7 @@ export default function App() {
         if (cached.lastSyncedAt) setLastSyncedAt(cached.lastSyncedAt);
         setActiveFieldId((prev) => {
           if (prev) return prev;
-          return cached.fields[0]?.id || '';
+          return localizedCachedFields[0]?.id || '';
         });
       })
       .catch(() => {});
@@ -463,10 +514,11 @@ export default function App() {
       authUser.uid,
       authUser.email,
       (cloudFields) => {
-        setFields(cloudFields);
+        const localizedCloudFields = cloudFields.map((f) => ensureFieldEnglishLocalization(f));
+        setFields(localizedCloudFields);
         setActiveFieldId((prev) => {
-          if (prev && cloudFields.some((f) => f.id === prev)) return prev;
-          return cloudFields[0]?.id || '';
+          if (prev && localizedCloudFields.some((f) => f.id === prev)) return prev;
+          return localizedCloudFields[0]?.id || '';
         });
       }
     );
@@ -1031,6 +1083,9 @@ export default function App() {
                 crop: {
                   ...f.crop,
                   currentStage: input.updatedStage || f.crop.currentStage,
+                  currentStageEn: input.updatedStage
+                    ? getCommonStageLabel(input.updatedStage, 'en')
+                    : f.crop.currentStageEn,
                   healthStatus: diagnostic.recommendedHealthStatus,
                 },
                 adaptiveMemory: {
@@ -1075,6 +1130,9 @@ export default function App() {
       crop: {
         ...activeField.crop,
         currentStage: input.updatedStage || activeField.crop.currentStage,
+        currentStageEn: input.updatedStage
+          ? getCommonStageLabel(input.updatedStage, 'en')
+          : activeField.crop.currentStageEn,
         healthStatus: diagnostic.recommendedHealthStatus,
       },
       adaptiveMemory: {
@@ -1291,6 +1349,16 @@ export default function App() {
     title: string;
     content: string;
   }) => {
+    if (!authUser) {
+      setAuthModalOpen(true);
+      throw new Error(
+        t(
+          'Vui lòng đăng nhập để đăng bài lên Cloud cho toàn bộ cộng đồng cùng xem.',
+          'Please sign in to publish your post to Cloud Firestore so all farmers can see it.'
+        )
+      );
+    }
+
     const otherLang = lang === 'en' ? 'vi' : 'en';
     const { translations } = await translateTexts(
       [input.title, input.content, input.cropName || ''],
@@ -1312,33 +1380,6 @@ export default function App() {
         : translations[2] || input.cropName
       : undefined;
 
-    if (!authUser) {
-      const localPost: CommunityPost = {
-        id: `DEMO_POST_${Date.now()}`,
-        authorUid: 'DEMO_FARMER',
-        authorName: t('Nông hộ Demo', 'Demo Farmer'),
-        province: input.province,
-        district: input.district,
-        cropName,
-        cropNameEn,
-        category: input.category,
-        title,
-        titleEn,
-        content,
-        contentEn,
-        likesCount: 0,
-        upvotedUids: [],
-        replies: [],
-        createdAt: new Date().toISOString(),
-        isDemoSeed: true,
-      };
-      setCommunityPosts((prev) => {
-        const next = [localPost, ...prev];
-        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
-        return next;
-      });
-      return;
-    }
     await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, {
       ...input,
       cropName,
@@ -1351,6 +1392,15 @@ export default function App() {
   };
 
   const handleAddCommunityReply = async (postId: string, content: string) => {
+    if (!authUser) {
+      setAuthModalOpen(true);
+      throw new Error(
+        t(
+          'Vui lòng đăng nhập để bình luận đồng bộ lên Cloud.',
+          'Please sign in to post a Cloud-synced reply.'
+        )
+      );
+    }
     const target = communityPosts.find((p) => p.id === postId);
     const otherLang = lang === 'en' ? 'vi' : 'en';
     const { translations } = await translateTexts(
@@ -1361,34 +1411,30 @@ export default function App() {
     const contentVi = lang === 'en' ? translations[0] || content : content;
     const contentEn = lang === 'en' ? content : translations[0] || content;
 
-    if (!authUser || target?.isDemoSeed) {
-      const replyAuthorUid = authUser?.uid || 'DEMO_FARMER';
-      const replyAuthorName = authUser?.displayName || t('Nông hộ Demo', 'Demo Farmer');
-      setCommunityPosts((prev) => {
-        const next = prev.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                replies: [
-                  ...(p.replies || []),
-                  {
-                    id: `REP_${Date.now()}`,
-                    authorUid: replyAuthorUid,
-                    authorName: replyAuthorName,
-                    authorProvince: activeField?.province,
-                    content: contentVi,
-                    contentEn,
-                    createdAt: new Date().toISOString(),
-                  },
-                ],
-              }
-            : p
-        );
-        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
-        return next;
+    if (target?.isDemoSeed) {
+      // Promote sample discussion + user reply into a shared Firestore Cloud post
+      const created = await FirestoreService.createCommunityPost(authUser.uid, authUser.displayName, {
+        province: target.province,
+        district: target.district,
+        cropName: target.cropName,
+        cropNameEn: target.cropNameEn,
+        category: target.category,
+        title: target.title,
+        titleEn: target.titleEn,
+        content: target.content,
+        contentEn: target.contentEn,
       });
+      await FirestoreService.addCommunityReply(
+        created.id,
+        authUser.uid,
+        authUser.displayName,
+        activeField?.province,
+        contentVi,
+        contentEn
+      );
       return;
     }
+
     await FirestoreService.addCommunityReply(
       postId,
       authUser.uid,
@@ -1400,26 +1446,27 @@ export default function App() {
   };
 
   const handleToggleCommunityUpvote = async (postId: string) => {
+    if (!authUser) {
+      setAuthModalOpen(true);
+      return;
+    }
     const target = communityPosts.find((p) => p.id === postId);
-    if (!authUser || target?.isDemoSeed) {
-      const actorUid = authUser?.uid || 'DEMO_FARMER';
-      setCommunityPosts((prev) => {
-        const next = prev.map((p) => {
+    if (target?.isDemoSeed) {
+      setCommunityPosts((prev) =>
+        prev.map((p) => {
           if (p.id !== postId) return p;
-          const upvoted = (p.upvotedUids || []).includes(actorUid);
+          const upvoted = (p.upvotedUids || []).includes(authUser.uid);
           const nextUids = upvoted
-            ? (p.upvotedUids || []).filter((id) => id !== actorUid)
-            : [...(p.upvotedUids || []), actorUid];
+            ? (p.upvotedUids || []).filter((id) => id !== authUser.uid)
+            : [...(p.upvotedUids || []), authUser.uid];
           const delta = upvoted ? -1 : 1;
           return {
             ...p,
             upvotedUids: nextUids,
             likesCount: Math.max(0, (p.likesCount || 0) + delta),
           };
-        });
-        saveDemoForumPosts(next.filter((p) => p.isDemoSeed || p.authorUid === 'DEMO_FARMER'));
-        return next;
-      });
+        })
+      );
       return;
     }
     await FirestoreService.toggleCommunityUpvote(postId, authUser.uid);
@@ -1483,10 +1530,10 @@ export default function App() {
   return (
     <div className="min-h-screen bg-stone-100 text-stone-900 flex flex-col font-sans antialiased">
       <Navbar
-        activeTab={authUser?.isAdmin ? 'admin' : activeTab}
+        activeTab={authUser?.isAdmin ? (activeTab === 'community' ? 'community' : 'admin') : activeTab}
         setActiveTab={(nextTab) => {
           if (authUser?.isAdmin) {
-            navigateToTab('admin');
+            navigateToTab(nextTab === 'community' ? 'community' : 'admin');
             return;
           }
           navigateToTab(nextTab);
@@ -1795,13 +1842,14 @@ export default function App() {
             renderMissingFieldPrompt()
           ))}
 
-        {!authUser?.isAdmin && activeTab === 'community' && (
+        {activeTab === 'community' && (
           <CommunityForumView
             activeField={activeField}
             authUser={authUser}
             isDemoMode={isDemoMode}
             posts={communityPosts}
             syncError={communitySyncError}
+            onOpenAuthModal={() => setAuthModalOpen(true)}
             onCreatePost={handleCreateCommunityPost}
             onAddReply={handleAddCommunityReply}
             onToggleUpvote={handleToggleCommunityUpvote}
@@ -1812,7 +1860,7 @@ export default function App() {
           <NasaSourcesView onNavigateTab={navigateToTab} />
         )}
 
-        {authUser?.isAdmin && (
+        {authUser?.isAdmin && activeTab !== 'community' && (
           <AdminDataManagementView
             onDatasetUpdated={() => setDatasetRefreshTick((t) => t + 1)}
           />

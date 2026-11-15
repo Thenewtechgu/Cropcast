@@ -1739,9 +1739,10 @@ export const FirestoreService = {
   ): Promise<CommunityPost> {
     const postId = `POST_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const path = `community_posts/${postId}`;
+    const safeAuthorName = ((authorName || '').trim() || 'Nông dân CropCast').slice(0, 120);
     const payload = {
       authorUid: uid,
-      authorName: (authorName || 'Nông dân CropCast').slice(0, 120),
+      authorName: safeAuthorName,
       province: input.province.slice(0, 100),
       district: input.district ? input.district.slice(0, 120) : undefined,
       cropName: input.cropName ? input.cropName.slice(0, 120) : undefined,
@@ -1792,10 +1793,11 @@ export const FirestoreService = {
   ): Promise<void> {
     const path = `community_posts/${postId}`;
     const ref = doc(db, 'community_posts', postId);
+    const safeReplyAuthor = ((authorName || '').trim() || 'Nông dân CropCast').slice(0, 120);
     const reply: CommunityReply = {
       id: `REP_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       authorUid: uid,
-      authorName: (authorName || 'Nông dân CropCast').slice(0, 120),
+      authorName: safeReplyAuthor,
       authorProvince: authorProvince ? authorProvince.slice(0, 100) : undefined,
       content: content.trim().slice(0, 1200),
       contentEn: contentEn ? contentEn.trim().slice(0, 1500) : undefined,

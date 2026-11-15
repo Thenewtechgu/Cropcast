@@ -24,18 +24,22 @@ const MiniTrendBars: React.FC<{
   series: TrendPoint[];
   barColor: string;
   unit: string;
-}> = ({ series, barColor, unit }) => {
+  lang: 'vi' | 'en';
+}> = ({ series, barColor, unit, lang }) => {
   if (!series || series.length === 0) return null;
   const maxAbs = Math.max(...series.map((p) => Math.abs(p.value)), 0.1);
+  const localizeLabel = (label: string) =>
+    lang === 'en' && label === 'Nay' ? 'Now' : lang === 'vi' && label === 'Now' ? 'Nay' : label;
   return (
     <div className="pt-3 border-t border-stone-100">
       <div className="flex items-end justify-between gap-1.5 h-12">
         {series.map((pt) => {
           const pct = Math.max(18, Math.round((Math.abs(pt.value) / maxAbs) * 100));
+          const displayLabel = localizeLabel(pt.label);
           return (
             <div key={pt.label} className="flex-1 flex flex-col items-center gap-1">
               <div
-                title={`${pt.label}: ${pt.value} ${unit}`}
+                title={`${displayLabel}: ${pt.value} ${unit}`}
                 className={`w-full rounded-sm ${barColor}`}
                 style={{ height: `${pct}%`, opacity: pt.value < 0 ? 0.6 : 0.9 }}
               />
@@ -46,7 +50,7 @@ const MiniTrendBars: React.FC<{
       <div className="flex justify-between text-[10px] text-stone-400 font-mono tabular-nums mt-1">
         {series.map((pt) => (
           <span key={pt.label} className="flex-1 text-center">
-            {pt.label}
+            {localizeLabel(pt.label)}
           </span>
         ))}
       </div>
@@ -298,6 +302,7 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                 series={oco2?.trendSeries || []}
                 barColor="bg-emerald-600"
                 unit={t('tấn CO₂/ha', 't CO₂/ha')}
+                lang={lang}
               />
             </div>
 
@@ -345,6 +350,7 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                 series={grace?.trendSeries || []}
                 barColor={grace?.groundwaterStatus === 'depleting' ? 'bg-rose-500' : 'bg-sky-600'}
                 unit="cm"
+                lang={lang}
               />
             </div>
 
@@ -392,6 +398,7 @@ export const EarthSustainabilityPanel: React.FC<EarthSustainabilityPanelProps> =
                 series={ghg?.trendSeries || []}
                 barColor={ghg?.emissionLevel === 'high' ? 'bg-amber-500' : 'bg-stone-600'}
                 unit={t('tấn CO₂e/ha', 't CO₂e/ha')}
+                lang={lang}
               />
             </div>
           </div>

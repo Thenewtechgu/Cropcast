@@ -1,5 +1,6 @@
 import { CropCategory, SeedFamilyId } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
+import { fallbackDictionaryTranslate, looksVietnamese } from '../services/translationService';
 
 export interface PlantOption {
   id: string;
@@ -1017,32 +1018,78 @@ export function getPlantDisplayName(plantOrCropName: string | PlantOption, lang:
     'chuối': 'Banana',
     'dứa': 'Pineapple',
   };
-  return extraMap[clean.toLowerCase()] || clean;
+  const out = extraMap[clean.toLowerCase()] || clean;
+  if (looksVietnamese(out)) {
+    return fallbackDictionaryTranslate(out, 'en');
+  }
+  return out;
 }
 
 export function getCommonStageLabel(stage: string, lang: AppLanguage = 'vi'): string {
   if (lang !== 'en') return stage;
+  const clean = (stage || '').trim();
+  if (!clean) return clean;
   const map: Record<string, string> = {
     'cây con / mạ non': 'Seedling / Nursery',
     'đang sinh trưởng': 'Vegetative Growth',
+    'đang sinh trưởng / đẻ nhánh rộ': 'Active growth / Peak tillering',
+    'đẻ nhánh': 'Tillering',
+    'đẻ nhánh rộ': 'Peak tillering',
+    'đẻ nhánh rộ (nhu cầu nước nông)': 'Peak tillering (shallow water demand)',
+    'cây con (2-3 lá thật)': 'Seedling (2–3 true leaves)',
     'cây con (mới gieo 7 ngày)': 'Seedling (7 days after sowing)',
     'sinh trưởng mạnh (vươn lóng)': 'Rapid Stem Elongation',
     'vươn lóng mạnh': 'Rapid Vegetative Elongation',
+    'vươn lóng mạnh (7-8 lá)': 'Rapid Stem Elongation (7–8 leaves)',
     'làm đòng trổ bông': 'Panicle Initiation & Heading',
+    'làm đòng - trổ bông': 'Panicle Initiation & Heading',
+    'đòng - trổ': 'Booting & Heading',
+    'đang làm đòng': 'Panicle Initiation',
+    'trổ bông': 'Heading / Flowering',
     'ra hoa đậu quả': 'Flowering & Fruit Set',
+    'ra hoa / đâm tia củ': 'Flowering / Pod pegging',
+    'ra hoa / kết trái': 'Flowering / Fruit set',
+    'đâm tia củ': 'Pod pegging',
+    'kết trái': 'Fruit set',
     'nuôi quả / tạo củ': 'Fruit / Tuber Filling',
+    'nuôi quả / làm hạt': 'Fruit / Grain Filling',
+    'tạo củ / vào chắc': 'Tuber Bulking / Grain Filling',
+    'chín sữa': 'Milk Grain Stage',
+    'chín sáp': 'Dough Stage',
+    'chín vàng': 'Ripening',
     'sắp thu hoạch': 'Pre-Harvest Maturation',
   };
-  return map[stage.trim().toLowerCase()] || stage;
+  const direct = map[clean.toLowerCase()];
+  if (direct) return direct;
+
+  if (clean.includes('/')) {
+    const parts = clean
+      .split('/')
+      .map((part) => {
+        const trimmed = part.trim();
+        const mapped = map[trimmed.toLowerCase()];
+        if (mapped) return mapped;
+        return fallbackDictionaryTranslate(trimmed, 'en');
+      });
+    const joined = parts.join(' / ');
+    return looksVietnamese(joined) ? fallbackDictionaryTranslate(joined, 'en') : joined;
+  }
+
+  const dictOut = fallbackDictionaryTranslate(clean, 'en');
+  return dictOut || clean;
 }
 
 export function getCommonVarietyLabel(variety: string, lang: AppLanguage = 'vi'): string {
   if (lang !== 'en') return variety;
+  const clean = (variety || '').trim();
   const map: Record<string, string> = {
     'giống địa phương': 'Local Variety',
     'cải thìa f1': 'Pak Choi F1',
+    'lạc l14': 'L14 Peanut',
+    'ngô lai f1': 'Hybrid Maize F1',
   };
-  return map[variety.trim().toLowerCase()] || variety;
+  const out = map[clean.toLowerCase()] || clean;
+  return looksVietnamese(out) ? fallbackDictionaryTranslate(out, 'en') : out;
 }
 
 export interface ResolvedBotanicalProfile {

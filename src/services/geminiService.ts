@@ -18,7 +18,11 @@ import {
   resolveCropBotanicalProfile,
   getPlantDisplayName,
   getCommonStageLabel,
+  getCommonVarietyLabel,
 } from '../data/cropTaxonomy';
+import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { findDistrictInProvince } from '../data/vietnamLocations';
+import { fallbackDictionaryTranslate, looksVietnamese } from './translationService';
 import type { AppLanguage } from '../contexts/LanguageContext';
 
 export interface AdvisorApiResponse {
@@ -65,8 +69,9 @@ function buildLocalAgronomyReply(
 ): string {
   const q = userMessage.toLowerCase().trim();
   const isEn = language === 'en';
+  const rawName = field?.name || 'your field';
   const fieldName = isEn
-    ? field?.nameEn || field?.name || 'your field'
+    ? field?.nameEn || (looksVietnamese(rawName) ? fallbackDictionaryTranslate(rawName, 'en') : rawName)
     : field?.name || 'thửa ruộng của bạn';
   const cropName = isEn
     ? field?.crop?.nameEn || getPlantDisplayName(field?.crop?.name || 'Paddy Rice', 'en')
@@ -503,38 +508,155 @@ export const GeminiService = {
         ? 'Hello, what should I check on my field today?'
         : 'Xin chào, ruộng của tôi hôm nay cần chú ý gì?');
 
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return {
+        reply: buildLocalAgronomyReply(promptText, field, weather, earth, language),
+        isError: false,
+        fromFallback: true,
+        provider: 'local',
+      };
+    }
+
+    const districtEn =
+      field.districtEn ||
+      findDistrictInProvince(field.province, field.district)?.nameEn ||
+      field.district;
+    const provinceEn = field.provinceEn || getLocalizedRegionName(field.province, 'en');
+    const nameEn =
+      field.nameEn ||
+      (looksVietnamese(field.name) ? fallbackDictionaryTranslate(field.name, 'en') : field.name);
+
+    const compactField = {
+      id: field.id,
+      name: field.name,
+      nameEn,
+      province: field.province,
+      provinceEn,
+      district: field.district,
+      districtEn,
+      lat: field.lat,
+      lon: field.lon,
+      areaHa: field.areaHa,
+      soilType: field.soilType,
+      soilCharacteristics: field.soilCharacteristics,
+      waterSource: field.waterSource,
+      crop: {
+        ...field.crop,
+        nameEn: field.crop.nameEn || getPlantDisplayName(field.crop.name, 'en'),
+        varietyEn: field.crop.varietyEn || getCommonVarietyLabel(field.crop.variety, 'en'),
+        currentStageEn: field.crop.currentStageEn || getCommonStageLabel(field.crop.currentStage, 'en'),
+      },
+      adaptiveMemory: earth
+        ? {
+            earthMetrics: {
+              carbonFluxOco2: earth.carbonFluxOco2
+                ? {
+                    sifWm2SrUm: earth.carbonFluxOco2.sifWm2SrUm,
+                    carbonUptakeTonHaYr: earth.carbonFluxOco2.carbonUptakeTonHaYr,
+                    photosynthesisStatus: earth.carbonFluxOco2.photosynthesisStatus,
+                  }
+                : undefined,
+              groundwaterAnomalyGrace: earth.groundwaterAnomalyGrace
+                ? {
+                    lweThicknessCm: earth.groundwaterAnomalyGrace.lweThicknessCm,
+                    groundwaterStatus: earth.groundwaterAnomalyGrace.groundwaterStatus,
+                  }
+                : undefined,
+              greenhouseGasEdgar: earth.greenhouseGasEdgar
+                ? {
+                    co2eqTonHa: earth.greenhouseGasEdgar.co2eqTonHa,
+                    ch4KgHa: earth.greenhouseGasEdgar.ch4KgHa,
+                    n2oKgHa: earth.greenhouseGasEdgar.n2oKgHa,
+                  }
+                : undefined,
+            },
+          }
+        : undefined,
+    };
+
+    const compactWeather = weather
+      ? {
+          temp: weather.temp,
+          minTemp: weather.minTemp,
+          maxTemp: weather.maxTemp,
+          rain: weather.rain,
+          humidity: weather.humidity,
+          gwetroot: weather.gwetroot,
+          gwettop: weather.gwettop,
+          vpdHpa: weather.vpdHpa,
+          solarRadiation: weather.solarRadiation,
+          observationDate: weather.observationDate,
+          observationDateEn: weather.observationDateEn,
+          historicalBaseline: weather.historicalBaseline
+            ? {
+                avgTemp: weather.historicalBaseline.avgTemp,
+                avgRain: weather.historicalBaseline.avgRain,
+              }
+            : undefined,
+        }
+      : undefined;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
     try {
       const resp = await fetch('/api/gemini/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           message: promptText,
-          field,
-          weather,
+          field: compactField,
+          weather: compactWeather,
           history: conversationHistory.slice(-8),
           language,
         }),
       });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (typeof data?.reply === 'string' && data.reply.trim()) {
-          return {
-            reply: data.reply.trim(),
-            isError: false,
-            fromFallback: false,
-            provider: 'gemini',
-          };
-        }
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && typeof data?.reply === 'string' && data.reply.trim()) {
+        return {
+          reply: data.reply.trim(),
+          isError: false,
+          fromFallback: false,
+          provider: 'gemini',
+        };
       }
-    } catch {
-      // Fallback seamlessly when offline or server Gemini API key is absent
-    }
 
-    return {
-      reply: buildLocalAgronomyReply(promptText, field, weather, earth, language),
-      isError: false,
-      fromFallback: true,
-      provider: 'local',
-    };
+      const errCode = typeof data?.error === 'string' ? data.error : `HTTP_${resp.status}`;
+      const errorMsg =
+        language === 'en'
+          ? errCode === 'GEMINI_API_KEY_NOT_CONFIGURED'
+            ? 'Gemini AI service is not configured on the server yet. Please contact the administrator.'
+            : `Gemini AI could not complete this request right now (${errCode}). Please tap Retry below.`
+          : errCode === 'GEMINI_API_KEY_NOT_CONFIGURED'
+          ? 'Dịch vụ Gemini AI chưa được cấu hình trên máy chủ. Vui lòng liên hệ quản trị viên.'
+          : `Gemini AI tạm thời chưa phản hồi (${errCode}). Vui lòng nhấn Thử lại bên dưới.`;
+
+      return {
+        reply: errorMsg,
+        isError: true,
+        fromFallback: false,
+        provider: 'gemini',
+      };
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      const errorMsg =
+        language === 'en'
+          ? isAbort
+            ? 'Gemini AI took too long to respond. Please tap Retry below.'
+            : 'Unable to reach Gemini AI server right now. Check your connection and tap Retry.'
+          : isAbort
+          ? 'Gemini AI phản hồi hơi lâu. Vui lòng nhấn Thử lại bên dưới.'
+          : 'Không thể kết nối máy chủ Gemini AI lúc này. Kiểm tra mạng và nhấn Thử lại.';
+
+      return {
+        reply: errorMsg,
+        isError: true,
+        fromFallback: false,
+        provider: 'gemini',
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 };

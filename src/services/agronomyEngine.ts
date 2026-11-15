@@ -13,6 +13,7 @@ import {
 } from '../types';
 import type { AppLanguage } from '../contexts/LanguageContext';
 import { getPlantDisplayName, getCommonStageLabel, getCommonVarietyLabel } from '../data/cropTaxonomy';
+import { fallbackDictionaryTranslate, looksVietnamese } from './translationService';
 
 /**
  * Tier 4 Agronomic Engine: Multi-Factor Decision Analysis
@@ -140,7 +141,10 @@ export function analyzeFieldAgronomy(
     field.crop.currentStage.toLowerCase().includes('flower');
 
   let riskLevel: DailyAgronomicBrief['riskLevel'] = 'LOW';
-  const fieldDisplayName = isEn ? field.nameEn || field.name : field.name;
+  const fieldDisplayName = isEn
+    ? field.nameEn ||
+      (looksVietnamese(field.name) ? fallbackDictionaryTranslate(field.name, 'en') : field.name)
+    : field.name;
   const cropDisplay = isEn
     ? field.crop.nameEn || getPlantDisplayName(field.crop.name, 'en')
     : field.crop.name;
@@ -930,7 +934,11 @@ export function evaluateFieldCheckIn(
   let verdictTitle = '';
   let rootCauseExplanation = '';
   let recommendedHealthStatus: 'healthy' | 'stressed' | 'pest_risk' = input.observedCropHealth;
-  let soilAdjustmentNote = field.adaptiveMemory?.soilAdjustment || '';
+  const rawSoilAdj = field.adaptiveMemory?.soilAdjustment || '';
+  let soilAdjustmentNote = isEn
+    ? field.adaptiveMemory?.soilAdjustmentEn ||
+      (looksVietnamese(rawSoilAdj) ? fallbackDictionaryTranslate(rawSoilAdj, 'en') : rawSoilAdj)
+    : rawSoilAdj;
   let irrigationSensitivity: 'higher' | 'normal' | 'lower' =
     field.adaptiveMemory?.irrigationSensitivity || 'normal';
 
@@ -1016,9 +1024,12 @@ export function evaluateFieldCheckIn(
     );
   } else if (input.observedCropHealth === 'pest_risk') {
     isPredictionAccurate = false;
+    const displayFieldName = isEn
+      ? field.nameEn || (looksVietnamese(field.name) ? fallbackDictionaryTranslate(field.name, 'en') : field.name)
+      : field.name;
     fixes.push(
       isEn
-        ? `Scout 5 sample points across ${field.name} (focusing on undersides of leaves and stem bases) to confirm pest/fungal density before targeted biological or IPM treatment.`
+        ? `Scout 5 sample points across ${displayFieldName} (focusing on undersides of leaves and stem bases) to confirm pest/fungal density before targeted biological or IPM treatment.`
         : `Kiểm tra 5 điểm chéo góc trên ruộng ${field.name} (mặt dưới lá và gốc thân) để xác định đúng đối tượng sâu/nấm trước khi xử lý theo ngưỡng phòng trừ tổng hợp (IPM).`
     );
     fixes.push(
@@ -1055,9 +1066,15 @@ export function evaluateFieldCheckIn(
   }
 
   if (fixes.length === 0) {
+    const irrLabel = isEn
+      ? field.crop.irrigationMethodEn ||
+        (looksVietnamese(field.crop.irrigationMethod)
+          ? fallbackDictionaryTranslate(field.crop.irrigationMethod, 'en')
+          : field.crop.irrigationMethod)
+      : field.crop.irrigationMethod;
     fixes.push(
       isEn
-        ? `Keep current ${field.crop.irrigationMethod} schedule and inspect again at ${brief.nextCheckTime}.`
+        ? `Keep current ${irrLabel} schedule and inspect again at ${brief.nextCheckTime}.`
         : `Tiếp tục duy trì chế độ ${field.crop.irrigationMethod} hiện tại và kiểm tra lại vào ${brief.nextCheckTime}.`
     );
     fixes.push(

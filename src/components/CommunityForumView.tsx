@@ -17,6 +17,8 @@ import {
   Languages,
   Loader2,
   AlertTriangle,
+  LogIn,
+  Cloud,
 } from 'lucide-react';
 import { AppUser, CommunityCategory, CommunityPost, FieldProfile } from '../types';
 import {
@@ -37,6 +39,7 @@ interface CommunityForumViewProps {
   isDemoMode: boolean;
   posts: CommunityPost[];
   syncError?: string | null;
+  onOpenAuthModal?: () => void;
   onCreatePost: (input: {
     province: string;
     district?: string;
@@ -47,6 +50,20 @@ interface CommunityForumViewProps {
   }) => Promise<void> | void;
   onAddReply: (postId: string, content: string) => Promise<void> | void;
   onToggleUpvote: (postId: string) => Promise<void> | void;
+}
+
+function formatCommunityError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.error === 'string') {
+      return parsed.error;
+    }
+  } catch {
+    // not JSON
+  }
+  return raw;
 }
 
 interface TranslatedPostOverlay {
@@ -63,6 +80,7 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
   isDemoMode,
   posts,
   syncError,
+  onOpenAuthModal,
   onCreatePost,
   onAddReply,
   onToggleUpvote,
@@ -83,6 +101,7 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
   const [postCategory, setPostCategory] = useState<CommunityCategory>('rotation_tips');
   const [submitting, setSubmitting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Reply state per post
   const [expandedPostIds, setExpandedPostIds] = useState<Record<string, boolean>>({});
@@ -165,6 +184,16 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
 
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!authUser) {
+      setPostError(
+        t(
+          'Vui lòng đăng nhập tài khoản để bài viết được đồng bộ Cloud cho tất cả bà con cùng xem.',
+          'Please sign in so your post syncs to the shared Cloud forum for all farmers and devices.'
+        )
+      );
+      onOpenAuthModal?.();
+      return;
+    }
     if (!postTitle.trim() || !postContent.trim()) {
       setPostError(
         t('Vui lòng nhập tiêu đề và nội dung chia sẻ.', 'Please enter both a title and post content.')
@@ -173,6 +202,7 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
     }
     setSubmitting(true);
     setPostError(null);
+    setActionError(null);
     try {
       await onCreatePost({
         province: postProvince,
@@ -186,10 +216,12 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
       setPostContent('');
       setComposerOpen(false);
       setSelectedCity(postProvince);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPostError(
-        err?.message ||
+        formatCommunityError(
+          err,
           t('Không thể đăng bài lúc này. Vui lòng thử lại.', 'Failed to publish post. Please try again.')
+        )
       );
     } finally {
       setSubmitting(false);
@@ -197,15 +229,57 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
   };
 
   const handleReplySubmit = async (postId: string) => {
+    if (!authUser) {
+      setActionError(
+        t(
+          'Vui lòng đăng nhập để gửi bình luận đồng bộ cho mọi người cùng xem.',
+          'Please sign in to post a Cloud-synced reply visible to everyone.'
+        )
+      );
+      onOpenAuthModal?.();
+      return;
+    }
     const text = (replyDrafts[postId] || '').trim();
     if (!text) return;
     setReplyBusyId(postId);
+    setActionError(null);
     try {
       await onAddReply(postId, text);
       setReplyDrafts((prev) => ({ ...prev, [postId]: '' }));
       setExpandedPostIds((prev) => ({ ...prev, [postId]: true }));
+    } catch (err: unknown) {
+      setActionError(
+        formatCommunityError(
+          err,
+          t('Không thể gửi bình luận lúc này. Vui lòng thử lại.', 'Could not post reply. Please try again.')
+        )
+      );
     } finally {
       setReplyBusyId(null);
+    }
+  };
+
+  const handleUpvoteClick = async (postId: string) => {
+    if (!authUser) {
+      setActionError(
+        t(
+          'Đăng nhập để đánh dấu hữu ích và đồng bộ với cộng đồng.',
+          'Sign in to upvote and sync with the community.'
+        )
+      );
+      onOpenAuthModal?.();
+      return;
+    }
+    setActionError(null);
+    try {
+      await onToggleUpvote(postId);
+    } catch (err: unknown) {
+      setActionError(
+        formatCommunityError(
+          err,
+          t('Không thể cập nhật lượt hữu ích lúc này.', 'Could not update vote right now.')
+        )
+      );
     }
   };
 
@@ -306,9 +380,21 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
       {/* Header */}
       <div className="bg-white rounded-2xl p-5 sm:p-6 border border-stone-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-            <Users className="w-4 h-4 text-emerald-600" />
-            {t('Diễn đàn Nông dân Việt Nam', 'Vietnam Farmer Community')}
+          <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-emerald-600" />
+              {t('Diễn đàn Nông dân Việt Nam', 'Vietnam Farmer Community')}
+            </span>
+            {authUser ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 normal-case font-semibold text-[11px]">
+                <Cloud className="w-3 h-3" />
+                {t('Đồng bộ Cloud thời gian thực', 'Live Cloud Sync')}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-950 normal-case font-semibold text-[11px]">
+                {t('Chế độ xem · Cần đăng nhập để đăng bài', 'Read-only · Sign in to post globally')}
+              </span>
+            )}
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 mt-1">
             {t('Trao đổi Mùa vụ, Đất nước & Sâu bệnh', 'Regional & Nationwide Farming Exchange')}
@@ -316,24 +402,36 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
           <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
             {isDemoMode
               ? t(
-                  'Đang hoạt động ở Chế độ Demo (bài viết lưu cục bộ trên trình duyệt). Đăng nhập để đồng bộ trao đổi cùng bà con cả nước.',
-                  'Running in Demo Mode (posts saved locally). Sign in to sync posts across farmers nationwide.'
+                  'Bạn có thể đọc bài từ cộng đồng cả nước ngay. Đăng nhập để viết bài & bình luận đồng bộ tới mọi nông hộ.',
+                  'Browse posts from farmers nationwide. Sign in to publish posts and replies visible on every device.'
                 )
               : t(
-                  'Hỏi đáp trực tiếp theo Tỉnh/Thành phố của ruộng bạn hoặc chia sẻ kinh nghiệm luân canh trên cả nước.',
-                  'Discuss local weather, irrigation, and rotation lessons by City/Province or nationwide.'
+                  'Hỏi đáp trực tiếp theo Tỉnh/Thành phố của ruộng bạn hoặc chia sẻ kinh nghiệm luân canh trên cả nước — hiển thị tức thì cho mọi thiết bị.',
+                  'Discuss local weather, irrigation, and rotation lessons by City/Province or nationwide — synced live across all users.'
                 )}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setComposerOpen((v) => !v)}
-          className="px-4 py-2.5 min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 self-start md:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          {composerOpen ? t('Đóng khung viết bài', 'Close Composer') : t('Đăng bài chia sẻ / Hỏi đáp', 'New Post / Question')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start md:self-auto">
+          {!authUser && onOpenAuthModal && (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="px-4 py-2.5 min-h-[44px] bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <LogIn className="w-4 h-4" />
+              {t('Đăng nhập để đăng bài', 'Sign In to Post')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setComposerOpen((v) => !v)}
+            className="px-4 py-2.5 min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            {composerOpen ? t('Đóng khung viết bài', 'Close Composer') : t('Đăng bài chia sẻ / Hỏi đáp', 'New Post / Question')}
+          </button>
+        </div>
       </div>
 
       {syncError && (
@@ -345,6 +443,15 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
             </div>
             <p className="text-[11px] leading-relaxed">{syncError}</p>
           </div>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="p-3 rounded-2xl border border-rose-200 bg-rose-50 text-rose-900 text-xs flex items-center justify-between gap-2">
+          <span className="font-semibold">{actionError}</span>
+          <button type="button" onClick={() => setActionError(null)} className="font-bold cursor-pointer px-1">
+            ✕
+          </button>
         </div>
       )}
 
@@ -453,6 +560,27 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
             <Sprout className="w-4 h-4 text-emerald-700" />
             {t('Viết bài chia sẻ thực tế hoặc hỏi đáp kỹ thuật', 'Share a Field Observation or Ask the Community')}
           </div>
+
+          {!authUser && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span>
+                {t(
+                  'Đăng nhập để bài viết được lưu lên Cloud và hiển thị tức thì cho tất cả nông dân khác (tránh mất bài khi chỉ lưu trên 1 máy).',
+                  'Sign in so your post saves to Cloud Firestore and is immediately visible to all other farmers and devices.'
+                )}
+              </span>
+              {onOpenAuthModal && (
+                <button
+                  type="button"
+                  onClick={onOpenAuthModal}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer shrink-0 self-start sm:self-auto"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  {t('Đăng nhập ngay', 'Sign In')}
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -681,6 +809,16 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                         {displayCropName}
                       </span>
                     )}
+                    {post.isDemoSeed ? (
+                      <span className="px-2 py-0.5 rounded-lg bg-stone-100 text-stone-500 text-[10px] font-semibold">
+                        {t('Bài mẫu tham khảo', 'Sample Guide')}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100/80 text-emerald-900 text-[10px] font-semibold">
+                        <Cloud className="w-3 h-3" />
+                        {t('Cộng đồng Cloud', 'Live Community')}
+                      </span>
+                    )}
                   </div>
                   <span className="text-[11px] text-stone-400 font-mono">
                     {new Date(post.createdAt).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')}
@@ -710,7 +848,7 @@ export const CommunityForumView: React.FC<CommunityForumViewProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => onToggleUpvote(post.id)}
+                      onClick={() => handleUpvoteClick(post.id)}
                       className={`px-3 py-1.5 min-h-[40px] sm:min-h-0 rounded-xl border font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
                         hasLiked
                           ? 'bg-emerald-800 text-white border-emerald-800'

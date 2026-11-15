@@ -9,6 +9,7 @@ import {
   getCommonVarietyLabel,
 } from '../data/cropTaxonomy';
 import { getLocalizedRegionName } from '../data/nasaVietnamGrid';
+import { fallbackDictionaryTranslate, looksVietnamese } from '../services/translationService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { AdvisoryDisclaimer } from './AdvisoryDisclaimer';
 
@@ -23,6 +24,8 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   fromFallback?: boolean;
+  provider?: 'gemini' | 'local';
+  isError?: boolean;
 }
 
 function renderInlineMarkdown(text: string, isAi: boolean): React.ReactNode[] {
@@ -174,15 +177,19 @@ const FormattedChatContent: React.FC<{ text: string; isAi: boolean }> = ({ text,
 export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, weather }) => {
   const { lang, t } = useLanguage();
 
-  const getFieldLabel = (field: FieldProfile) =>
-    lang === 'en' ? field.nameEn || field.name : field.name;
+  const getFieldLabel = (field: FieldProfile) => {
+    if (lang !== 'en') return field.name;
+    if (field.nameEn) return field.nameEn;
+    return looksVietnamese(field.name) ? fallbackDictionaryTranslate(field.name, 'en') : field.name;
+  };
 
   const buildGreeting = (field: FieldProfile): ChatMessage => ({
     id: `msg-0-${field.id}-${lang}`,
     sender: 'ai',
+    provider: 'gemini',
     text: t(
-      `Xin chào bác nông dân! Tôi là Trợ lý AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu (2001–2026). Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
-      `Hello! I am CropCast Agronomy AI. I am tracking "${getFieldLabel(field)}" (${getPlantDisplayName(field.crop.name, 'en')}, ${getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 2001–2026 climate records. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
+      `Xin chào bác nông dân! Tôi là Trợ lý Gemini AI Canh tác CropCast. Tôi đang theo dõi thửa ruộng "${field.name}" (${field.crop.name}, ${field.crop.variety}) tại ${field.province} với dữ liệu thời tiết thực tế và chuỗi khí hậu (2001–2026). Hôm nay nhiệt độ ${weather.temp}°C, ẩm độ rễ ${(weather.gwetroot * 100).toFixed(0)}%. Bác cần tư vấn gì cho ruộng hôm nay?`,
+      `Hello! I am CropCast Gemini Agronomy AI. I am tracking "${getFieldLabel(field)}" (${field.crop.nameEn || getPlantDisplayName(field.crop.name, 'en')}, ${field.crop.varietyEn || getCommonVarietyLabel(field.crop.variety, 'en')}) in ${getLocalizedRegionName(field.province, 'en')} using live weather and 2001–2026 climate records. Today is ${weather.temp}°C with ${(weather.gwetroot * 100).toFixed(0)}% root-zone moisture. How can I help with your field today?`
     ),
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
@@ -243,7 +250,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
     setIsLoading(true);
 
     try {
-      const { reply, isError, fromFallback } = await GeminiService.sendChatMessage(
+      const { reply, isError, fromFallback, provider } = await GeminiService.sendChatMessage(
         textToSend,
         activeField,
         currentHistory,
@@ -261,6 +268,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         text: reply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         fromFallback,
+        provider,
+        isError,
       };
 
       setMessages((prev) => [...prev, aiMsg]);
@@ -299,7 +308,8 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
         </div>
 
         <div className="text-xs bg-emerald-50 text-emerald-900 font-semibold px-3 py-1.5 rounded-xl border border-emerald-200 self-start sm:self-auto">
-          {t('Cây:', 'Crop:')} {getPlantDisplayName(activeField.crop.name, lang)} • {getCommonStageLabel(activeField.crop.currentStage, lang)}
+          {t('Cây:', 'Crop:')} {activeField.crop.nameEn && lang === 'en' ? activeField.crop.nameEn : getPlantDisplayName(activeField.crop.name, lang)} •{' '}
+          {activeField.crop.currentStageEn && lang === 'en' ? activeField.crop.currentStageEn : getCommonStageLabel(activeField.crop.currentStage, lang)}
         </div>
       </div>
 
@@ -324,18 +334,27 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ activeField, w
 
                 <div
                   className={`p-3.5 sm:p-4 rounded-2xl max-w-[88%] sm:max-w-[75%] break-words space-y-1.5 leading-relaxed ${
-                    isAi
+                    msg.isError
+                      ? 'bg-rose-50 text-rose-900 rounded-tl-xs border border-rose-200'
+                      : isAi
                       ? 'bg-stone-100/90 text-stone-800 rounded-tl-xs border border-stone-200/80'
                       : 'bg-emerald-800 text-white rounded-tr-xs shadow-xs'
                   }`}
                 >
                   <FormattedChatContent text={msg.text} isAi={isAi} />
                   <div
-                    className={`text-[10px] text-right font-mono ${
-                      isAi ? 'text-stone-400' : 'text-emerald-200'
+                    className={`text-[10px] flex items-center justify-end gap-2 font-mono ${
+                      msg.isError ? 'text-rose-600' : isAi ? 'text-stone-400' : 'text-emerald-200'
                     }`}
                   >
-                    {msg.timestamp}
+                    {isAi && !msg.isError && (
+                      <span className="font-sans font-semibold text-emerald-700">
+                        {msg.fromFallback
+                          ? t('Ngoại tuyến', 'Offline mode')
+                          : 'Gemini AI'}
+                      </span>
+                    )}
+                    <span>{msg.timestamp}</span>
                   </div>
                 </div>
 
